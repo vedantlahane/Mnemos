@@ -1,0 +1,26 @@
+backend/
+├── main.py
+├── requirements.txt
+├── .env
+├── venv/
+└── app/
+    ├── __init__.py
+    ├── config.py
+    ├── routes/
+    │   ├── __init__.py
+    │   ├── capture.py
+    │   ├── notes.py
+    │   ├── search.py
+    │   ├── chat.py
+    │   └── context.py
+    ├── services/
+    │   ├── __init__.py
+    │   ├── llm.py
+    │   ├── embeddings.py
+    │   └── processor.py
+    ├── db/
+    │   ├── __init__.py
+    │   └── supabase.py
+    └── models/
+        ├── __init__.py
+        └── schemas.py
