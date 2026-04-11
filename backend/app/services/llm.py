@@ -2,6 +2,7 @@ from google import genai
 from google.genai import types
 from app.config import settings
 from app.models.schemas import ProcessedCapture
+from app.services.retry import with_retry
 
 client = genai.Client(api_key=settings.gemini_api_key)
 
@@ -23,6 +24,7 @@ information, say so honestly. Cite which notes you're drawing from by
 mentioning their titles."""
 
 
+@with_retry(max_retries=3, base_delay=2.0)
 async def process_capture(text: str) -> ProcessedCapture:
     response = await client.aio.models.generate_content(
         model="gemini-2.5-flash",
@@ -34,6 +36,7 @@ async def process_capture(text: str) -> ProcessedCapture:
     return ProcessedCapture.model_validate_json(response.text)
 
 
+@with_retry(max_retries=3, base_delay=2.0)
 async def chat(
     question: str,
     context: str,
