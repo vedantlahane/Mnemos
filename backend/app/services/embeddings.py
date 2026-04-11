@@ -1,27 +1,29 @@
-import asyncio
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from app.config import settings
 
-genai.configure(api_key=settings.gemini_api_key)
+client = genai.Client(api_key=settings.gemini_api_key)
 
 
 async def generate(text: str) -> list[float]:
-    result = await asyncio.to_thread(
-        lambda: genai.embed_content(
-            model="models/text-embedding-004",
-            content=text[:2000],
-            task_type="retrieval_document",
-        )
+    result = await client.aio.models.embed_content(
+        model="gemini-embedding-001",
+        contents=text[:2000],
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_DOCUMENT",
+            output_dimensionality=768,
+        ),
     )
-    return result["embedding"]
+    return result.embeddings[0].values
 
 
 async def generate_query(text: str) -> list[float]:
-    result = await asyncio.to_thread(
-        lambda: genai.embed_content(
-            model="models/text-embedding-004",
-            content=text[:500],
-            task_type="retrieval_query",
-        )
+    result = await client.aio.models.embed_content(
+        model="gemini-embedding-001",
+        contents=text[:500],
+        config=types.EmbedContentConfig(
+            task_type="RETRIEVAL_QUERY",
+            output_dimensionality=768,
+        ),
     )
-    return result["embedding"]
+    return result.embeddings[0].values

@@ -1,9 +1,9 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from app.config import settings
 from app.models.schemas import ProcessedCapture
 
-genai.configure(api_key=settings.gemini_api_key)
-model = genai.GenerativeModel("gemini-2.0-flash")
+client = genai.Client(api_key=settings.gemini_api_key)
 
 PROCESS_PROMPT = """Analyze this text and return JSON only:
 {{
@@ -24,9 +24,12 @@ mentioning their titles."""
 
 
 async def process_capture(text: str) -> ProcessedCapture:
-    response = await model.generate_content_async(
-        PROCESS_PROMPT.format(text=text[:3000]),
-        generation_config={"response_mime_type": "application/json"},
+    response = await client.aio.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=PROCESS_PROMPT.format(text=text[:3000]),
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+        ),
     )
     return ProcessedCapture.model_validate_json(response.text)
 
@@ -36,25 +39,37 @@ async def chat(
     context: str,
     history: list[dict],
 ) -> str:
-    messages = []
+    contents = []
 
-    messages.append({"role": "user", "parts": [CHAT_SYSTEM]})
-    messages.append(
-        {"role": "model", "parts": ["Understood. I'll answer only from your notes."]}
+    contents.append(
+        types.Content(role="user", parts=[types.Part(text=CHAT_SYSTEM)])
+    )
+    contents.append(
+        types.Content(
+            role="model",
+            parts=[types.Part(text="Understood. I'll answer only from your notes.")],
+        )
     )
 
     for msg in history[-10:]:
         role = "user" if msg["role"] == "user" else "model"
-        messages.append({"role": role, "parts": [msg["content"]]})
+        contents.append(
+            types.Content(role=role, parts=[types.Part(text=msg["content"])])
+        )
 
-    messages.append(
-        {
-            "role": "user",
-            "parts": [
-                f"Context from my notes:\n\n{context}\n\n---\n\nQuestion: {question}"
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    text=f"Context from my notes:\n\n{context}\n\n---\n\nQuestion: {question}"
+                )
             ],
-        }
+        )
     )
 
-    response = await model.generate_content_async(messages)
+    response = await client.aio.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=contents,
+    )
     return response.text

@@ -38,10 +38,13 @@ class NoteProcessor:
             # Step 2: Embedding
             embedding = None
             try:
-                embedding = await embeddings.generate(raw_text)
+                raw_embedding = await embeddings.generate(raw_text)
+                embedding = list(raw_embedding)  # Force plain Python list
+                print(f"Embedding generated for {note_id}: {len(embedding)} dimensions")
                 await db.update_note(note_id, embedding=embedding)
+                print(f"Embedding saved for {note_id}")
             except Exception as e:
-                print(f"Embedding failed for {note_id}: {e}")
+                print(f"EMBEDDING ERROR for {note_id}: {type(e).__name__}: {e}")
 
             # Step 3: Find related notes
             if embedding:
