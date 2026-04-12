@@ -1,20 +1,15 @@
-import { BaseEdge, getBezierPath } from "@xyflow/react"
+import { useEffect, useRef } from "react"
+import { getBezierPath } from "@xyflow/react"
 import type { EdgeProps } from "@xyflow/react"
+import rough from "roughjs"
 
-const colors: Record<string, string> = {
-  related: "rgba(148,163,184, 0.5)",     // gray
-  depends_on: "rgba(37,99,235, 0.8)",    // blue
-  extends: "rgba(16,185,129, 0.8)",      // green
-  contradicts: "rgba(220,38,38, 0.8)",   // red
-  summarizes: "rgba(168,85,247, 0.8)",   // purple
-  example_of: "rgba(249,115,22, 0.8)",   // orange
-}
-
-const strokeDash: Record<string, string> = {
-  related: "5,5",
-  contradicts: "2,2",
-  summarizes: "5,5",
-  example_of: "2,2"
+const COLORS: Record<string, string> = {
+  related: "rgba(148,163,184,0.6)",
+  depends_on: "rgba(99,102,241,0.8)",
+  extends: "rgba(34,197,94,0.8)",
+  contradicts: "rgba(239,68,68,0.8)",
+  summarizes: "rgba(168,85,247,0.8)",
+  example_of: "rgba(249,115,22,0.8)",
 }
 
 export default function SketchyEdge({
@@ -26,6 +21,8 @@ export default function SketchyEdge({
   targetPosition,
   data,
 }: EdgeProps) {
+  const svgRef = useRef<SVGGElement>(null)
+
   const [edgePath] = getBezierPath({
     sourceX,
     sourceY,
@@ -35,20 +32,41 @@ export default function SketchyEdge({
     targetPosition,
   })
 
-  const edgeType = data?.edgeType as string || "related"
-  const color = colors[edgeType] || colors.related
-  const dash = strokeDash[edgeType]
+  const edgeType = (data?.edgeType as string) || "related"
+  const color = COLORS[edgeType] || COLORS.related
+
+  useEffect(() => {
+    if (!svgRef.current) return
+
+    // Clear previous
+    while (svgRef.current.firstChild) {
+      svgRef.current.removeChild(svgRef.current.firstChild)
+    }
+
+    // Create a temporary SVG to parse the path
+    const tempSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    document.body.appendChild(tempSvg)
+
+    try {
+      const rc = rough.svg(tempSvg)
+      const node = rc.path(edgePath, {
+        stroke: color,
+        strokeWidth: 1.5,
+        roughness: 1.2,
+        bowing: 1,
+        fill: "none",
+      })
+
+      // Copy the rough path elements into our ref
+      while (node.firstChild) {
+        svgRef.current.appendChild(node.firstChild)
+      }
+    } finally {
+      document.body.removeChild(tempSvg)
+    }
+  }, [edgePath, color])
 
   return (
-    <>
-      <BaseEdge 
-         path={edgePath} 
-         style={{
-            stroke: color,
-            strokeWidth: 2,
-            strokeDasharray: dash,
-         }} 
-      />
-    </>
+    <g ref={svgRef} className="react-flow__edge-path" />
   )
 }

@@ -1,0 +1,75 @@
+frontend
++--- public
+|    +--- favicon.svg
+|    \--- icons.svg
++--- src
+|    +--- api
+|    |    \--- client.ts
+|    +--- assets
+|    |    +--- hero.png
+|    |    \--- vite.svg
+|    +--- blocks
+|    |    +--- CuratorReportBlock.tsx
+|    |    +--- GapAnalysisBlock.tsx
+|    |    +--- HelpBlock.tsx
+|    |    +--- HistoryBlock.tsx
+|    |    +--- NoteDetailBlock.tsx
+|    |    +--- NoteGridBlock.tsx
+|    |    +--- PageListBlock.tsx
+|    |    +--- ReadingPathBlock.tsx
+|    |    +--- SearchResultsBlock.tsx
+|    |    +--- SettingsBlock.tsx
+|    |    +--- StatsBlock.tsx
+|    |    +--- TagCloudBlock.tsx
+|    |    +--- TaskListBlock.tsx
+|    |    \--- WelcomeBlock.tsx
+|    +--- canvas
+|    |    +--- AnnotationNode.tsx
+|    |    +--- CanvasChatPanel.tsx
+|    |    +--- CanvasControls.tsx
+|    |    +--- CanvasMinimap.tsx
+|    |    +--- CanvasOverlay.tsx
+|    |    +--- CanvasSearch.tsx
+|    |    +--- CanvasView.tsx
+|    |    +--- ClusterRegion.tsx
+|    |    +--- NoteNode.tsx
+|    |    +--- SketchyEdge.tsx
+|    |    \--- StickyNode.tsx
+|    +--- core
+|    |    +--- CommandBar.tsx
+|    |    +--- ContextProvider.tsx
+|    |    +--- Stream.tsx
+|    |    +--- StreamBlock.tsx
+|    |    \--- StreamMessage.tsx
+|    +--- glass
+|    |    +--- GlassBadge.tsx
+|    |    +--- GlassButton.tsx
+|    |    +--- GlassCard.tsx
+|    |    +--- GlassChip.tsx
+|    |    +--- GlassDropdown.tsx
+|    |    +--- GlassInput.tsx
+|    |    +--- GlassModal.tsx
+|    |    \--- GlassTooltip.tsx
+|    +--- hooks
+|    |    +--- useCanvas.ts
+|    |    +--- useCanvasSearch.ts
+|    |    +--- useCommands.ts
+|    |    +--- useContext.ts
+|    |    +--- useKeyboard.ts
+|    |    \--- useStream.ts
+|    +--- App.tsx
+|    +--- index.css
+|    +--- main.tsx
+|    \--- types.ts
++--- .env
++--- .env.example
++--- .gitignore
++--- eslint.config.js
++--- index.html
++--- package-lock.json
++--- package.json
++--- README.md
++--- tsconfig.app.json
++--- tsconfig.json
++--- tsconfig.node.json
+\--- vite.config.ts

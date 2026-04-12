@@ -8,8 +8,9 @@ interface ContextState {
   goHome: () => void
 }
 
-export const useContextStore = create<ContextState>((set, get) => ({
+export const useAppContextStore = create<ContextState>((set, get) => ({
   current: { type: "home" },
+
   switchTo: (type, pageId, pageName) =>
     set({
       current: {
@@ -19,16 +20,17 @@ export const useContextStore = create<ContextState>((set, get) => ({
         previousContext: get().current,
       },
     }),
+
   goBack: () =>
     set((state) => ({
       current: state.current.previousContext || { type: "home" },
     })),
+
   goHome: () =>
-    set({
-      current: { type: "home" },
-    }),
+    set({ current: { type: "home" } }),
 }))
 
-export function useContext() {
-  return useContextStore()
+// Named useAppContext to avoid shadowing React.useContext
+export function useAppContext() {
+  return useAppContextStore()
 }

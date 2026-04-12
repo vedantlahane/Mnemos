@@ -1,32 +1,21 @@
-// src/types.ts
-
 // ─── Stream ──────────────────────────────────────────
 
 export interface StreamItem {
   id: string
   type: "user" | "assistant" | "block" | "system"
-
-  // For text messages
   content?: string
-
-  // For rich blocks
   blockType?: BlockType
-  blockData?: any
-
-  // For AI responses
+  blockData?: unknown
   sources?: ChatSource[]
   followUps?: string[]
-
-  // Metadata for context awareness
   metadata?: {
-    noteIds?: string[]        // which notes are visible in this block
-    query?: string            // what query produced this
-    tag?: string              // what tag filter is active
-    pageId?: string           // which page context
-    command?: string          // what command triggered this
-    topic?: string            // topic for reading path
+    noteIds?: string[]
+    query?: string
+    tag?: string
+    pageId?: string
+    command?: string
+    topic?: string
   }
-
   timestamp: number
   loading?: boolean
 }
@@ -53,9 +42,9 @@ export type ContextType = "home" | "page" | "settings" | "history"
 
 export interface AppContext {
   type: ContextType
-  pageId?: string         // when type === "page"
-  pageName?: string       // display name
-  previousContext?: AppContext  // for /back navigation
+  pageId?: string
+  pageName?: string
+  previousContext?: AppContext
 }
 
 // ─── Notes ───────────────────────────────────────────
@@ -73,7 +62,6 @@ export interface Note {
   capture_type: string
   processing_status: string
   related_note_ids: string[]
-  // New fields:
   page_id: string | null
   canvas_x: number | null
   canvas_y: number | null
@@ -82,10 +70,9 @@ export interface Note {
   cluster_id: string | null
   centrality: number
   is_bridge: boolean
-  //
   created_at: string
   updated_at: string
-  similarity?: number      // from search results
+  similarity?: number
 }
 
 // ─── Pages ───────────────────────────────────────────
@@ -97,7 +84,7 @@ export interface Page {
   icon: string
   color: string
   is_archived: boolean
-  canvas_data: Record<string, any>
+  canvas_data: Record<string, unknown>
   viewport: { x: number; y: number; zoom: number }
   note_count: number
   last_activity: string
@@ -149,12 +136,12 @@ export interface CanvasElement {
   page_id: string
   element_type: ElementType
   content: string | null
-  canvas_data: Record<string, any> | null
+  canvas_data: Record<string, unknown> | null
   position_x: number
   position_y: number
   width: number | null
   height: number | null
-  style: Record<string, any>
+  style: Record<string, unknown>
   created_by: string
   created_at: string
   updated_at: string
@@ -208,7 +195,7 @@ export interface TagWithCount {
 
 export interface CuratorReport {
   potential_duplicates: Array<{
-    note_a: string; note_b: string; similarity: number;
+    note_a: string; note_b: string; similarity: number
     suggestion: string; reason: string
   }>
   orphan_notes: Array<{
@@ -221,24 +208,24 @@ export interface CuratorReport {
     cluster_id: string; issue: string; size?: number; suggestion: string
   }>
   missing_connections: Array<{
-    note_a: string; note_b: string; similarity: number;
+    note_a: string; note_b: string; similarity: number
     suggested_type: string; reason: string
   }>
   auto_applied: number
   needs_confirmation: Array<{
-    action_type: string; params: Record<string, any>; reason: string
+    action_type: string; params: Record<string, unknown>; reason: string
   }>
 }
 
 // ─── Commands ────────────────────────────────────────
 
 export interface Command {
-  name: string           // e.g., "/notes"
-  aliases: string[]      // e.g., ["/note", "/n"]
+  name: string
+  aliases: string[]
   description: string
-  context: ContextType[] // which contexts this works in
-  args?: string          // description of expected args
-  handler: string        // function name to call
+  context: ContextType[]
+  args?: string
+  handler: string
 }
 
 // ─── History ─────────────────────────────────────────

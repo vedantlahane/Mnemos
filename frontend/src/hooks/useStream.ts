@@ -1,91 +1,88 @@
 import { create } from "zustand"
 import type { StreamItem, BlockType, ChatSource } from "../types"
 
+function uid() {
+  return crypto.randomUUID?.() ?? Math.random().toString(36).substring(2, 10)
+}
+
 interface StreamState {
   items: StreamItem[]
   isLoading: boolean
+
   addUserMessage: (content: string) => void
   addAssistantMessage: (content: string, sources?: ChatSource[], followUps?: string[]) => void
-  addBlock: (blockType: BlockType, blockData?: any, metadata?: any) => void
+  addBlock: (blockType: BlockType, blockData?: unknown, metadata?: StreamItem["metadata"]) => void
   addSystemMessage: (content: string) => void
   setLoading: (loading: boolean) => void
+  setBlockLoading: (id: string, loading: boolean) => void
   clearStream: () => void
+  getLastBlock: () => StreamItem | undefined
+  getVisibleNoteIds: () => string[]
 }
 
-export const useStreamStore = create<StreamState>((set) => ({
-  items: [
-    {
-      id: "welcome",
-      type: "block",
-      blockType: "welcome",
-      timestamp: Date.now(),
-    },
-  ],
+const WELCOME_ITEM: StreamItem = {
+  id: "welcome",
+  type: "block",
+  blockType: "welcome",
+  timestamp: Date.now(),
+}
+
+export const useStreamStore = create<StreamState>((set, get) => ({
+  items: [WELCOME_ITEM],
   isLoading: false,
+
   addUserMessage: (content) =>
-    set((state) => ({
-      items: [
-        ...state.items,
-        {
-          id: Math.random().toString(36).substring(7),
-          type: "user",
-          content,
-          timestamp: Date.now(),
-        },
-      ],
+    set((s) => ({
+      items: [...s.items, { id: uid(), type: "user", content, timestamp: Date.now() }],
     })),
+
   addAssistantMessage: (content, sources, followUps) =>
-    set((state) => ({
+    set((s) => ({
       items: [
-        ...state.items,
-        {
-          id: Math.random().toString(36).substring(7),
-          type: "assistant",
-          content,
-          sources,
-          followUps,
-          timestamp: Date.now(),
-        },
+        ...s.items,
+        { id: uid(), type: "assistant", content, sources, followUps, timestamp: Date.now() },
       ],
     })),
+
   addBlock: (blockType, blockData, metadata) =>
-    set((state) => ({
+    set((s) => ({
       items: [
-        ...state.items,
-        {
-          id: Math.random().toString(36).substring(7),
-          type: "block",
-          blockType,
-          blockData,
-          metadata,
-          timestamp: Date.now(),
-        },
+        ...s.items,
+        { id: uid(), type: "block", blockType, blockData, metadata, timestamp: Date.now() },
       ],
     })),
+
   addSystemMessage: (content) =>
-    set((state) => ({
-      items: [
-        ...state.items,
-        {
-          id: Math.random().toString(36).substring(7),
-          type: "system",
-          content,
-          timestamp: Date.now(),
-        },
-      ],
+    set((s) => ({
+      items: [...s.items, { id: uid(), type: "system", content, timestamp: Date.now() }],
     })),
+
   setLoading: (loading) => set({ isLoading: loading }),
-  clearStream: () =>
-    set({
-      items: [
-        {
-          id: "welcome",
-          type: "block",
-          blockType: "welcome",
-          timestamp: Date.now(),
-        },
-      ],
-    }),
+
+  // Spec: toggle loading state on a specific block
+  setBlockLoading: (id, loading) =>
+    set((s) => ({
+      items: s.items.map((item) => (item.id === id ? { ...item, loading } : item)),
+    })),
+
+  clearStream: () => set({ items: [{ ...WELCOME_ITEM, timestamp: Date.now() }] }),
+
+  // Spec: returns most recent block for context awareness
+  getLastBlock: () => {
+    const blocks = get().items.filter((i) => i.type === "block")
+    return blocks[blocks.length - 1]
+  },
+
+  // Spec: collects all noteIds from visible blocks for "explain the first one" resolution
+  getVisibleNoteIds: () => {
+    const ids: string[] = []
+    for (const item of get().items) {
+      if (item.metadata?.noteIds) {
+        ids.push(...item.metadata.noteIds)
+      }
+    }
+    return ids
+  },
 }))
 
 export function useStream() {
