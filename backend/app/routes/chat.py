@@ -10,40 +10,105 @@ router = APIRouter()
 async def chat_with_notes(payload: ChatRequest):
     query_embedding = await embeddings.generate_query(payload.question)
 
-    relevant = await db.vector_search(
-        query_embedding, limit=5, threshold=0.65
-    )
+    # Scoped or global search
+    if payload.context_type == "page" and payload.page_id:
+        relevant = await db.vector_search_in_page(
+            query_embedding,
+            page_id=payload.page_id,
+            limit=5,
+            threshold=0.60,
+        )
+        # If page-scoped search returns too few, fall back to global
+        if len(relevant) < 2:
+            global_results = await db.vector_search(
+                query_embedding, limit=5, threshold=0.65
+            )
+            # Merge, deduplicate
+            seen = {r["id"] for r in relevant}
+            for r in global_results:
+                if r["id"] not in seen:
+                    relevant.append(r)
+                    seen.add(r["id"])
+    else:
+        relevant = await db.vector_search(
+            query_embedding, limit=5, threshold=0.65
+        )
 
     if not relevant:
         return {
             "answer": "I couldn't find any related notes in your knowledge base.",
             "sources": [],
+            "follow_ups": [],
         }
 
-    context = "\n\n---\n\n".join(
-        [
+    # Graph expansion: follow edges from retrieved notes for extra context
+    expanded_ids = set(r["id"] for r in relevant)
+    extra_context_notes = []
+    for r in relevant[:3]:
+        try:
+            edges = await db.get_edges_for_note(r["id"])
+            for edge in edges[:2]:
+                neighbor_id = edge["target_id"] if edge["source_id"] == r["id"] else edge["source_id"]
+                if neighbor_id not in expanded_ids:
+                    neighbor = await db.get_note(neighbor_id)
+                    if neighbor:
+                        extra_context_notes.append(neighbor)
+                        expanded_ids.add(neighbor_id)
+        except Exception:
+            pass
+
+    # Build context string
+    context_parts = []
+    for n in relevant:
+        context_parts.append(
             f"Note: {n['title']}\n"
             f"Summary: {n.get('summary', 'No summary')}\n"
             f"Content: {n['raw_text'][:1000]}\n"
             f"Tags: {', '.join(n.get('tags', []))}"
-            for n in relevant
-        ]
-    )
+        )
+    for n in extra_context_notes[:3]:
+        context_parts.append(
+            f"Related Note: {n.get('title', 'Untitled')}\n"
+            f"Summary: {n.get('summary', 'No summary')}\n"
+            f"Content: {n.get('raw_text', '')[:500]}"
+        )
+    context = "\n\n---\n\n".join(context_parts)
+
+    # Get page name for context
+    page_context = None
+    if payload.context_type == "page" and payload.page_id:
+        try:
+            page = await db.get_page(payload.page_id)
+            if page:
+                page_context = page["name"]
+        except Exception:
+            pass
 
     answer = await llm.chat(
         question=payload.question,
         context=context,
         history=payload.history,
+        page_context=page_context,
     )
+
+    # Generate follow-up suggestions
+    follow_ups = []
+    try:
+        follow_ups = await llm.generate_follow_ups(payload.question, answer)
+    except Exception as e:
+        print(f"Follow-up generation failed: {e}")
+
+    sources = [
+        {
+            "id": n["id"],
+            "title": n["title"],
+            "similarity": n["similarity"],
+        }
+        for n in relevant
+    ]
 
     return {
         "answer": answer,
-        "sources": [
-            {
-                "id": n["id"],
-                "title": n["title"],
-                "similarity": n["similarity"],
-            }
-            for n in relevant
-        ],
+        "sources": sources,
+        "follow_ups": follow_ups,
     }

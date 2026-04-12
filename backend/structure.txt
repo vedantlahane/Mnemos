@@ -24,3 +24,41 @@ backend/
     └── models/
         ├── __init__.py
         └── schemas.py
+
+        backend/
+├── main.py
+├── requirements.txt
+├── .env
+├── venv/
+└── app/
+    ├── __init__.py
+    ├── config.py
+    ├── routes/
+    │   ├── __init__.py
+    │   ├── capture.py          ← MODIFIED
+    │   ├── notes.py            ← MODIFIED
+    │   ├── search.py           ← MODIFIED
+    │   ├── chat.py             ← MODIFIED
+    │   ├── context.py          ← MODIFIED
+    │   ├── pages.py            ← NEW
+    │   ├── edges.py            ← NEW
+    │   ├── clusters.py         ← NEW
+    │   ├── canvas.py           ← NEW
+    │   ├── stats.py            ← NEW
+    │   ├── history.py          ← NEW
+    │   └── curator.py          ← NEW
+    ├── services/
+    │   ├── __init__.py
+    │   ├── llm.py              ← MODIFIED
+    │   ├── embeddings.py       ← KEEP
+    │   ├── processor.py        ← MODIFIED
+    │   ├── retry.py            ← KEEP
+    │   ├── page_router.py      ← NEW
+    │   ├── cartographer.py     ← NEW
+    │   └── curator.py          ← NEW
+    ├── db/
+    │   ├── __init__.py
+    │   └── supabase.py         ← MODIFIED
+    └── models/
+        ├── __init__.py
+        └── schemas.py          ← MODIFIED

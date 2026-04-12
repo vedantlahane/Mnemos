@@ -13,6 +13,13 @@ class Settings(BaseSettings):
         "chrome-extension://*",
     ]
 
+    # Canvas defaults
+    canvas_width: int = 2000
+    canvas_height: int = 1500
+
+    # Routing
+    page_route_confidence_threshold: float = 0.75
+
     class Config:
         env_file = ".env"
 

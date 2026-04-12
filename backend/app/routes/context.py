@@ -37,4 +37,31 @@ async def check_context(payload: ContextRequest):
         threshold=CONTEXT_CONFIG["similarity_threshold"],
     )
 
-    return {"related_notes": related}
+    # Enrich with page info
+    enriched = []
+    for note in related:
+        page_name = None
+        page_id = note.get("page_id")
+        if not page_id:
+            # Fetch full note to get page_id (vector search may not return it)
+            try:
+                full_note = await db.get_note(note["id"])
+                page_id = full_note.get("page_id") if full_note else None
+            except Exception:
+                pass
+
+        if page_id:
+            try:
+                page = await db.get_page(page_id)
+                if page:
+                    page_name = page["name"]
+            except Exception:
+                pass
+
+        enriched.append({
+            **note,
+            "page_id": page_id,
+            "page_name": page_name,
+        })
+
+    return {"related_notes": enriched}
