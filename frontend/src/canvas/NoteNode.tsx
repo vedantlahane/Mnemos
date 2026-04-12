@@ -1,64 +1,65 @@
+import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
-import { FileText, Link, AlertTriangle, CheckSquare } from "lucide-react"
+import { Link2, AlertTriangle, CheckSquare } from "lucide-react"
 
-export default function NoteNode({ data, selected }: any) {
+export default memo(function NoteNode({ data, selected }: any) {
   const { note, highlighted } = data
-  const isRecent = (Date.now() - new Date(note.created_at).getTime()) < 60 * 60 * 1000
-  const isStale = (Date.now() - new Date(note.updated_at).getTime()) > 30 * 24 * 60 * 60 * 1000
-  const isOrphan = !note.related_note_ids || note.related_note_ids.length === 0
+  const isRecent = Date.now() - new Date(note.created_at).getTime() < 3600000
+  const isStale = Date.now() - new Date(note.updated_at).getTime() > 30 * 86400000
+  const isOrphan = !note.related_note_ids?.length
 
-  // Spec: border width = centrality score
-  const borderWidth = Math.max(1, Math.min(3, (note.centrality || 0) * 6))
+  // Left accent stripe
+  let accent = "#e5e7eb"
+  if (note.is_bridge) accent = "#6366f1"
+  else if (isOrphan) accent = "#f59e0b"
+  else if (isRecent) accent = "#22c55e"
 
   return (
     <div
-      className={`glass-surface-2 w-[280px] p-4 rounded-xl transition-all ${
-        selected
-          ? "border-[var(--color-accent)] shadow-[0_0_20px_rgba(99,102,241,0.2)]"
-          : highlighted
-          ? "border-[var(--color-warning)] shadow-[0_0_16px_rgba(245,158,11,0.2)]"
-          : "border-[rgba(255,255,255,0.06)]"
-      } ${isStale ? "opacity-50" : "opacity-100"} ${
-        isRecent ? "shadow-[0_0_12px_rgba(99,102,241,0.15)]" : ""
-      }`}
-      style={{ borderWidth: `${borderWidth}px`, borderStyle: "solid" }}
+      className={`group w-[240px] paper overflow-hidden transition-all ${
+        selected ? "ring-2 ring-[var(--accent)]" : ""
+      } ${highlighted ? "ring-2 ring-amber-400" : ""} ${isStale ? "opacity-45" : ""}`}
+      style={{ borderLeft: `3px solid ${accent}` }}
     >
-      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-[var(--color-tertiary)] !border-none" />
+      <Handle type="target" position={Position.Top} className="!w-1.5 !h-1.5 !bg-gray-300 !border-0 !-top-1" />
 
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText size={13} className="text-[var(--color-accent)] shrink-0" />
-          <div className="font-semibold text-[12px] text-white truncate">
-            {note.title || "Untitled"}
+      <div className="p-3">
+        {/* Title */}
+        <h4 className="text-[12.5px] font-semibold text-gray-900 leading-tight mb-1 line-clamp-2">
+          {note.title || "Untitled"}
+        </h4>
+
+        {/* Summary */}
+        <p className="text-[10.5px] text-gray-500 leading-[1.5] line-clamp-3 mb-2">
+          {note.summary || note.raw_text?.slice(0, 120)}
+        </p>
+
+        {/* Tags */}
+        {note.tags?.length > 0 && (
+          <div className="flex flex-wrap gap-0.5 mb-2">
+            {note.tags.slice(0, 3).map((t: string) => (
+              <span key={t} className="text-[8px] font-semibold uppercase tracking-wide bg-indigo-50 text-indigo-500 px-1.5 py-[1px] rounded">
+                {t}
+              </span>
+            ))}
+            {note.tags.length > 3 && (
+              <span className="text-[8px] text-gray-400">+{note.tags.length - 3}</span>
+            )}
           </div>
+        )}
+
+        {/* Footer */}
+        <div className="flex items-center gap-1.5 pt-1.5 border-t border-gray-100 text-gray-400">
+          {note.is_bridge && <Link2 size={10} className="text-indigo-400" />}
+          {note.tasks?.length > 0 && <CheckSquare size={10} className="text-emerald-400" />}
+          {isOrphan && <AlertTriangle size={10} className="text-amber-400" />}
+          <span className="ml-auto text-[8px] font-mono text-gray-300">
+            {new Date(note.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          </span>
         </div>
       </div>
 
-      <div className="text-[10px] text-[var(--color-secondary)] line-clamp-3 leading-relaxed pointer-events-none mb-2">
-        {note.summary || note.raw_text}
-      </div>
-
-      {/* Tags */}
-      {note.tags?.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {note.tags.slice(0, 3).map((t: string) => (
-            <span key={t} className="text-[8px] bg-[rgba(99,102,241,0.08)] text-[var(--color-accent)] px-1 py-0.5 rounded font-semibold uppercase tracking-wider">
-              {t}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Visual cue icons */}
-      <div className="flex items-center gap-2 pt-2 border-t border-[rgba(255,255,255,0.06)]">
-        <div className="flex gap-1.5 text-[var(--color-tertiary)]">
-          {note.is_bridge && <div title="Bridge note"><Link size={11} className="text-[var(--color-accent)]" /></div>}
-          {note.tasks?.length > 0 && <div title="Has tasks"><CheckSquare size={11} className="text-[var(--color-success)]" /></div>}
-          {isOrphan && <div title="Orphan note"><AlertTriangle size={11} className="text-[var(--color-warning)]" /></div>}
-        </div>
-      </div>
-
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-[var(--color-tertiary)] !border-none" />
+      <Handle type="source" position={Position.Bottom} className="!w-1.5 !h-1.5 !bg-gray-300 !border-0 !-bottom-1" />
     </div>
   )
-}
+})

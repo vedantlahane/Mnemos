@@ -6,14 +6,14 @@ import CanvasOverlay from "./canvas/CanvasOverlay"
 export default function App() {
   return (
     <ContextProvider>
-      <div className="w-full h-screen bg-[var(--color-void)] text-[var(--color-primary)] flex flex-col overflow-hidden relative z-10">
-        {/* Canvas renders behind stream when in page context */}
+      <div className="w-full h-full relative overflow-hidden" style={{ background: "var(--color-void)" }}>
+        {/* z-0: Canvas (full screen when page open) */}
         <CanvasOverlay />
 
-        {/* Main conversation stream — scrollable */}
+        {/* z-20: Stream (centered home / floating overlay on canvas) */}
         <Stream />
 
-        {/* Always-visible command bar at bottom */}
+        {/* z-40: Command bar (always bottom center) */}
         <CommandBar />
       </div>
     </ContextProvider>

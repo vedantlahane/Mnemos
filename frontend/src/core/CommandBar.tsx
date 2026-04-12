@@ -1,5 +1,5 @@
 import { useRef } from "react"
-import { Search, ArrowUp } from "lucide-react"
+import { Search, ArrowUp, Command } from "lucide-react"
 import { useCommands } from "../hooks/useCommands"
 import { useKeyboard } from "../hooks/useKeyboard"
 import { useAppContext } from "../hooks/useAppContext"
@@ -8,138 +8,96 @@ import { motion, AnimatePresence } from "framer-motion"
 export default function CommandBar() {
   const inputRef = useRef<HTMLInputElement>(null)
   useKeyboard(inputRef)
-
-  const {
-    inputValue,
-    handleInput,
-    suggestions,
-    selectedIndex,
-    setSelectedIndex,
-    handleSubmit,
-  } = useCommands()
-
+  const { inputValue, handleInput, suggestions, selectedIndex, setSelectedIndex, handleSubmit } = useCommands()
   const { current } = useAppContext()
 
-  function getPlaceholder() {
-    switch (current.type) {
-      case "page":
-        return `Search, add notes, or ask about ${current.pageName || "this page"}...`
-      case "settings":
-        return "Change a setting or type to adjust..."
-      case "history":
-        return "Search past conversations..."
-      default:
-        return "Type a message or /command..."
-    }
-  }
+  const placeholder =
+    current.type === "page"
+      ? `Ask about ${current.pageName || "this page"}, /command…`
+      : current.type === "settings"
+      ? "Adjust a setting…"
+      : "Ask anything or type / for commands…"
 
   return (
-    <div className="shrink-0 border-t border-[rgba(255,255,255,0.06)] bg-[rgba(6,6,10,0.85)] backdrop-blur-2xl flex items-center justify-center relative z-30 px-4 py-3">
-      <div className="w-[740px] max-w-full relative">
-        {/* ─── Autocomplete Dropdown ─── */}
-        <AnimatePresence>
-          {suggestions.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 8 }}
-              transition={{ duration: 0.15 }}
-              className="absolute bottom-full left-0 right-0 mb-2 glass-surface-2 rounded-xl overflow-hidden shadow-2xl"
-            >
+    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[560px] max-w-[calc(100vw-40px)]">
+
+      {/* ── Scrollable autocomplete ── */}
+      <AnimatePresence>
+        {suggestions.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.97 }}
+            transition={{ duration: 0.12 }}
+            className="glass-solid rounded-2xl mb-2 overflow-hidden relative"
+          >
+            {/* MAX HEIGHT + SCROLL */}
+            <div className="max-h-[280px] overflow-y-auto overscroll-contain py-1">
               {suggestions.map((cmd, i) => (
                 <div
                   key={cmd.name}
-                  onClick={() => {
-                    handleInput(cmd.name + " ")
-                    inputRef.current?.focus()
-                  }}
+                  onClick={() => { handleInput(cmd.name + " "); inputRef.current?.focus() }}
                   onMouseEnter={() => setSelectedIndex(i)}
-                  className={`px-4 py-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                  className={`px-4 py-2 mx-1 rounded-lg flex items-center justify-between cursor-pointer transition-colors relative z-10 ${
                     i === selectedIndex
-                      ? "bg-[rgba(99,102,241,0.08)]"
-                      : "hover:bg-[rgba(255,255,255,0.03)]"
+                      ? "bg-[rgba(99,102,241,0.12)]"
+                      : "hover:bg-[rgba(255,255,255,0.04)]"
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="text-[13px] font-mono font-semibold text-[var(--color-accent)]">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-[13px] font-mono font-semibold text-[var(--accent-light)] shrink-0">
                       {cmd.name}
                     </span>
                     {cmd.args && (
-                      <span className="text-[11px] text-[var(--color-tertiary)] italic">
+                      <span className="text-[11px] text-[var(--glass-text-muted)] italic truncate">
                         {cmd.args}
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] text-[var(--color-secondary)]">
+                  <span className="text-[11px] text-[var(--glass-text-dim)] shrink-0 ml-4 text-right">
                     {cmd.description}
                   </span>
                 </div>
               ))}
-            </motion.div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Input Pill ── */}
+      <form onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
+        <div className="glass cmd-glow rounded-2xl flex items-center px-4 py-3 gap-3 relative transition-all focus-within:border-[rgba(99,102,241,0.25)]">
+          <Search size={15} className="text-[var(--glass-text-muted)] shrink-0 relative z-10" />
+          <input
+            ref={inputRef}
+            value={inputValue}
+            onChange={(e) => handleInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (suggestions.length > 0) {
+                if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((s: number) => Math.max(0, s - 1)) }
+                else if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((s: number) => Math.min(suggestions.length - 1, s + 1)) }
+                else if (e.key === "Tab") { e.preventDefault(); handleInput(suggestions[selectedIndex].name + " ") }
+              }
+            }}
+            placeholder={placeholder}
+            className="bg-transparent border-none outline-none text-[14px] text-[var(--glass-text)] placeholder-[var(--glass-text-muted)] flex-1 min-w-0 relative z-10"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {inputValue.trim() ? (
+            <button
+              type="submit"
+              className="w-8 h-8 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-light)] flex items-center justify-center transition-colors shrink-0 relative z-10"
+            >
+              <ArrowUp size={14} className="text-white" />
+            </button>
+          ) : (
+            <kbd className="text-[10px] font-mono text-[var(--glass-text-muted)] bg-[rgba(255,255,255,0.05)] px-2 py-1 rounded-md flex items-center gap-1 shrink-0 relative z-10">
+              <Command size={10} /> K
+            </kbd>
           )}
-        </AnimatePresence>
-
-        {/* ─── Input Bar ─── */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            handleSubmit()
-          }}
-        >
-          <div className="glass-surface-3 flex items-center px-4 py-2.5 rounded-xl command-breathe transition-all focus-within:glass-glow-active">
-            <Search size={15} className="text-[var(--color-tertiary)] mr-3 shrink-0" />
-            <input
-              ref={inputRef}
-              value={inputValue}
-              onChange={(e) => handleInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowUp" && suggestions.length > 0) {
-                  e.preventDefault()
-                  setSelectedIndex((s: number) => Math.max(0, s - 1))
-                } else if (e.key === "ArrowDown" && suggestions.length > 0) {
-                  e.preventDefault()
-                  setSelectedIndex((s: number) =>
-                    Math.min(suggestions.length - 1, s + 1)
-                  )
-                } else if (e.key === "Tab" && suggestions.length > 0) {
-                  e.preventDefault()
-                  handleInput(suggestions[selectedIndex].name + " ")
-                }
-              }}
-              placeholder={getPlaceholder()}
-              className="bg-transparent border-none outline-none text-[14px] text-[var(--color-primary)] placeholder-[var(--color-tertiary)] flex-1 min-w-0"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {inputValue.trim() && (
-              <button
-                type="submit"
-                className="w-7 h-7 rounded-lg bg-[var(--color-accent-dim)] hover:bg-[var(--color-accent)] flex items-center justify-center ml-2 transition-colors shrink-0"
-              >
-                <ArrowUp size={14} className="text-white" />
-              </button>
-            )}
-          </div>
-        </form>
-
-        {/* ─── Keyboard hint ─── */}
-        <div className="flex justify-center mt-1.5">
-          <span className="text-[10px] text-[var(--color-tertiary)]">
-            <kbd className="font-mono bg-[rgba(255,255,255,0.05)] px-1 py-0.5 rounded text-[9px]">
-              ⌘K
-            </kbd>{" "}
-            to focus •{" "}
-            <kbd className="font-mono bg-[rgba(255,255,255,0.05)] px-1 py-0.5 rounded text-[9px]">
-              /
-            </kbd>{" "}
-            for commands •{" "}
-            <kbd className="font-mono bg-[rgba(255,255,255,0.05)] px-1 py-0.5 rounded text-[9px]">
-              ESC
-            </kbd>{" "}
-            to close
-          </span>
         </div>
-      </div>
+      </form>
     </div>
   )
 }

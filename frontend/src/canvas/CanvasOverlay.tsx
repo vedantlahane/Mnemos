@@ -4,19 +4,19 @@ import { motion, AnimatePresence } from "framer-motion"
 
 export default function CanvasOverlay() {
   const { current } = useAppContext()
-  const isOpen = current.type === "page" && !!current.pageId
 
   return (
     <AnimatePresence>
-      {isOpen && (
+      {current.type === "page" && current.pageId && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.98 }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
+          key={current.pageId}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25 }}
           className="absolute inset-0 z-0"
         >
-          <CanvasView pageId={current.pageId!} />
+          <CanvasView pageId={current.pageId} />
         </motion.div>
       )}
     </AnimatePresence>

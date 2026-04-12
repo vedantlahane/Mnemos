@@ -1,92 +1,77 @@
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { useAppContext } from "../hooks/useAppContext"
-import { useStream } from "../hooks/useStream"
 import type { Page, WorkspaceStats } from "../types"
-import { BarChart2, FileText, Hash, Zap } from "lucide-react"
+import { FileText, Layers, Hash, Zap } from "lucide-react"
 import { motion } from "framer-motion"
 
 export default function WelcomeBlock() {
   const [pages, setPages] = useState<Page[]>([])
   const [stats, setStats] = useState<WorkspaceStats | null>(null)
   const { switchTo } = useAppContext()
-  const { addBlock } = useStream()
 
   useEffect(() => {
     Promise.all([
-      api.listPages().then((r) => setPages(r.pages || r || [])),
+      api.listPages().then(r => setPages(r.pages || r || [])),
       api.getStats().then(setStats),
-    ]).catch(console.error)
+    ]).catch(() => {})
   }, [])
 
   return (
-    <div className="flex flex-col items-center pt-12 pb-4">
-      {/* Header */}
-      <div className="text-[28px] font-bold tracking-tight text-white mb-1">
+    <div className="flex flex-col items-center pt-24 pb-8">
+      <motion.h1 initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="text-[36px] font-extrabold tracking-tight text-white mb-1">
         Mnemos
-      </div>
-      <div className="text-[14px] text-[var(--color-secondary)] mb-10">
-        Your personal knowledge workspace
-      </div>
+      </motion.h1>
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="text-[14px] text-[var(--glass-text-dim)] mb-16">
+        Your knowledge, connected.
+      </motion.p>
 
-      {/* Quick stats */}
+      {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-4 gap-3 w-full mb-8">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="flex gap-10 mb-16">
           {[
-            { label: "Notes", value: stats.total_notes, icon: FileText, color: "var(--color-accent)" },
-            { label: "Pages", value: stats.total_pages, icon: BarChart2, color: "var(--color-accent-purple)" },
-            { label: "Tags", value: stats.total_tags, icon: Hash, color: "var(--color-success)" },
-            { label: "Tasks", value: stats.total_tasks, icon: Zap, color: "var(--color-warning)" },
-          ].map((s) => (
-            <div key={s.label} className="glass-surface-1 p-3 rounded-xl text-center">
-              <s.icon size={16} className="mx-auto mb-1.5" style={{ color: s.color }} />
-              <div className="text-[18px] font-bold text-white">{s.value}</div>
-              <div className="text-[10px] text-[var(--color-tertiary)] uppercase tracking-wider">{s.label}</div>
+            { icon: FileText, v: stats.total_notes, l: "notes", c: "var(--accent)" },
+            { icon: Layers, v: stats.total_pages, l: "pages", c: "var(--purple)" },
+            { icon: Hash, v: stats.total_tags, l: "tags", c: "var(--green)" },
+            { icon: Zap, v: stats.total_tasks, l: "tasks", c: "var(--amber)" },
+          ].map(s => (
+            <div key={s.l} className="flex flex-col items-center">
+              <s.icon size={15} style={{ color: s.c }} className="mb-2" />
+              <span className="text-[24px] font-bold text-white">{s.v}</span>
+              <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--glass-text-muted)] mt-0.5">{s.l}</span>
             </div>
           ))}
-        </div>
+        </motion.div>
       )}
 
-      {/* Page cards */}
+      {/* Pages */}
       {pages.length > 0 && (
-        <>
-          <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)] mb-3 self-start">
-            Your Pages
-          </div>
-          <div className="grid grid-cols-2 gap-3 w-full">
-            {pages.slice(0, 6).map((page, i) => (
-              <motion.div
-                key={page.id}
-                initial={{ opacity: 0, y: 10 }}
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="w-full max-w-[480px]">
+          <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--glass-text-muted)] font-semibold mb-3">Pages</div>
+          <div className="grid grid-cols-2 gap-2.5">
+            {pages.map((p, i) => (
+              <motion.button
+                key={p.id}
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                onClick={() => switchTo("page", page.id, page.name)}
-                className="glass-surface-2 p-4 rounded-xl glass-hover cursor-pointer flex items-center gap-3"
+                transition={{ delay: 0.2 + i * 0.03 }}
+                onClick={() => switchTo("page", p.id, p.name)}
+                className="glass rounded-xl p-3.5 text-left glass-hover flex items-center gap-3 relative"
               >
-                <div className="text-xl">{page.icon || "📄"}</div>
+                <span className="text-lg">{p.icon || "📄"}</span>
                 <div className="min-w-0">
-                  <div className="text-[13px] font-semibold text-white truncate">{page.name}</div>
-                  <div className="text-[11px] text-[var(--color-tertiary)]">
-                    {page.note_count} note{page.note_count !== 1 ? "s" : ""}
-                  </div>
+                  <div className="text-[12.5px] font-semibold text-white truncate">{p.name}</div>
+                  <div className="text-[10px] text-[var(--glass-text-muted)]">{p.note_count} note{p.note_count !== 1 ? "s" : ""}</div>
                 </div>
-              </motion.div>
+              </motion.button>
             ))}
           </div>
-        </>
+        </motion.div>
       )}
 
-      {/* Hint */}
-      <div className="mt-10 text-[12px] text-[var(--color-tertiary)] text-center leading-relaxed">
-        Type a question to search your knowledge, or use{" "}
-        <button
-          onClick={() => addBlock("help")}
-          className="text-[var(--color-accent)] hover:underline font-mono"
-        >
-          /help
-        </button>{" "}
-        to see all commands.
-      </div>
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }} className="text-[11px] text-[var(--glass-text-muted)] mt-14 text-center">
+        Type a question below, or <span className="text-[var(--accent-light)] font-mono">/help</span> for commands
+      </motion.p>
     </div>
   )
 }

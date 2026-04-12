@@ -1,32 +1,28 @@
+import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
 
-export default function StickyNode({ data, selected }: any) {
-  const { highlighted } = data
+const COLORS = ["#fef08a", "#bbf7d0", "#bfdbfe", "#fecdd3", "#e9d5ff", "#fed7aa"]
+
+export default memo(function StickyNode({ data, selected }: any) {
+  const color = data.style?.color || COLORS[Math.floor(Math.random() * COLORS.length)]
 
   return (
     <div
-      className={`w-[180px] p-4 shadow-lg transition-all ${
-        selected
-          ? "border-2 border-amber-500 shadow-xl scale-105"
-          : highlighted
-          ? "border-2 border-[var(--color-warning)] shadow-xl"
-          : "border-2 border-transparent"
-      }`}
+      className={`w-[160px] shadow-lg transition-transform ${selected ? "scale-[1.04] shadow-xl" : ""}`}
       style={{
-        background: "rgba(254, 240, 138, 0.9)",
-        color: "#78350f",
+        background: color,
         fontFamily: "var(--font-hand)",
-        borderRadius: "2px 10px 10px 2px",
-        transform: `rotate(${selected ? 0 : 1}deg)`,
+        padding: "12px 14px",
+        borderRadius: "1px 1px 8px 1px",
+        transform: `rotate(${selected ? 0 : (data.id?.charCodeAt(0) || 0) % 5 - 2}deg)`,
+        boxShadow: "2px 4px 14px rgba(0,0,0,0.18)",
       }}
     >
-      <Handle type="target" position={Position.Top} className="opacity-0" />
-
-      <div className="text-[15px] leading-snug whitespace-pre-wrap font-medium">
-        {data.content || "Sticky note"}
+      <Handle type="target" position={Position.Top} className="!opacity-0" />
+      <div className="text-[15px] leading-snug text-amber-900/80 whitespace-pre-wrap">
+        {data.content || "…"}
       </div>
-
-      <Handle type="source" position={Position.Bottom} className="opacity-0" />
+      <Handle type="source" position={Position.Bottom} className="!opacity-0" />
     </div>
   )
-}
+})
