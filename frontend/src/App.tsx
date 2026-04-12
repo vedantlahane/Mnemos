@@ -1,21 +1,19 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom"
-import Layout from "./components/Layout"
-import Dashboard from "./pages/Dashboard"
-import NoteDetail from "./pages/NoteDetail"
-import Search from "./pages/Search"
-import Chat from "./pages/Chat"
+import { BrowserRouter } from "react-router-dom"
+import { ContextProvider } from "./core/ContextProvider"
+import Stream from "./core/Stream"
+import CommandBar from "./core/CommandBar"
+import CanvasOverlay from "./canvas/CanvasOverlay"
 
 export default function App() {
   return (
     <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/note/:id" element={<NoteDetail />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/chat" element={<Chat />} />
-        </Routes>
-      </Layout>
+      <ContextProvider>
+        <div className="w-full h-screen bg-[#060609] text-slate-200 flex flex-col overflow-hidden relative">
+          <CanvasOverlay />
+          <Stream />
+          <CommandBar />
+        </div>
+      </ContextProvider>
     </BrowserRouter>
   )
 }

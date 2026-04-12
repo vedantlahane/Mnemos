@@ -9,170 +9,183 @@ interface Note {
   id: string
   title: string
   summary?: string
-  tags?: string[]
-  source_url?: string
+  page_name?: string
   similarity?: number
 }
 
 function Popup() {
-  const [recentNotes, setRecentNotes] = useState<Note[]>([])
+  const [selectedText, setSelectedText] = useState("")
   const [relatedNotes, setRelatedNotes] = useState<Note[]>([])
-  const [manualText, setManualText] = useState("")
+  const [pages, setPages] = useState<any[]>([])
+  const [selectedPage, setSelectedPage] = useState<string | null>(null)
+  const [commandText, setCommandText] = useState("")
   const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
+  const [dropdownOpen, setDropdownOpen] = useState(false)
 
   useEffect(() => {
     loadData()
   }, [])
 
   async function loadData() {
-    setLoading(true)
     try {
-      const recentResp = await new Promise<any>((resolve) => {
-        chrome.runtime.sendMessage({ type: "GET_RECENT_NOTES" }, resolve)
+      const pgs = await fetch(`${BACKEND_URL}/api/pages`).then(r => r.json())
+      setPages(pgs?.pages || [])
+      
+      const selection = await new Promise<any>((resolve) => {
+         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs[0]?.id) return resolve("");
+            chrome.scripting.executeScript({
+                target: { tabId: tabs[0].id },
+                func: () => window.getSelection()?.toString() || ""
+            }, (res) => resolve(res?.[0]?.result || ""));
+         });
       })
-      setRecentNotes(recentResp?.notes || [])
+      if (selection) setSelectedText(selection)
 
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
       if (tab?.url) {
         const relatedResp = await fetch(`${BACKEND_URL}/api/context`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: tab.url, text: "" })
-        })
-          .then((r) => r.json())
-          .catch(() => ({ related_notes: [] }))
+          body: JSON.stringify({ url: tab.url, text: selection || "" })
+        }).then((r) => r.json()).catch(() => ({ related_notes: [] }))
 
         setRelatedNotes(relatedResp?.related_notes || [])
       }
     } catch (err) {
-      setError("Can't connect to backend")
-    } finally {
-      setLoading(false)
+      console.error(err)
     }
   }
 
-  async function handleManualCapture() {
-    if (!manualText.trim()) return
+  async function handleSave(openLink = false) {
+    if (!selectedText.trim() && !commandText.trim()) return
     setSaving(true)
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    
+    // We send message to backend directly
+    try {
+       const res = await fetch(`${BACKEND_URL}/api/capture`, {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({
+               text: selectedText.trim() || commandText.trim(),
+               source_url: tab?.url || "",
+               page_title: tab?.title || "",
+               capture_type: "manual",
+               page_hint: selectedPage ? pages.find(p => p.id === selectedPage)?.name : null,
+               custom_command: commandText
+           })
+       }).then(r => r.json())
 
-    const result = await new Promise<any>((resolve) => {
-      chrome.runtime.sendMessage(
-        {
-          type: "CAPTURE",
-          payload: {
-            text: manualText.trim(),
-            source_url: tab?.url || "",
-            page_title: tab?.title || "",
-            capture_type: "manual"
-          }
-        },
-        resolve
-      )
-    })
-
-    if (result?.success) {
-      setManualText("")
-      loadData()
-    }
+       if (openLink && res?.note_id) {
+           chrome.tabs.create({ url: `${FRONTEND_URL}/note/${res.note_id}` })
+       } else if (openLink) {
+           chrome.tabs.create({ url: FRONTEND_URL })
+       } else {
+           window.close()
+       }
+    } catch(e) {}
     setSaving(false)
   }
 
-  function openDashboard() {
-    chrome.tabs.create({ url: FRONTEND_URL })
-  }
-
-  function openNote(id: string) {
-    chrome.tabs.create({ url: `${FRONTEND_URL}/note/${id}` })
+  function getPageDisplay() {
+    if (!selectedPage) return "Auto-detect (AI decides)"
+    return pages.find(p => p.id === selectedPage)?.name || "Auto-detect"
   }
 
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h1 style={styles.title}>🧠 Mnemos</h1>
-        <button onClick={openDashboard} style={styles.dashboardBtn}>
-          Dashboard →
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+           <span style={{ color: "#60a5fa", fontSize: 16 }}>✨</span>
+           <span style={styles.title}>MNEMOS</span>
+        </div>
+        <button onClick={() => chrome.tabs.create({ url: FRONTEND_URL })} style={styles.linkBtn}>
+          Open Dashboard ↗
         </button>
       </div>
-
-      {error && <div style={styles.error}>{error}</div>}
 
       <div style={styles.section}>
-        <textarea
-          value={manualText}
-          onChange={(e) => setManualText(e.target.value)}
-          placeholder="Quick note..."
-          style={styles.textarea}
-          rows={3}
-        />
-        <button
-          onClick={handleManualCapture}
-          disabled={saving || !manualText.trim()}
-          style={{
-            ...styles.captureBtn,
-            opacity: saving || !manualText.trim() ? 0.5 : 1
-          }}
-        >
-          {saving ? "Saving..." : "Save Note"}
-        </button>
+         <div style={styles.label}>SELECTED TEXT</div>
+         <div style={styles.glassCard}>
+            <div style={styles.selectedText}>
+                {selectedText ? `"${selectedText.slice(0, 140)}..."` : "No text selected on page."}
+            </div>
+            {selectedText && <div style={styles.charCount}>{selectedText.length} chars</div>}
+         </div>
       </div>
 
-      {loading ? (
-        <div style={styles.loading}>Loading...</div>
-      ) : (
-        <>
-          {relatedNotes.length > 0 && (
-            <div style={styles.section}>
-              <h2 style={styles.sectionTitle}>📌 Related to this page</h2>
-              {relatedNotes.map((note) => (
-                <NoteItem key={note.id} note={note} onClick={() => openNote(note.id)} />
-              ))}
-            </div>
-          )}
+      <div style={styles.section}>
+         <div style={styles.label}>SAVE TO PAGE</div>
+         <div style={{ position: "relative" }}>
+             <button style={styles.dropdownToggle} onClick={() => setDropdownOpen(!dropdownOpen)}>
+                 <span>🔍 {getPageDisplay()}</span>
+                 <span>▼</span>
+             </button>
+             {dropdownOpen && (
+                 <div style={styles.dropdownMenu}>
+                     <div style={!selectedPage ? styles.dropdownItemActive : styles.dropdownItem} onClick={() => { setSelectedPage(null); setDropdownOpen(false); }}>
+                         🔍 Auto-detect (AI decides)
+                     </div>
+                     {pages.map(p => (
+                         <div key={p.id} style={selectedPage === p.id ? styles.dropdownItemActive : styles.dropdownItem} onClick={() => { setSelectedPage(p.id); setDropdownOpen(false); }}>
+                             {p.icon || "📄"} {p.name}
+                             <span style={{ float: "right", color: "#94a3b8", fontSize: 10 }}>{p.note_count} notes</span>
+                         </div>
+                     ))}
+                 </div>
+             )}
+         </div>
+      </div>
 
+      <div style={styles.section}>
+         <div style={styles.label}>COMMAND (OPTIONAL)</div>
+         <input 
+            value={commandText}
+            onChange={(e) => setCommandText(e.target.value)}
+            style={styles.input} 
+            placeholder="e.g., 'also tag as important'" 
+         />
+      </div>
+
+      <div style={styles.actionRow}>
+         <button onClick={() => handleSave(false)} style={styles.btnPrimary} disabled={saving}>
+             {saving ? "Saving..." : "Save"}
+         </button>
+         <button onClick={() => handleSave(true)} style={styles.btnGhost} disabled={saving}>
+             {saving ? "..." : "Save & Open"}
+         </button>
+      </div>
+
+      <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "16px 0" }} />
+
+      {relatedNotes.length > 0 && (
           <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>🕐 Recent</h2>
-            {recentNotes.length === 0 ? (
-              <div style={styles.empty}>
-                No notes yet. Highlight text and press Ctrl+Shift+S!
-              </div>
-            ) : (
-              recentNotes.map((note) => (
-                <NoteItem key={note.id} note={note} onClick={() => openNote(note.id)} />
-              ))
-            )}
+             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                 <div style={styles.label}>RELATED TO THIS PAGE</div>
+                 <div style={{ fontSize: 10, color: "#60a5fa" }}>Docker</div>
+             </div>
+             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                 {relatedNotes.slice(0, 3).map((note) => (
+                     <div key={note.id} style={styles.noteCard}>
+                         <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0" }}>{note.title}</div>
+                         <div style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                             {note.summary || "No summary available..."}
+                         </div>
+                         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                             <span style={{ fontSize: 10, color: "#60a5fa", background: "rgba(37,99,235,0.1)", padding: "2px 6px", borderRadius: 4 }}>{note.page_name || "Uncategorized"}</span>
+                             <span style={{ fontSize: 10, color: "#10b981", fontWeight: 600 }}>{Math.round((note.similarity || 0)*100)}%</span>
+                         </div>
+                     </div>
+                 ))}
+             </div>
           </div>
-        </>
       )}
-    </div>
-  )
-}
 
-function NoteItem({ note, onClick }: { note: Note; onClick: () => void }) {
-  return (
-    <div style={styles.noteItem} onClick={onClick}>
-      <div style={styles.noteTitle}>{note.title || "Untitled"}</div>
-      {note.summary && (
-        <div style={styles.noteSummary}>
-          {note.summary.slice(0, 80)}
-          {note.summary.length > 80 ? "..." : ""}
-        </div>
-      )}
-      {note.tags && note.tags.length > 0 && (
-        <div style={styles.tags}>
-          {note.tags.slice(0, 3).map((tag) => (
-            <span key={tag} style={styles.tag}>
-              #{tag}
-            </span>
-          ))}
-        </div>
-      )}
-      {note.similarity !== undefined && (
-        <span style={styles.similarity}>{Math.round(note.similarity * 100)}% match</span>
-      )}
+      <div style={styles.footer}>
+          ⌨️ Ctrl+Shift+S to quick save
+      </div>
     </div>
   )
 }
@@ -180,122 +193,170 @@ function NoteItem({ note, onClick }: { note: Note; onClick: () => void }) {
 const styles: Record<string, React.CSSProperties> = {
   container: {
     width: 360,
-    maxHeight: 500,
+    height: 540,
+    fontFamily: "'Inter', sans-serif",
+    background: "#0c0c14",
+    color: "#e2e8f0",
+    display: "flex",
+    flexDirection: "column",
     overflowY: "auto",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    padding: 16,
-    background: "#0f172a",
-    color: "#e2e8f0"
+    overflowX: "hidden",
+    boxSizing: "border-box"
   },
   header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16
+    height: 48,
+    padding: "0 16px",
+    borderBottom: "1px solid rgba(255,255,255,0.06)",
+    flexShrink: 0
   },
   title: {
-    fontSize: 18,
+    fontSize: 13,
     fontWeight: 700,
-    margin: 0
+    letterSpacing: "0.05em",
+    margin: 0,
+    color: "#e2e8f0"
   },
-  dashboardBtn: {
+  linkBtn: {
     background: "transparent",
-    border: "1px solid #475569",
-    color: "#94a3b8",
-    padding: "4px 10px",
-    borderRadius: 6,
-    cursor: "pointer",
-    fontSize: 12
+    border: "none",
+    color: "#60a5fa",
+    fontSize: 11,
+    cursor: "pointer"
   },
   section: {
-    marginBottom: 16
+    padding: "14px 16px 0",
   },
-  sectionTitle: {
-    fontSize: 13,
+  label: {
+    fontSize: 9,
+    textTransform: "uppercase",
+    color: "#475569",
+    letterSpacing: "0.05em",
     fontWeight: 600,
-    color: "#94a3b8",
-    marginBottom: 8,
-    margin: "0 0 8px 0"
+    marginBottom: 8
   },
-  textarea: {
-    width: "100%",
-    padding: 10,
+  glassCard: {
+    background: "rgba(30, 30, 45, 0.4)",
+    border: "1px solid rgba(255,255,255,0.06)",
     borderRadius: 8,
-    border: "1px solid #334155",
-    background: "#1e293b",
+    padding: "10px 12px",
+    position: "relative"
+  },
+  selectedText: {
+    fontSize: 12,
+    fontStyle: "italic",
+    color: "#e2e8f0",
+    lineHeight: 1.4,
+    display: "-webkit-box",
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden"
+  },
+  charCount: {
+    position: "absolute",
+    bottom: 6,
+    right: 8,
+    fontSize: 9,
+    color: "#475569"
+  },
+  dropdownToggle: {
+    width: "100%",
+    height: 40,
+    background: "rgba(20, 20, 30, 0.75)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 8,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "0 12px",
     color: "#e2e8f0",
     fontSize: 13,
-    resize: "vertical" as const,
-    boxSizing: "border-box" as const,
-    outline: "none"
+    cursor: "pointer",
   },
-  captureBtn: {
-    width: "100%",
-    marginTop: 8,
-    padding: "8px 0",
-    background: "#6366f1",
-    color: "white",
-    border: "none",
+  dropdownMenu: {
+    position: "absolute",
+    top: 44,
+    left: 0,
+    right: 0,
+    background: "rgba(20, 20, 30, 0.95)",
+    backdropFilter: "blur(20px)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 8,
+    padding: 4,
+    zIndex: 10,
+    boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+  },
+  dropdownItem: {
+    padding: "8px 10px",
+    fontSize: 12,
     borderRadius: 6,
     cursor: "pointer",
-    fontWeight: 600,
-    fontSize: 13
+    color: "#e2e8f0"
   },
-  noteItem: {
-    padding: 10,
-    background: "#1e293b",
-    borderRadius: 8,
-    marginBottom: 6,
+  dropdownItemActive: {
+    padding: "8px 10px",
+    fontSize: 12,
+    borderRadius: 6,
     cursor: "pointer",
-    transition: "background 0.15s"
+    color: "#60a5fa",
+    background: "rgba(96, 165, 250, 0.1)",
+    borderLeft: "2px solid #2563eb"
   },
-  noteTitle: {
+  input: {
+    width: "100%",
+    height: 36,
+    background: "rgba(20,20,30,0.5)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 8,
+    padding: "0 12px",
+    color: "#e2e8f0",
+    fontSize: 13,
+    outline: "none",
+    boxSizing: "border-box"
+  },
+  actionRow: {
+    display: "flex",
+    gap: 8,
+    padding: "14px 16px 0",
+  },
+  btnPrimary: {
+    flex: 1,
+    height: 36,
+    background: "linear-gradient(to right, #2563eb, #0891b2)",
+    border: "none",
+    borderRadius: 8,
+    color: "#fff",
     fontSize: 13,
     fontWeight: 600,
-    marginBottom: 4
+    cursor: "pointer"
   },
-  noteSummary: {
-    fontSize: 12,
+  btnGhost: {
+    flex: 1,
+    height: 36,
+    background: "transparent",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 8,
     color: "#94a3b8",
-    marginBottom: 4
+    fontSize: 13,
+    cursor: "pointer"
   },
-  tags: {
+  noteCard: {
+    background: "rgba(20, 20, 30, 0.75)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 8,
+    padding: "10px 12px",
+  },
+  footer: {
+    marginTop: "auto",
+    height: 32,
+    borderTop: "1px solid rgba(255,255,255,0.06)",
     display: "flex",
-    gap: 4,
-    flexWrap: "wrap" as const
-  },
-  tag: {
-    fontSize: 11,
-    color: "#818cf8",
-    background: "#1e1b4b",
-    padding: "2px 6px",
-    borderRadius: 4
-  },
-  similarity: {
-    fontSize: 11,
-    color: "#22c55e",
-    float: "right" as const
-  },
-  loading: {
-    textAlign: "center" as const,
-    color: "#64748b",
-    padding: 20,
-    fontSize: 13
-  },
-  empty: {
-    textAlign: "center" as const,
-    color: "#64748b",
-    padding: 16,
-    fontSize: 12
-  },
-  error: {
-    background: "#7f1d1d",
-    color: "#fca5a5",
-    padding: 8,
-    borderRadius: 6,
-    fontSize: 12,
-    marginBottom: 12,
-    textAlign: "center" as const
+    justifyContent: "center",
+    alignItems: "center",
+    fontSize: 10,
+    color: "#475569"
   }
 }
 
