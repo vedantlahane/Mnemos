@@ -1,7 +1,6 @@
 import { create } from "zustand"
 import type { WorkspaceSettings } from "../types"
 import { DEFAULT_SETTINGS } from "../types"
-import { api } from "../api/client"
 
 const STORAGE_KEY = "mnemos-settings"
 
@@ -35,14 +34,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loading: false,
 
   load: async () => {
+    // Load from local storage only (backend settings endpoint not yet implemented)
     set({ loading: true })
     try {
-      const remote = await api.getSettings()
-      const merged = { ...DEFAULT_SETTINGS, ...remote }
-      saveLocal(merged)
-      set({ settings: merged })
-    } catch {
-      // Offline — use local
+      const local = loadLocal()
+      set({ settings: local })
     } finally {
       set({ loading: false })
     }
@@ -52,12 +48,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const next = { ...get().settings, ...partial }
     saveLocal(next)
     set({ settings: next })
-
-    try {
-      await api.updateSettings(partial)
-    } catch {
-      // Save locally even if remote fails
-    }
   },
 }))
 

@@ -354,16 +354,6 @@ export const api = {
       body: JSON.stringify(action),
     }),
 
-  // ─── Settings ───────────────────────────────────
-  getSettings: () =>
-    request<import("../types").WorkspaceSettings>("/settings"),
-
-  updateSettings: (data: Partial<import("../types").WorkspaceSettings>) =>
-    request<import("../types").WorkspaceSettings>("/settings", {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-
   // ─── Health ─────────────────────────────────────
   health: () =>
     fetch(`${API_BASE.replace("/api", "")}/health`, {
