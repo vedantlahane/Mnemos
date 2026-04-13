@@ -159,6 +159,7 @@ export function useCommands() {
       case "page": {
         const sub = parts[1]?.toLowerCase()
         const name = parts.slice(2).join(" ")
+
         if (sub === "create" && name) {
           try {
             const page = await api.createPage({ name })
@@ -187,8 +188,41 @@ export function useCommands() {
           } catch {
             addAssistantMessage("Failed to delete page.")
           }
+        } else if (sub && sub !== "create" && sub !== "delete") {
+          // Treat "/page <name>" as shorthand for "/page create <name>"
+          const fullName = parts.slice(1).join(" ")
+          try {
+            const page = await api.createPage({ name: fullName })
+            addSystemMessage(`Created page: ${page.icon} ${page.name}`)
+            addBlock("page-list")
+          } catch (err) {
+            // If creation fails (duplicate), try opening it instead
+            try {
+              const { pages } = await api.listPages()
+              const match = pages.find(
+                (p) => p.name.toLowerCase() === fullName.toLowerCase()
+              )
+              if (match) {
+                switchTo("page", match.id, match.name)
+                addSystemMessage(`Opened page: ${match.icon || "📄"} ${match.name}`)
+              } else {
+                addAssistantMessage(
+                  `Failed to create "${fullName}": ${err instanceof Error ? err.message : "Unknown error"}`
+                )
+              }
+            } catch {
+              addAssistantMessage(
+                `Failed to create "${fullName}": ${err instanceof Error ? err.message : "Unknown error"}`
+              )
+            }
+          }
         } else {
-          addAssistantMessage("Usage: `/page create <name>` or `/page delete <name>`")
+          addAssistantMessage(
+            "**Usage:**\n" +
+            "• `/page <name>` — create (or open if exists)\n" +
+            "• `/page create <name>` — create new page\n" +
+            "• `/page delete <name>` — delete a page"
+          )
         }
         break
       }

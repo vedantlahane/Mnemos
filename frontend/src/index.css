@@ -245,6 +245,38 @@
   .draggable:active { cursor: grabbing; }
 
   /* ─── Excalidraw Overrides (single source of truth) ─── */
+
+  /* Kill the welcome screen entirely */
+  .excalidraw .welcome-screen-center,
+  .excalidraw .welcome-screen-decor,
+  .excalidraw .welcome-screen-menu-hints,
+  .excalidraw [class*="WelcomeScreen"],
+  .excalidraw [class*="welcome-screen"],
+  .excalidraw [class*="welcomeScreen"],
+  .excalidraw-container [class*="welcome"],
+  .excalidraw .welcome-screen-decor__wrapper,
+  .excalidraw .welcome-screen-decor svg,
+  .excalidraw .welcome-screen-center__logo,
+  .excalidraw .welcome-screen-center__heading,
+  .excalidraw .welcome-screen-center__menu {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    z-index: -1 !important;
+  }
+
+  /* Hide the decorative shapes (lock icon, etc) */
+  .excalidraw .layer-ui__wrapper .welcome-screen-decor,
+  .excalidraw .layer-ui__wrapper [class*="welcome"] {
+    display: none !important;
+  }
+
+  /* Standard z-index management */
   .excalidraw .Toast { bottom: 80px !important; z-index: 55 !important; }
   .excalidraw .popover,
   .excalidraw .context-menu,
@@ -259,45 +291,28 @@
   .excalidraw .color-picker-content { z-index: 100 !important; }
   .excalidraw .Island { z-index: 15 !important; }
 
-  /* ─── Excalidraw Empty State / Splash ─── */
-  .excalidraw .welcome-screen-center,
-  .excalidraw .welcome-screen-menu-hints,
-  .excalidraw .virgil,
-  .excalidraw .welcome-screen-decor,
-  .excalidraw [class*="welcome-screen"] {
-    display: none !important;
-  }
-
-  /* Hide the giant lock/shape icon on empty canvas */
-  .excalidraw .layer-ui__wrapper__top-right .zen-mode-transition {
-    display: none !important;
-  }
-
-  /* Cleaner empty canvas hint */
+  /* Make hint viewer less intrusive */
   .excalidraw .HintViewer {
-    background: var(--glass-bg) !important;
-    border: 1px solid var(--glass-border) !important;
-    color: var(--glass-text-dim) !important;
-    border-radius: 12px !important;
+    background: rgba(14, 14, 26, 0.8) !important;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    color: rgba(255,255,255,0.5) !important;
+    border-radius: 10px !important;
     font-size: 11px !important;
-    padding: 6px 12px !important;
-    backdrop-filter: blur(20px) !important;
+    padding: 4px 10px !important;
+    backdrop-filter: blur(16px) !important;
   }
 
-  /* Make Excalidraw toolbars glass-like */
-  .excalidraw .App-toolbar-container {
-    backdrop-filter: blur(30px) saturate(1.4) !important;
+  /* Nuclear: hide ANY large SVG in Excalidraw layer-ui that isn't a tool icon */
+  .excalidraw .layer-ui__wrapper > div > svg,
+  .excalidraw .layer-ui__wrapper > div > div > svg {
+    max-width: 48px !important;
+    max-height: 48px !important;
   }
 
-  /* Remove Excalidraw default welcome overlay */
-  .excalidraw-wrapper .excalidraw .welcome-screen-center {
-    display: none !important;
-  }
-
-  /* Fix Excalidraw welcome screen shapes/decor */
-  .excalidraw .welcome-screen-center__logo,
-  .excalidraw .welcome-screen-center__heading,
-  .excalidraw .welcome-screen-center__menu {
+  /* Hide the entire welcome screen layer */
+  .excalidraw .layer-ui__wrapper > div:has([class*="welcome"]),
+  .excalidraw .layer-ui__wrapper > div:has(svg[width="200"]),
+  .excalidraw .layer-ui__wrapper > div:has(svg[height="200"]) {
     display: none !important;
   }
 }

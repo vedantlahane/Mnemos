@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react"
-import { Excalidraw, MainMenu, WelcomeScreen } from "@excalidraw/excalidraw"
+import { Excalidraw, MainMenu } from "@excalidraw/excalidraw"
 import type {
   ExcalidrawImperativeAPI,
   AppState,
@@ -13,6 +13,7 @@ import { useCanvasEvents, type CanvasCommand } from "../hooks/useCanvasEvents"
 import { useAppContext } from "../hooks/useAppContext"
 import { createNoteCard, createSticky } from "./canvasAI"
 import { api } from "../api/client"
+import { nanoid } from "../utils"
 
 interface Props {
   pageId: string
@@ -23,6 +24,42 @@ function getZoomValue(appState: Record<string, unknown>): number {
     return (appState.zoom as { value: number }).value
   }
   return (appState.zoom as number) || 1
+}
+
+/**
+ * Create an invisible placeholder element so Excalidraw
+ * never shows its built-in welcome screen (lock icon / decorations).
+ * This is a 1x1 transparent dot far off-screen.
+ */
+function createPlaceholderElement(): Record<string, unknown> {
+  return {
+    id: `__placeholder_${nanoid(8)}`,
+    type: "rectangle",
+    x: -99999,
+    y: -99999,
+    width: 1,
+    height: 1,
+    angle: 0,
+    strokeColor: "transparent",
+    backgroundColor: "transparent",
+    fillStyle: "solid",
+    strokeWidth: 0,
+    strokeStyle: "solid",
+    roughness: 0,
+    opacity: 0,
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    seed: Math.floor(Math.random() * 2e9),
+    version: 1,
+    versionNonce: Math.floor(Math.random() * 2e9),
+    isDeleted: false,
+    boundElements: null,
+    updated: Date.now(),
+    link: null,
+    locked: false,
+    customData: { type: "__placeholder" },
+  }
 }
 
 export default function ExcalidrawCanvas({ pageId }: Props) {
@@ -55,7 +92,12 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       const exc = excalidrawRef.current
       if (!exc) return
 
-      exc.updateScene({ elements: initialScene.elements })
+      // Always include at least one element to prevent welcome screen
+      const elements = initialScene.elements.length > 0
+        ? initialScene.elements
+        : [createPlaceholderElement()]
+
+      exc.updateScene({ elements })
 
       if (initialScene.appState) {
         const restore: Record<string, unknown> = {}
@@ -74,7 +116,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       setTimeout(() => {
         userHasInteracted.current = true
       }, 2000)
-    }, 300)
+    }, 150)
 
     return () => clearTimeout(timer)
   }, [initialScene, excalidrawRef])
@@ -156,29 +198,23 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
                 try {
                   const note = await api.getNote(resp.note_id)
                   addElements(
-                    createNoteCard(
-                      {
-                        noteId: note.id,
-                        title: note.title || "Untitled",
-                        summary: note.summary || note.raw_text,
-                        tags: note.tags || [],
-                      },
-                      { x: centerX, y: centerY }
-                    )
+                    createNoteCard({
+                      noteId: note.id,
+                      title: note.title || "Untitled",
+                      summary: note.summary || note.raw_text,
+                      tags: note.tags || [],
+                    }, { x: centerX, y: centerY })
                   )
-                } catch { /* processing may not be done yet */ }
+                } catch { /* processing may not be done */ }
               }, 3000)
             } catch {
               addElements(
-                createNoteCard(
-                  {
-                    noteId: `manual-${Date.now()}`,
-                    title: cmd.content.slice(0, 50),
-                    summary: cmd.content,
-                    tags: [],
-                  },
-                  { x: centerX, y: centerY }
-                )
+                createNoteCard({
+                  noteId: `manual-${Date.now()}`,
+                  title: cmd.content.slice(0, 50),
+                  summary: cmd.content,
+                  tags: [],
+                }, { x: centerX, y: centerY })
               )
               addSystemMessage("Note card added (local only).")
             }
@@ -197,51 +233,41 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
 
       case "open-library": {
         if (!exc) return
-        const selectors = [
-          '[data-testid="toolbar-library"]',
-          ".library-button",
-          '[aria-label="Library"]',
-          ".ToolIcon__library",
-        ]
-        for (const sel of selectors) {
+        for (const sel of [
+          '[data-testid="toolbar-library"]', ".library-button",
+          '[aria-label="Library"]', ".ToolIcon__library",
+        ]) {
           const btn = document.querySelector<HTMLButtonElement>(sel)
           if (btn) { btn.click(); return }
         }
         try {
-          const apiAny = exc as unknown as {
-            toggleSidebar?: (opts: { name: string; force: boolean }) => void
-          }
-          apiAny.toggleSidebar?.({ name: "library", force: true })
+          (exc as unknown as { toggleSidebar?: (o: { name: string; force: boolean }) => void })
+            .toggleSidebar?.({ name: "library", force: true })
         } catch {
-          addSystemMessage("Click the book icon 📚 in the toolbar to open the library.")
+          addSystemMessage("Click 📚 in toolbar to open library.")
         }
         break
       }
 
       case "zoom": {
         if (!exc) return
-        const zoomAppState = exc.getAppState()
-        const currentZoom = getZoomValue(zoomAppState)
+        const zas = exc.getAppState()
+        const cz = getZoomValue(zas)
         if (cmd.direction === "fit") {
-          const elements = exc.getSceneElements()
-          if (elements.length > 0) {
-            exc.scrollToContent(elements[0], { fitToContent: true, animate: true })
-          }
+          const els = exc.getSceneElements()
+          if (els.length > 0) exc.scrollToContent(els[0], { fitToContent: true, animate: true })
           return
         }
-        const newZoom = cmd.direction === "in"
-          ? Math.min(5, currentZoom * 1.25)
-          : Math.max(0.1, currentZoom * 0.8)
+        const nz = cmd.direction === "in" ? Math.min(5, cz * 1.25) : Math.max(0.1, cz * 0.8)
         exc.updateScene({
-          appState: { zoom: { value: newZoom } } as unknown as Pick<AppState, keyof AppState>,
+          appState: { zoom: { value: nz } } as unknown as Pick<AppState, keyof AppState>,
         })
         break
       }
 
-      case "refresh": {
+      case "refresh":
         reload()
         break
-      }
     }
   }
 
@@ -264,11 +290,22 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   const handleExcalidrawAPI = useCallback(
     (apiRef: ExcalidrawImperativeAPI) => {
       excalidrawRef.current = apiRef as unknown as typeof excalidrawRef.current
+
+      // Immediately inject placeholder to suppress welcome screen
+      setTimeout(() => {
+        try {
+          const api = excalidrawRef.current
+          if (!api) return
+          const els = api.getSceneElements()
+          if (els.length === 0) {
+            api.updateScene({ elements: [createPlaceholderElement()] })
+          }
+        } catch { /* ignore */ }
+      }, 50)
     },
     [excalidrawRef]
   )
 
-  // ─── Loading ──────────────────────────────────
   if (loading) {
     return (
       <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
@@ -280,7 +317,6 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
     )
   }
 
-  // ─── Error ────────────────────────────────────
   if (error && !initialScene) {
     return (
       <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
@@ -292,16 +328,22 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
     )
   }
 
-  // Check if canvas is empty (no notes loaded)
-  const hasContent = initialScene && initialScene.elements.length > 0
+  // Check if canvas has real content (not just placeholder)
+  const hasRealContent = initialScene && initialScene.elements.some(
+    (el) => !(el.customData as Record<string, unknown>)?.type?.toString().startsWith("__placeholder")
+  )
 
   return (
     <div className="w-full h-full excalidraw-wrapper relative" data-excalidraw-host="true">
+      {/* Excalidraw with placeholder element to prevent welcome screen */}
       <Excalidraw
         excalidrawAPI={handleExcalidrawAPI}
         initialData={{
-          elements: [],
-          appState: { viewBackgroundColor: "#0e0e1a", theme: "dark" as const },
+          elements: [createPlaceholderElement() as any],
+          appState: {
+            viewBackgroundColor: "#0e0e1a",
+            theme: "dark" as const,
+          },
           files: undefined,
         }}
         onChange={handleChange}
@@ -311,28 +353,6 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         viewModeEnabled={false}
         zenModeEnabled={false}
       >
-        {/* Override Excalidraw's default welcome screen with our own */}
-        <WelcomeScreen>
-          <WelcomeScreen.Center>
-            <WelcomeScreen.Center.Logo>
-              <div className="text-[28px] font-extrabold text-white tracking-tight">
-                {current.pageName || "Canvas"}
-              </div>
-            </WelcomeScreen.Center.Logo>
-            <WelcomeScreen.Center.Heading>
-              Start drawing or use commands to add notes
-            </WelcomeScreen.Center.Heading>
-            <WelcomeScreen.Center.Menu>
-              <WelcomeScreen.Center.MenuItemLink href="#">
-                Type /add to create a note card
-              </WelcomeScreen.Center.MenuItemLink>
-              <WelcomeScreen.Center.MenuItemLink href="#">
-                Type /capture to save knowledge
-              </WelcomeScreen.Center.MenuItemLink>
-            </WelcomeScreen.Center.Menu>
-          </WelcomeScreen.Center>
-        </WelcomeScreen>
-
         <MainMenu>
           <MainMenu.DefaultItems.LoadScene />
           <MainMenu.DefaultItems.SaveAsImage />
@@ -342,32 +362,22 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         </MainMenu>
       </Excalidraw>
 
-      {/* Empty state overlay — shown when canvas has no note content */}
-      {!hasContent && (
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-[5]">
-          <div className="pointer-events-auto text-center max-w-[320px]">
-            <div className="glass rounded-2xl p-8 relative overflow-hidden">
-              <div className="relative z-10">
+      {/* Custom empty state overlay */}
+      {!hasRealContent && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 5 }}>
+          <div className="pointer-events-auto">
+            <div className="glass rounded-2xl p-8 relative overflow-hidden max-w-[320px]">
+              <div className="relative z-10 text-center">
                 <div className="w-14 h-14 rounded-2xl bg-[var(--accent-subtle)] flex items-center justify-center mx-auto mb-4">
                   <MousePointer2 size={24} className="text-[var(--accent)]" />
                 </div>
-                <h3 className="text-[16px] font-bold text-white mb-2">
-                  Empty Canvas
-                </h3>
+                <h3 className="text-[16px] font-bold text-white mb-2">Empty Canvas</h3>
                 <p className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed mb-5">
-                  Capture notes to populate this canvas, or draw freely with the tools above.
+                  Capture notes or draw freely with the tools above.
                 </p>
                 <div className="flex flex-col gap-2 text-left">
-                  <HintRow
-                    icon={<StickyNote size={13} />}
-                    command="/add sticky: hello"
-                    label="Add a sticky note"
-                  />
-                  <HintRow
-                    icon={<MessageSquare size={13} />}
-                    command="/capture some text"
-                    label="Capture knowledge"
-                  />
+                  <HintRow icon={<StickyNote size={13} />} command="/add sticky: hello" label="Add a sticky" />
+                  <HintRow icon={<MessageSquare size={13} />} command="/capture text" label="Capture note" />
                 </div>
               </div>
             </div>
@@ -378,22 +388,12 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   )
 }
 
-function HintRow({
-  icon,
-  command,
-  label,
-}: {
-  icon: React.ReactNode
-  command: string
-  label: string
-}) {
+function HintRow({ icon, command, label }: { icon: React.ReactNode; command: string; label: string }) {
   return (
     <div className="flex items-center gap-2.5 py-1.5">
       <div className="text-[var(--accent)]">{icon}</div>
       <div>
-        <code className="text-[10px] font-mono text-[var(--accent-light)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded">
-          {command}
-        </code>
+        <code className="text-[10px] font-mono text-[var(--accent-light)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded">{command}</code>
         <span className="text-[10px] text-[var(--glass-text-muted)] ml-2">{label}</span>
       </div>
     </div>
