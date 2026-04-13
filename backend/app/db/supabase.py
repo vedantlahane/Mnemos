@@ -43,12 +43,14 @@ class NotesDB:
             return None
 
     async def list_notes(
-        self, page: int = 1, limit: int = 20, tag: str = None, page_id: str = None
+        self, page: int = 1, limit: int = 20, tag: str = None,
+        page_id: str = None, user_id: str = None,
     ) -> dict:
         _tag = tag
         _page_id = page_id
         _page = page
         _limit = limit
+        _user_id = user_id
 
         def _query():
             q = client.table("notes").select("*", count="exact")
@@ -56,6 +58,8 @@ class NotesDB:
                 q = q.contains("tags", [_tag])
             if _page_id:
                 q = q.eq("page_id", _page_id)
+            if _user_id:
+                q = q.eq("user_id", _user_id)
             q = q.order("created_at", desc=True)
             q = q.range((_page - 1) * _limit, _page * _limit - 1)
             return q.execute()
@@ -168,13 +172,35 @@ class NotesDB:
         result = await asyncio.to_thread(
             lambda: client.table("notes")
             .select(
-                "id, title, tags, embedding, canvas_x, canvas_y, cluster_id, centrality, is_bridge"
+                "id, title, tags, embedding, canvas_x, canvas_y, "
+                "cluster_id, centrality, is_bridge, summary, raw_text"
             )
             .eq("page_id", _pid)
             .not_.is_("embedding", "null")
             .execute()
         )
         return result.data or []
+
+    async def get_all_notes_with_embeddings(self) -> list:
+        result = await asyncio.to_thread(
+            lambda: client.table("notes")
+            .select("id, title, tags, embedding, page_id, summary, raw_text")
+            .not_.is_("embedding", "null")
+            .execute()
+        )
+        return result.data or []
+
+    async def count_notes(self, page_id: str = None) -> int:
+        _pid = page_id
+
+        def _query():
+            q = client.table("notes").select("id", count="exact")
+            if _pid:
+                q = q.eq("page_id", _pid)
+            return q.execute()
+
+        result = await asyncio.to_thread(_query)
+        return result.count or 0
 
     # ── Pages ─────────────────────────────────────────
 
@@ -507,7 +533,6 @@ class NotesDB:
 
     async def delete_clusters_for_page(self, page_id: str) -> None:
         _pid = page_id
-        # First unset cluster_id on notes
         notes = await self.get_notes_for_page(_pid)
         for n in notes:
             if n.get("cluster_id"):
@@ -582,15 +607,17 @@ class NotesDB:
         )
         return result.data[0] if result.data else {}
 
-    async def list_chats(self, limit: int = 20) -> list:
+    async def list_chats(self, limit: int = 20, user_id: str = None) -> list:
         _lim = limit
-        result = await asyncio.to_thread(
-            lambda: client.table("chat_history")
-            .select("*")
-            .order("updated_at", desc=True)
-            .limit(_lim)
-            .execute()
-        )
+        _uid = user_id
+
+        def _query():
+            q = client.table("chat_history").select("*").order("updated_at", desc=True).limit(_lim)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
+        result = await asyncio.to_thread(_query)
         return result.data or []
 
     async def get_chat(self, chat_id: str) -> dict | None:
@@ -615,6 +642,166 @@ class NotesDB:
             .eq("id", _cid)
             .execute()
         )
+
+    # ── Users ─────────────────────────────────────────
+
+    async def upsert_user(
+        self,
+        google_id: str,
+        email: str,
+        name: str = None,
+        avatar_url: str = None,
+    ) -> dict:
+        _gid = google_id
+        _email = email
+        _name = name
+        _avatar = avatar_url
+
+        # Check if user exists
+        existing = await asyncio.to_thread(
+            lambda: client.table("users")
+            .select("*")
+            .eq("google_id", _gid)
+            .maybe_single()
+            .execute()
+        )
+
+        if existing and existing.data:
+            # Update existing
+            user_id = existing.data["id"]
+            updates = {"updated_at": datetime.utcnow().isoformat()}
+            if _name:
+                updates["name"] = _name
+            if _avatar:
+                updates["avatar_url"] = _avatar
+            if _email:
+                updates["email"] = _email
+            _uid = user_id
+            result = await asyncio.to_thread(
+                lambda: client.table("users")
+                .update(updates)
+                .eq("id", _uid)
+                .execute()
+            )
+            return result.data[0] if result.data else existing.data
+        else:
+            # Insert new
+            result = await asyncio.to_thread(
+                lambda: client.table("users")
+                .insert({
+                    "google_id": _gid,
+                    "email": _email,
+                    "name": _name,
+                    "avatar_url": _avatar,
+                })
+                .execute()
+            )
+            return result.data[0]
+
+    async def get_user(self, user_id: str) -> dict | None:
+        _uid = user_id
+        try:
+            result = await asyncio.to_thread(
+                lambda: client.table("users")
+                .select("*")
+                .eq("id", _uid)
+                .maybe_single()
+                .execute()
+            )
+            return result.data
+        except Exception:
+            return None
+
+    async def get_user_by_google_id(self, google_id: str) -> dict | None:
+        _gid = google_id
+        try:
+            result = await asyncio.to_thread(
+                lambda: client.table("users")
+                .select("*")
+                .eq("google_id", _gid)
+                .maybe_single()
+                .execute()
+            )
+            return result.data
+        except Exception:
+            return None
+
+    # ── Settings ──────────────────────────────────────
+
+    async def get_settings(self, user_id: str = None) -> dict | None:
+        _uid = user_id
+        try:
+            def _query():
+                q = client.table("settings").select("*")
+                if _uid:
+                    q = q.eq("user_id", _uid)
+                else:
+                    q = q.is_("user_id", "null")
+                return q.maybe_single().execute()
+
+            result = await asyncio.to_thread(_query)
+            return result.data
+        except Exception:
+            return None
+
+    async def upsert_settings(self, user_id: str = None, **kwargs) -> dict:
+        _uid = user_id
+        existing = await self.get_settings(user_id=user_id)
+
+        updates = {k: v for k, v in kwargs.items() if v is not None}
+        updates["updated_at"] = datetime.utcnow().isoformat()
+
+        if existing:
+            _eid = existing["id"]
+            result = await asyncio.to_thread(
+                lambda: client.table("settings")
+                .update(updates)
+                .eq("id", _eid)
+                .execute()
+            )
+            return result.data[0] if result.data else existing
+        else:
+            insert_data = {**updates}
+            if _uid:
+                insert_data["user_id"] = _uid
+            result = await asyncio.to_thread(
+                lambda: client.table("settings")
+                .insert(insert_data)
+                .execute()
+            )
+            return result.data[0]
+
+    # ── Agent Runs ────────────────────────────────────
+
+    async def insert_agent_run(self, **kwargs) -> dict:
+        result = await asyncio.to_thread(
+            lambda: client.table("agent_runs").insert(kwargs).execute()
+        )
+        return result.data[0]
+
+    async def update_agent_run(self, run_id: str, **kwargs) -> dict:
+        updates = {k: v for k, v in kwargs.items() if v is not None}
+        _rid = run_id
+        result = await asyncio.to_thread(
+            lambda: client.table("agent_runs")
+            .update(updates)
+            .eq("id", _rid)
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+
+    async def list_agent_runs(self, agent_type: str = None, limit: int = 20) -> list:
+        _at = agent_type
+        _lim = limit
+
+        def _query():
+            q = client.table("agent_runs").select("*").order("started_at", desc=True).limit(_lim)
+            if _at:
+                q = q.eq("agent_type", _at)
+            return q.execute()
+
+        result = await asyncio.to_thread(_query)
+        return result.data or []
 
     # ── Stats ─────────────────────────────────────────
 

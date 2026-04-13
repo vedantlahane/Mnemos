@@ -1,13 +1,15 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.models.schemas import ChatRequest
-from app.services import llm, embeddings
+from app.services import embeddings
 from app.db.supabase import db
+from app.llm import router as llm
+from app.auth.dependencies import get_optional_user_id
 
 router = APIRouter()
 
 
 @router.post("/chat")
-async def chat_with_notes(payload: ChatRequest):
+async def chat_with_notes(payload: ChatRequest, user_id: str = Depends(get_optional_user_id)):
     query_embedding = await embeddings.generate_query(payload.question)
 
     # Scoped or global search
@@ -18,12 +20,10 @@ async def chat_with_notes(payload: ChatRequest):
             limit=5,
             threshold=0.60,
         )
-        # If page-scoped search returns too few, fall back to global
         if len(relevant) < 2:
             global_results = await db.vector_search(
                 query_embedding, limit=5, threshold=0.65
             )
-            # Merge, deduplicate
             seen = {r["id"] for r in relevant}
             for r in global_results:
                 if r["id"] not in seen:
@@ -38,10 +38,10 @@ async def chat_with_notes(payload: ChatRequest):
         return {
             "answer": "I couldn't find any related notes in your knowledge base.",
             "sources": [],
-            "follow_ups": [],
+            "follow_ups": ["What topics have I captured notes on?", "Show me my recent notes"],
         }
 
-    # Graph expansion: follow edges from retrieved notes for extra context
+    # Graph expansion
     expanded_ids = set(r["id"] for r in relevant)
     extra_context_notes = []
     for r in relevant[:3]:
@@ -57,7 +57,7 @@ async def chat_with_notes(payload: ChatRequest):
         except Exception:
             pass
 
-    # Build context string
+    # Build context
     context_parts = []
     for n in relevant:
         context_parts.append(
@@ -74,7 +74,6 @@ async def chat_with_notes(payload: ChatRequest):
         )
     context = "\n\n---\n\n".join(context_parts)
 
-    # Get page name for context
     page_context = None
     if payload.context_type == "page" and payload.page_id:
         try:
@@ -91,7 +90,6 @@ async def chat_with_notes(payload: ChatRequest):
         page_context=page_context,
     )
 
-    # Generate follow-up suggestions
     follow_ups = []
     try:
         follow_ups = await llm.generate_follow_ups(payload.question, answer)
@@ -102,7 +100,7 @@ async def chat_with_notes(payload: ChatRequest):
         {
             "id": n["id"],
             "title": n["title"],
-            "similarity": n["similarity"],
+            "similarity": n.get("similarity", 0.0),
         }
         for n in relevant
     ]

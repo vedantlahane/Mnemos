@@ -2,13 +2,13 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-# ── Existing (modified) ──────────────────────────────
+# ── Capture / Chat ────────────────────────────────────
 
 class CaptureRequest(BaseModel):
     text: str
     source_url: Optional[str] = None
     page_title: Optional[str] = None
-    capture_type: str = "highlight"
+    capture_type: str = "manual"
     page_hint: Optional[str] = None
     custom_command: Optional[str] = None
 
@@ -25,14 +25,24 @@ class ContextRequest(BaseModel):
     text: str
 
 
+# ── Notes ─────────────────────────────────────────────
+
 class NoteUpdate(BaseModel):
     title: Optional[str] = None
     summary: Optional[str] = None
     tags: Optional[list[str]] = None
     tasks: Optional[list[str]] = None
+    entities: Optional[list[str]] = None
     page_id: Optional[str] = None
     canvas_x: Optional[float] = None
     canvas_y: Optional[float] = None
+    canvas_width: Optional[int] = None
+    canvas_height: Optional[int] = None
+    cluster_id: Optional[str] = None
+
+
+class NoteMoveRequest(BaseModel):
+    page_id: str
 
 
 class ProcessedCapture(BaseModel):
@@ -43,7 +53,7 @@ class ProcessedCapture(BaseModel):
     entities: list[str]
 
 
-# ── New models ────────────────────────────────────────
+# ── Pages ─────────────────────────────────────────────
 
 class PageCreate(BaseModel):
     name: str
@@ -62,6 +72,8 @@ class PageUpdate(BaseModel):
     is_archived: Optional[bool] = None
 
 
+# ── Edges ─────────────────────────────────────────────
+
 class EdgeCreate(BaseModel):
     source_id: str
     target_id: str
@@ -70,6 +82,14 @@ class EdgeCreate(BaseModel):
     strength: float = 0.0
     created_by: str = "user"
 
+
+class EdgeClassification(BaseModel):
+    edge_type: str
+    label: Optional[str] = None
+    confidence: float
+
+
+# ── Clusters ──────────────────────────────────────────
 
 class ClusterCreate(BaseModel):
     page_id: str
@@ -83,6 +103,8 @@ class ClusterUpdate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
 
+
+# ── Canvas Elements ───────────────────────────────────
 
 class ElementCreate(BaseModel):
     element_type: str
@@ -106,9 +128,7 @@ class ElementUpdate(BaseModel):
     style: Optional[dict] = None
 
 
-class NoteMoveRequest(BaseModel):
-    page_id: str
-
+# ── Chat History ──────────────────────────────────────
 
 class ChatSave(BaseModel):
     context_type: str = "home"
@@ -116,6 +136,8 @@ class ChatSave(BaseModel):
     messages: list[dict]
     title: Optional[str] = None
 
+
+# ── Canvas State ──────────────────────────────────────
 
 class CanvasState(BaseModel):
     page: dict
@@ -125,6 +147,8 @@ class CanvasState(BaseModel):
     clusters: list[dict]
     viewport: dict
 
+
+# ── Curator ───────────────────────────────────────────
 
 class CuratorReport(BaseModel):
     potential_duplicates: list[dict]
@@ -141,17 +165,13 @@ class CuratorAction(BaseModel):
     params: dict
 
 
+# ── Routing / Stats ───────────────────────────────────
+
 class PageRoutingResult(BaseModel):
     page_id: str
     page_name: str
     confidence: float
     reason: str
-
-
-class EdgeClassification(BaseModel):
-    edge_type: str
-    label: Optional[str] = None
-    confidence: float
 
 
 class StatsResponse(BaseModel):
