@@ -1,19 +1,33 @@
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import type { Note, StreamItem } from "../types"
-import { FileText, ExternalLink, Tag, CheckSquare, Link, Clock, Loader2 } from "lucide-react"
+import {
+  FileText,
+  ExternalLink,
+  Tag,
+  CheckSquare,
+  Link,
+  Clock,
+  Loader2,
+} from "lucide-react"
 import { GlassBadge } from "../glass/GlassBadge"
 
 export default function NoteDetailBlock({ item }: { item: StreamItem }) {
-  const [note, setNote] = useState<Note | null>((item.blockData as any)?.note || null)
+  const [note, setNote] = useState<Note | null>(
+    (item.blockData as any)?.note || null
+  )
   const [loading, setLoading] = useState(!note)
 
   useEffect(() => {
     if (note) return
     const noteId = item.metadata?.noteIds?.[0]
-    if (!noteId) return
+    if (!noteId) {
+      setLoading(false)
+      return
+    }
 
-    api.getNote(noteId)
+    api
+      .getNote(noteId)
       .then(setNote)
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -22,7 +36,10 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
   if (loading) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+        <Loader2
+          className="animate-spin text-[var(--glass-text-muted)]"
+          size={20}
+        />
       </div>
     )
   }
@@ -35,12 +52,13 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
     )
   }
 
-  const statusColors: Record<string, "success" | "warning" | "info" | "error"> = {
-    done: "success",
-    pending: "warning",
-    processing: "info",
-    failed: "error",
-  }
+  const statusColors: Record<string, "success" | "warning" | "info" | "error"> =
+    {
+      done: "success",
+      pending: "warning",
+      processing: "info",
+      failed: "error",
+    }
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
@@ -48,7 +66,9 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-2.5">
           <FileText size={18} className="text-[var(--accent)]" />
-          <h3 className="text-[16px] font-bold text-white">{note.title || "Untitled"}</h3>
+          <h3 className="text-[16px] font-bold text-white">
+            {note.title || "Untitled"}
+          </h3>
         </div>
         <GlassBadge variant={statusColors[note.processing_status] || "info"}>
           {note.processing_status}
@@ -73,7 +93,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       </div>
 
       {/* Tags */}
-      {note.tags.length > 0 && (
+      {note.tags && note.tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {note.tags.map((t) => (
             <span
@@ -87,29 +107,37 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       )}
 
       {/* Tasks */}
-      {note.tasks.length > 0 && (
+      {note.tasks && note.tasks.length > 0 && (
         <div className="mb-4">
           <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Tasks
           </div>
           {note.tasks.map((task, i) => (
             <div key={i} className="flex items-start gap-2 py-1">
-              <CheckSquare size={13} className="text-[var(--green)] mt-0.5 shrink-0" />
-              <span className="text-[12px] text-[var(--glass-text-dim)]">{task}</span>
+              <CheckSquare
+                size={13}
+                className="text-[var(--green)] mt-0.5 shrink-0"
+              />
+              <span className="text-[12px] text-[var(--glass-text-dim)]">
+                {task}
+              </span>
             </div>
           ))}
         </div>
       )}
 
       {/* Entities */}
-      {note.entities.length > 0 && (
+      {note.entities && note.entities.length > 0 && (
         <div className="mb-4">
           <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Entities
           </div>
           <div className="flex flex-wrap gap-1.5">
             {note.entities.map((e) => (
-              <span key={e} className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--glass-text-dim)]">
+              <span
+                key={e}
+                className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--glass-text-dim)]"
+              >
                 {e}
               </span>
             ))}
@@ -117,7 +145,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
         </div>
       )}
 
-      {/* Metadata footer */}
+      {/* Footer */}
       <div className="flex items-center gap-4 pt-3 border-t border-[var(--glass-border)] text-[11px] text-[var(--glass-text-muted)]">
         <div className="flex items-center gap-1">
           <Clock size={11} />

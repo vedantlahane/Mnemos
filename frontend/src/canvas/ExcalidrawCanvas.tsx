@@ -1,6 +1,10 @@
 import { useCallback, useEffect } from "react"
-import { Excalidraw, MainMenu, WelcomeScreen } from "@excalidraw/excalidraw"
-import type { ExcalidrawImperativeAPI, AppState, BinaryFiles } from "@excalidraw/excalidraw/types"
+import { Excalidraw, MainMenu } from "@excalidraw/excalidraw"
+import type {
+  ExcalidrawImperativeAPI,
+  AppState,
+  BinaryFiles,
+} from "@excalidraw/excalidraw/types"
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import { Loader2 } from "lucide-react"
 import { useExcalidraw } from "./useExcalidraw"
@@ -11,6 +15,13 @@ import "@excalidraw/excalidraw/index.css"
 
 interface Props {
   pageId: string
+}
+
+interface CanvasAddDetail {
+  type: "sticky" | "note"
+  content: string
+  x?: number
+  y?: number
 }
 
 export default function ExcalidrawCanvas({ pageId }: Props) {
@@ -37,7 +48,9 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       const matches = searchElements(query)
       if (matches.length > 0) {
         scrollToElement(matches[0].id)
-        addSystemMessage(`Found ${matches.length} match${matches.length > 1 ? "es" : ""} on canvas.`)
+        addSystemMessage(
+          `Found ${matches.length} match${matches.length > 1 ? "es" : ""} on canvas.`
+        )
       } else {
         addSystemMessage(`No matches for "${query}" on canvas.`)
       }
@@ -51,11 +64,14 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       if (!drawingApi) return
 
       const appState = drawingApi.getAppState()
-      const zoomValue = (appState.zoom && typeof appState.zoom === 'object' && 'value' in appState.zoom) 
-        ? (appState.zoom as any).value 
-        : appState.zoom || 1
-      const centerX = detail.x ?? (-appState.scrollX + window.innerWidth / 2) / zoomValue
-      const centerY = detail.y ?? (-appState.scrollY + window.innerHeight / 2) / zoomValue
+      const zoomValue =
+        appState.zoom && typeof appState.zoom === "object" && "value" in appState.zoom
+          ? (appState.zoom as any).value
+          : (appState.zoom as number) || 1
+      const centerX =
+        detail.x ?? (-appState.scrollX + window.innerWidth / 2) / zoomValue
+      const centerY =
+        detail.y ?? (-appState.scrollY + window.innerHeight / 2) / zoomValue
 
       if (detail.type === "sticky") {
         addElements(createSticky(detail.content, centerX, centerY))
@@ -87,22 +103,34 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   }, [addElements, addSystemMessage, excalidrawRef, scrollToElement, searchElements])
 
   const handleChange = useCallback(
-    (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
+    (
+      elements: readonly OrderedExcalidrawElement[],
+      appState: AppState,
+      files: BinaryFiles
+    ) => {
       saveScene(elements, appState, files)
     },
     [saveScene]
   )
 
-  const handleExcalidrawAPI = useCallback((api: ExcalidrawImperativeAPI) => {
-    excalidrawRef.current = api
-  }, [])
+  const handleExcalidrawAPI = useCallback(
+    (api: ExcalidrawImperativeAPI) => {
+      excalidrawRef.current = api
+    },
+    [excalidrawRef]
+  )
 
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
+      <div
+        className="w-full h-full flex items-center justify-center"
+        style={{ background: "#0e0e1a" }}
+      >
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
-          <span className="text-[13px] text-[var(--glass-text-dim)]">Loading canvas...</span>
+          <span className="text-[13px] text-[var(--glass-text-dim)]">
+            Loading canvas...
+          </span>
         </div>
       </div>
     )
@@ -110,10 +138,16 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
 
   if (error && !initialScene) {
     return (
-      <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
+      <div
+        className="w-full h-full flex items-center justify-center"
+        style={{ background: "#0e0e1a" }}
+      >
         <div className="text-center">
           <p className="text-[var(--red)] mb-2">{error}</p>
-          <button onClick={reload} className="text-[var(--accent)] underline text-sm">
+          <button
+            onClick={reload}
+            className="text-[var(--accent)] underline text-sm"
+          >
             Retry
           </button>
         </div>
@@ -129,14 +163,12 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
           width: 100%;
           overflow: hidden;
         }
-        
         .excalidraw-wrapper .excalidraw {
           --color-primary: #6366f1;
           --color-primary-light: #818cf8;
           --color-brand: #6366f1;
           --color-brand-light: #818cf8;
         }
-        
         .excalidraw-wrapper .excalidraw canvas {
           background: #0e0e1a !important;
         }
@@ -151,11 +183,17 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
                 appState: {
                   ...initialScene.appState,
                   viewBackgroundColor: "#0e0e1a",
-                  theme: "dark",
+                  theme: "dark" as const,
                 },
                 files: initialScene.files,
               }
-            : undefined
+            : {
+                elements: [],
+                appState: {
+                  viewBackgroundColor: "#0e0e1a",
+                  theme: "dark" as const,
+                },
+              }
         }
         onChange={handleChange}
         theme="dark"
@@ -174,11 +212,4 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       </Excalidraw>
     </div>
   )
-}
-
-interface CanvasAddDetail {
-  type: "sticky" | "note"
-  content: string
-  x?: number
-  y?: number
 }

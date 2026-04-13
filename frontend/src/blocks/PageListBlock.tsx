@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
-import type { Page } from "../types"
 import { useAppContext } from "../hooks/useAppContext"
-import { Loader2, Trash2 } from "lucide-react"
+import type { Page } from "../types"
+import { Layers, Loader2, Trash2 } from "lucide-react"
 import { motion } from "framer-motion"
-import { useStream } from "../hooks/useStream"
 
 export default function PageListBlock() {
   const [pages, setPages] = useState<Page[]>([])
   const [loading, setLoading] = useState(true)
   const { switchTo } = useAppContext()
-  const { addSystemMessage } = useStream()
 
   useEffect(() => {
     api.listPages()
@@ -19,13 +17,11 @@ export default function PageListBlock() {
       .finally(() => setLoading(false))
   }, [])
 
-  async function handleDelete(e: React.MouseEvent, page: Page) {
-    e.stopPropagation()
-    if (page.name === "Uncategorized") return
+  async function handleDelete(id: string, name: string) {
+    if (name === "Uncategorized") return
     try {
-      await api.deletePage(page.id)
-      setPages((prev) => prev.filter((p) => p.id !== page.id))
-      addSystemMessage(`Deleted page: ${page.name}. Notes moved to Uncategorized.`)
+      await api.deletePage(id)
+      setPages((prev) => prev.filter((p) => p.id !== id))
     } catch (err) {
       console.error(err)
     }
@@ -39,44 +35,55 @@ export default function PageListBlock() {
     )
   }
 
+  if (pages.length === 0) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--glass-text-dim)]">
+        No pages found. Use <code className="font-mono text-[var(--accent)]">/page create &lt;name&gt;</code> to create one.
+      </div>
+    )
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-3">
-        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)]">
-          All Pages
-          <span className="ml-2 text-[var(--glass-text-dim)]">({pages.length})</span>
-        </div>
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-3">
+        Pages
+        <span className="ml-2 text-[var(--glass-text-dim)]">({pages.length})</span>
       </div>
-
       <div className="grid grid-cols-2 gap-3">
         {pages.map((page, i) => (
           <motion.div
             key={page.id}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.04 }}
+            transition={{ delay: i * 0.03 }}
+            className="glass-surface-2 p-4 rounded-xl glass-hover cursor-pointer relative group"
             onClick={() => switchTo("page", page.id, page.name)}
-            className="glass-surface-3 p-4 rounded-xl glass-hover cursor-pointer flex items-center justify-between group"
           >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="text-xl shrink-0">{page.icon || "📄"}</div>
-              <div className="min-w-0">
-                <div className="text-[13px] font-semibold text-white truncate">{page.name}</div>
-                <div className="text-[11px] text-[var(--glass-text-muted)]">
-                  {page.note_count} note{page.note_count !== 1 ? "s" : ""}
-                  {page.description && (
-                    <span className="ml-1 hidden sm:inline">• {page.description.slice(0, 40)}</span>
-                  )}
+            <div className="flex items-center gap-2.5 mb-2">
+              <span className="text-lg">{page.icon || "📄"}</span>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-[13px] text-white truncate">
+                  {page.name}
+                </div>
+                <div className="text-[10px] text-[var(--glass-text-muted)]">
+                  {page.note_count || 0} note{(page.note_count || 0) !== 1 ? "s" : ""}
                 </div>
               </div>
             </div>
-
+            {page.description && (
+              <div className="text-[11px] text-[var(--glass-text-dim)] line-clamp-2">
+                {page.description}
+              </div>
+            )}
             {page.name !== "Uncategorized" && (
               <button
-                onClick={(e) => handleDelete(e, page)}
-                className="text-[var(--glass-text-muted)] hover:text-[var(--red)] transition-colors opacity-0 group-hover:opacity-100 p-1"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDelete(page.id, page.name)
+                }}
+                className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--glass-text-muted)] hover:text-[var(--red)] p-1"
               >
-                <Trash2 size={13} />
+                <Trash2 size={12} />
               </button>
             )}
           </motion.div>

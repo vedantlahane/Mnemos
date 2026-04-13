@@ -1,0 +1,4109 @@
+=== FILE: frontend\src\api\client.ts ===
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api"
+
+async function request(path: string, options?: RequestInit) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return res.json()
+}
+
+export const api = {
+  // ─── Notes ──────────────────────────────────────
+  listNotes: (page = 1, limit = 20, tag?: string, pageId?: string) =>
+    request(`/notes?page=${page}&limit=${limit}${tag ? `&tag=${tag}` : ""}${pageId ? `&page_id=${pageId}` : ""}`),
+  getNote: (id: string) => request(`/notes/${id}`),
+  updateNote: (id: string, data: Record<string, unknown>) =>
+    request(`/notes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteNote: (id: string) =>
+    request(`/notes/${id}`, { method: "DELETE" }),
+  retryNote: (id: string) =>
+    request(`/notes/${id}/retry`, { method: "POST" }),
+  moveNote: (id: string, pageId: string) =>
+    request(`/notes/${id}/move`, { method: "POST", body: JSON.stringify({ page_id: pageId }) }),
+
+  // ─── Capture ────────────────────────────────────
+  capture: (data: { text: string; source_url?: string; page_title?: string; capture_type?: string; page_hint?: string; custom_command?: string }) =>
+    request("/capture", { method: "POST", body: JSON.stringify(data) }),
+
+  // ─── Pages ──────────────────────────────────────
+  listPages: () => request("/pages"),
+  createPage: (data: { name: string; description?: string; icon?: string; color?: string }) =>
+    request("/pages", { method: "POST", body: JSON.stringify(data) }),
+  getPage: (id: string) => request(`/pages/${id}`),
+  updatePage: (id: string, data: Record<string, unknown>) =>
+    request(`/pages/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deletePage: (id: string) =>
+    request(`/pages/${id}`, { method: "DELETE" }),
+  getPageCanvas: (id: string) => request(`/pages/${id}/canvas`),
+  savePageViewport: (id: string, viewport: { x: number; y: number; zoom: number }) =>
+    request(`/pages/${id}/canvas`, { method: "PUT", body: JSON.stringify({ viewport }) }),
+  triggerPageLayout: (id: string) =>
+    request(`/pages/${id}/layout`, { method: "POST" }),
+
+  // ─── Edges ──────────────────────────────────────
+  listEdges: (pageId?: string, noteId?: string) =>
+    request(`/edges?${pageId ? `page_id=${pageId}` : ""}${noteId ? `&note_id=${noteId}` : ""}`),
+  createEdge: (data: { source_id: string; target_id: string; edge_type: string; label?: string }) =>
+    request("/edges", { method: "POST", body: JSON.stringify(data) }),
+  deleteEdge: (id: string) =>
+    request(`/edges/${id}`, { method: "DELETE" }),
+
+  // ─── Clusters ───────────────────────────────────
+  listClusters: (pageId?: string) =>
+    request(`/clusters${pageId ? `?page_id=${pageId}` : ""}`),
+  createCluster: (data: { page_id: string; label: string; description?: string; color?: string }) =>
+    request("/clusters", { method: "POST", body: JSON.stringify(data) }),
+  updateCluster: (id: string, data: Record<string, unknown>) =>
+    request(`/clusters/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteCluster: (id: string) =>
+    request(`/clusters/${id}`, { method: "DELETE" }),
+
+  // ─── Canvas Elements ────────────────────────────
+  listElements: (pageId: string) =>
+    request(`/pages/${pageId}/elements`),
+  createElement: (pageId: string, data: Record<string, unknown>) =>
+    request(`/pages/${pageId}/elements`, { method: "POST", body: JSON.stringify(data) }),
+  updateElement: (id: string, data: Record<string, unknown>) =>
+    request(`/elements/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteElement: (id: string) =>
+    request(`/elements/${id}`, { method: "DELETE" }),
+
+  // ─── Search ─────────────────────────────────────
+  search: (q: string, limit = 10, pageId?: string) =>
+    request(`/search?q=${encodeURIComponent(q)}&limit=${limit}${pageId ? `&page_id=${pageId}` : ""}`),
+  searchCanvas: (pageId: string, query: string) =>
+    request("/search/canvas", { method: "POST", body: JSON.stringify({ page_id: pageId, query }) }),
+
+  // ─── Chat ───────────────────────────────────────
+  chat: (question: string, history: Array<{ role: string; content: string }>, contextType = "home", pageId?: string) =>
+    request("/chat", {
+      method: "POST",
+      body: JSON.stringify({ question, history, context_type: contextType, page_id: pageId }),
+    }),
+
+  // ─── Tags ───────────────────────────────────────
+  getTags: () => request("/tags"),
+
+  // ─── Stats ──────────────────────────────────────
+  getStats: () => request("/stats"),
+  getPageStats: (pageId: string) => request(`/pages/${pageId}/stats`),
+
+  // ─── History ────────────────────────────────────
+  listHistory: (limit = 20) => request(`/history?limit=${limit}`),
+  getHistory: (id: string) => request(`/history/${id}`),
+  saveHistory: (data: { context_type: string; context_id?: string; messages: any[]; title?: string }) =>
+    request("/history", { method: "POST", body: JSON.stringify(data) }),
+  deleteHistory: (id: string) =>
+    request(`/history/${id}`, { method: "DELETE" }),
+
+  // ─── Curator ────────────────────────────────────
+  curatorScan: () =>
+    request("/curator/scan", { method: "POST" }),
+  curatorApply: (action: { action_type: string; params: Record<string, unknown> }) =>
+    request("/curator/apply", { method: "POST", body: JSON.stringify(action) }),
+
+  // ─── Health ─────────────────────────────────────
+  health: () => fetch(`${API_BASE.replace("/api", "")}/health`).then(r => r.json()).catch(() => null),
+}
+
+
+=== FILE: frontend\src\blocks\CuratorReportBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import { useStream } from "../hooks/useStream"
+import type { CuratorReport, StreamItem } from "../types"
+import { AlertTriangle, CheckCircle, Link, Trash2, Loader2 } from "lucide-react"
+
+export default function CuratorReportBlock({}: { item: StreamItem }) {
+  const [report, setReport] = useState<CuratorReport | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [applying, setApplying] = useState<string | null>(null)
+  const { addSystemMessage } = useStream()
+
+  useEffect(() => {
+    api.curatorScan()
+      .then(setReport)
+      .catch((err) => {
+        console.error(err)
+        setReport(null)
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function applyAction(action: { action_type: string; params: Record<string, unknown>; reason: string }) {
+    setApplying(action.action_type)
+    try {
+      await api.curatorApply({ action_type: action.action_type, params: action.params })
+      addSystemMessage(`✓ Applied: ${action.reason}`)
+    } catch {
+      addSystemMessage(`✗ Failed to apply: ${action.reason}`)
+    } finally {
+      setApplying(null)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
+        <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
+        <span className="text-[13px] text-[var(--glass-text-dim)]">Running curator scan...</span>
+      </div>
+    )
+  }
+
+  if (!report) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--red)]">
+        Curator scan failed. Backend may not support this endpoint yet.
+      </div>
+    )
+  }
+
+  const hasIssues =
+    report.potential_duplicates.length +
+    report.orphan_notes.length +
+    report.stale_notes.length +
+    report.missing_connections.length > 0
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
+        Curator Report
+      </div>
+
+      {!hasIssues ? (
+        <div className="flex items-center gap-2 text-[var(--green)]">
+          <CheckCircle size={16} />
+          <span className="text-[13px] font-semibold">Workspace is well maintained. No issues found.</span>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {/* Duplicates */}
+          {report.potential_duplicates.length > 0 && (
+            <Section title={`${report.potential_duplicates.length} Potential Duplicate${report.potential_duplicates.length > 1 ? "s" : ""}`} icon={<AlertTriangle size={14} className="text-[var(--amber)]" />}>
+              {report.potential_duplicates.map((d, i) => (
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
+                  Similarity {Math.round(d.similarity * 100)}% — {d.reason}
+                </div>
+              ))}
+            </Section>
+          )}
+
+          {/* Orphans */}
+          {report.orphan_notes.length > 0 && (
+            <Section title={`${report.orphan_notes.length} Orphan Note${report.orphan_notes.length > 1 ? "s" : ""}`} icon={<Trash2 size={14} className="text-[var(--red)]" />}>
+              {report.orphan_notes.map((o, i) => (
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
+                  "{o.title}" — {o.suggestion}
+                </div>
+              ))}
+            </Section>
+          )}
+
+          {/* Missing connections */}
+          {report.missing_connections.length > 0 && (
+            <Section title={`${report.missing_connections.length} Missing Connection${report.missing_connections.length > 1 ? "s" : ""}`} icon={<Link size={14} className="text-[var(--accent)]" />}>
+              {report.missing_connections.map((m, i) => (
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
+                  {m.reason} (suggested: {m.suggested_type})
+                </div>
+              ))}
+            </Section>
+          )}
+
+          {/* Actions needing confirmation */}
+          {report.needs_confirmation.length > 0 && (
+            <div className="pt-3 border-t border-[var(--glass-border)]">
+              <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
+                Suggested Actions
+              </div>
+              {report.needs_confirmation.map((action, i) => (
+                <div key={i} className="flex items-center justify-between py-2">
+                  <span className="text-[12px] text-[var(--glass-text-dim)]">{action.reason}</span>
+                  <button
+                    onClick={() => applyAction(action)}
+                    disabled={applying === action.action_type}
+                    className="text-[11px] text-[var(--accent)] border border-[rgba(99,102,241,0.25)] px-3 py-1 rounded-lg hover:bg-[rgba(99,102,241,0.1)] transition-colors disabled:opacity-50"
+                  >
+                    {applying === action.action_type ? "Applying..." : "Apply"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {report.auto_applied > 0 && (
+        <div className="mt-4 text-[11px] text-[var(--green)]">
+          ✓ Auto-applied {report.auto_applied} safe action{report.auto_applied > 1 ? "s" : ""}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        {icon}
+        <span className="text-[12px] font-semibold text-white">{title}</span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\GapAnalysisBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import type { StreamItem } from "../types"
+import { AlertTriangle, CheckCircle, Lightbulb, Loader2 } from "lucide-react"
+
+interface GapResult {
+  covered: string[]
+  missing: string[]
+  suggestions: string[]
+}
+
+export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
+  const [result, setResult] = useState<GapResult | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function analyze() {
+      try {
+        const pageId = item.metadata?.pageId
+        const prompt = pageId
+          ? "Analyze the notes on this page. What subtopics are covered, what's missing, and what should I read next?"
+          : "Analyze all my notes. What topics are well covered, what's missing, and what should I learn next?"
+
+        const resp = await api.chat(prompt, [], pageId ? "page" : "home", pageId)
+
+        // Try to parse structured response, fall back to raw text
+        try {
+          const parsed = JSON.parse(resp.answer)
+          setResult(parsed)
+        } catch {
+          // AI returned freeform text — wrap it
+          setResult({
+            covered: [],
+            missing: [],
+            suggestions: [resp.answer],
+          })
+        }
+      } catch (err) {
+        console.error(err)
+        setResult(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+    analyze()
+  }, [item.metadata?.pageId])
+
+  if (loading) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
+        <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
+        <span className="text-[13px] text-[var(--glass-text-dim)]">Analyzing knowledge gaps...</span>
+      </div>
+    )
+  }
+
+  if (!result) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--red)]">
+        Gap analysis failed. Try again later.
+      </div>
+    )
+  }
+
+  // If we got a freeform response
+  if (result.covered.length === 0 && result.missing.length === 0 && result.suggestions.length > 0) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl">
+        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
+          Gap Analysis
+        </div>
+        <div className="text-[13px] text-[var(--glass-text-dim)] leading-relaxed whitespace-pre-wrap">
+          {result.suggestions[0]}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
+        Gap Analysis
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {/* Covered */}
+        {result.covered.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle size={14} className="text-[var(--green)]" />
+              <span className="text-[12px] font-semibold text-white">Well Covered ({result.covered.length})</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 pl-5">
+              {result.covered.map((topic, i) => (
+                <span
+                  key={i}
+                  className="text-[11px] bg-[rgba(34,197,94,0.08)] text-[var(--green)] px-2 py-0.5 rounded-full"
+                >
+                  {topic}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Missing */}
+        {result.missing.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={14} className="text-[var(--amber)]" />
+              <span className="text-[12px] font-semibold text-white">Missing ({result.missing.length})</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 pl-5">
+              {result.missing.map((topic, i) => (
+                <span
+                  key={i}
+                  className="text-[11px] bg-[rgba(245,158,11,0.08)] text-[var(--amber)] px-2 py-0.5 rounded-full"
+                >
+                  {topic}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Suggestions */}
+        {result.suggestions.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Lightbulb size={14} className="text-[var(--accent)]" />
+              <span className="text-[12px] font-semibold text-white">Suggestions</span>
+            </div>
+            <ul className="pl-5 flex flex-col gap-1">
+              {result.suggestions.map((s, i) => (
+                <li key={i} className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed">
+                  • {s}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\HelpBlock.tsx ===
+
+export default function HelpBlock() {
+  const sections = [
+    {
+      title: "Navigation",
+      cmds: [
+        { name: "/open", args: "<page>", desc: "Open a page canvas" },
+        { name: "/close", desc: "Return to home" },
+        { name: "/home", desc: "Go to home" },
+        { name: "/back", desc: "Previous context" },
+      ],
+    },
+    {
+      title: "Content",
+      cmds: [
+        { name: "/notes", args: "[#tag]", desc: "Browse notes" },
+        { name: "/pages", desc: "List all pages" },
+        { name: "/search", args: "<query>", desc: "Semantic search" },
+        { name: "/tags", desc: "View all tags" },
+        { name: "/tasks", desc: "List all tasks" },
+        { name: "/stats", desc: "Workspace stats" },
+        { name: "/capture", args: "<text>", desc: "Quick capture" },
+      ],
+    },
+    {
+      title: "Canvas",
+      cmds: [
+        { name: "/find", args: "<text>", desc: "Search on canvas" },
+        { name: "/add", args: "<text>", desc: "Add sticky note" },
+        { name: "/layout", desc: "Auto-reorganize" },
+        { name: "/summarize", desc: "Summarize page" },
+        { name: "/gaps", desc: "Find missing topics" },
+        { name: "/reading", args: "[topic]", desc: "Reading order" },
+      ],
+    },
+    {
+      title: "System",
+      cmds: [
+        { name: "/curator", desc: "Run maintenance" },
+        { name: "/settings", desc: "Settings" },
+        { name: "/history", desc: "Past conversations" },
+        { name: "/clear", desc: "Clear stream" },
+        { name: "/help", desc: "This help" },
+      ],
+    },
+  ]
+
+  return (
+    <div className="glass rounded-2xl p-5 relative overflow-hidden">
+      <div className="relative z-10">
+        <div className="text-[9px] uppercase tracking-[0.2em] font-bold text-[var(--glass-text-muted)] mb-4">Commands</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {sections.map((sec) => (
+            <div key={sec.title}>
+              <div className="text-[10px] uppercase tracking-widest font-bold text-[var(--accent-light)] mb-2">{sec.title}</div>
+              {sec.cmds.map((c) => (
+                <div key={c.name} className="flex justify-between py-1 group">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[12px] text-[var(--glass-text)]">{c.name}</span>
+                    {c.args && <span className="text-[10px] text-[var(--glass-text-muted)] italic">{c.args}</span>}
+                  </div>
+                  <span className="text-[10px] text-[var(--glass-text-dim)] group-hover:text-[var(--glass-text)] transition-colors">{c.desc}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 p-3 rounded-xl bg-[rgba(99,102,241,0.05)] border border-[rgba(99,102,241,0.1)]">
+          <p className="text-[11px] text-[var(--glass-text-dim)] leading-relaxed">
+            Everything without <span className="font-mono text-[var(--accent-light)]">/</span> is sent as a natural language question.
+            Press <kbd className="font-mono bg-[rgba(255,255,255,0.06)] px-1.5 py-0.5 rounded text-[10px] text-white mx-0.5">⌘K</kbd> to focus.
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\HistoryBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import type { ChatConversation } from "../types"
+import { MessageSquare, Loader2, Trash2 } from "lucide-react"
+
+export default function HistoryBlock() {
+  const [conversations, setConversations] = useState<ChatConversation[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.listHistory(20)
+      .then((res) => setConversations(res.conversations || res || []))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleDelete(id: string) {
+    try {
+      await api.deleteHistory(id)
+      setConversations((prev) => prev.filter((c) => c.id !== id))
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+      </div>
+    )
+  }
+
+  if (conversations.length === 0) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--glass-text-dim)]">
+        No chat history yet. Start a conversation to see it here.
+      </div>
+    )
+  }
+
+  // Group by date
+  const grouped = conversations.reduce<Record<string, ChatConversation[]>>((acc, c) => {
+    const date = new Date(c.created_at).toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    })
+    if (!acc[date]) acc[date] = []
+    acc[date].push(c)
+    return acc
+  }, {})
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
+        Chat History
+      </div>
+
+      {Object.entries(grouped).map(([date, convos]) => (
+        <div key={date} className="mb-4">
+          <div className="text-[11px] text-[var(--glass-text-muted)] font-semibold mb-2">{date}</div>
+          {convos.map((c) => (
+            <div
+              key={c.id}
+              className="glass-surface-2 p-3 rounded-xl mb-2 flex items-center justify-between glass-hover"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <MessageSquare size={14} className="text-[var(--accent)] shrink-0" />
+                <div className="min-w-0">
+                  <div className="text-[13px] text-white truncate">
+                    {c.title || c.messages?.[0]?.content?.slice(0, 50) || "Untitled conversation"}
+                  </div>
+                  <div className="text-[10px] text-[var(--glass-text-muted)]">
+                    {c.messages?.length || 0} messages • {c.context_type}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => handleDelete(c.id)}
+                className="text-[var(--glass-text-muted)] hover:text-[var(--red)] transition-colors p-1"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import type { Note, StreamItem } from "../types"
+import { FileText, ExternalLink, Tag, CheckSquare, Link, Clock, Loader2 } from "lucide-react"
+import { GlassBadge } from "../glass/GlassBadge"
+
+export default function NoteDetailBlock({ item }: { item: StreamItem }) {
+  const [note, setNote] = useState<Note | null>((item.blockData as any)?.note || null)
+  const [loading, setLoading] = useState(!note)
+
+  useEffect(() => {
+    if (note) return
+    const noteId = item.metadata?.noteIds?.[0]
+    if (!noteId) return
+
+    api.getNote(noteId)
+      .then(setNote)
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [note, item.metadata?.noteIds])
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+      </div>
+    )
+  }
+
+  if (!note) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[var(--glass-text-dim)] text-[13px]">
+        Note not found.
+      </div>
+    )
+  }
+
+  const statusColors: Record<string, "success" | "warning" | "info" | "error"> = {
+    done: "success",
+    pending: "warning",
+    processing: "info",
+    failed: "error",
+  }
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-2.5">
+          <FileText size={18} className="text-[var(--accent)]" />
+          <h3 className="text-[16px] font-bold text-white">{note.title || "Untitled"}</h3>
+        </div>
+        <GlassBadge variant={statusColors[note.processing_status] || "info"}>
+          {note.processing_status}
+        </GlassBadge>
+      </div>
+
+      {/* Summary */}
+      {note.summary && (
+        <div className="text-[13px] text-[var(--glass-text-dim)] leading-relaxed mb-4">
+          {note.summary}
+        </div>
+      )}
+
+      {/* Raw text */}
+      <div className="glass-surface-2 p-4 rounded-xl mb-4">
+        <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
+          Original Text
+        </div>
+        <div className="text-[12px] text-[var(--glass-text)] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+          {note.raw_text}
+        </div>
+      </div>
+
+      {/* Tags */}
+      {note.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {note.tags.map((t) => (
+            <span
+              key={t}
+              className="flex items-center gap-1 text-[10px] bg-[rgba(99,102,241,0.08)] text-[var(--accent)] px-2 py-1 rounded-full font-semibold"
+            >
+              <Tag size={9} /> {t}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Tasks */}
+      {note.tasks.length > 0 && (
+        <div className="mb-4">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
+            Tasks
+          </div>
+          {note.tasks.map((task, i) => (
+            <div key={i} className="flex items-start gap-2 py-1">
+              <CheckSquare size={13} className="text-[var(--green)] mt-0.5 shrink-0" />
+              <span className="text-[12px] text-[var(--glass-text-dim)]">{task}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Entities */}
+      {note.entities.length > 0 && (
+        <div className="mb-4">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
+            Entities
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {note.entities.map((e) => (
+              <span key={e} className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--glass-text-dim)]">
+                {e}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Metadata footer */}
+      <div className="flex items-center gap-4 pt-3 border-t border-[var(--glass-border)] text-[11px] text-[var(--glass-text-muted)]">
+        <div className="flex items-center gap-1">
+          <Clock size={11} />
+          {new Date(note.created_at).toLocaleDateString()}
+        </div>
+        {note.source_url && (
+          <a
+            href={note.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-[var(--accent)] hover:underline"
+          >
+            <ExternalLink size={11} />
+            Source
+          </a>
+        )}
+        {note.is_bridge && (
+          <div className="flex items-center gap-1 text-[var(--accent)]">
+            <Link size={11} />
+            Bridge note
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\NoteGridBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import { useStream } from "../hooks/useStream"
+import type { Note, StreamItem } from "../types"
+import { FileText, Tag, Loader2 } from "lucide-react"
+import { motion } from "framer-motion"
+
+export default function NoteGridBlock({ item }: { item: StreamItem }) {
+  const [notes, setNotes] = useState<Note[]>([])
+  const [loading, setLoading] = useState(true)
+  const { addBlock } = useStream()
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const limit = (item.blockData as any)?.limit || 20
+        const resp = await api.listNotes(1, limit, item.metadata?.tag, item.metadata?.pageId)
+        setNotes(resp.notes || [])
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [item.metadata?.tag, item.metadata?.pageId, item.blockData])
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+      </div>
+    )
+  }
+
+  if (notes.length === 0) {
+    return (
+      <div className="text-center text-[12px] text-[var(--glass-text-muted)] py-12 glass-surface-1 rounded-xl">
+        {item.metadata?.tag
+          ? `No notes found with tag #${item.metadata.tag}`
+          : "No notes found."}
+      </div>
+    )
+  }
+
+  function handleNoteClick(note: Note) {
+    addBlock("note-detail", { note }, { noteIds: [note.id] })
+  }
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-3">
+        {item.metadata?.tag ? `Notes tagged #${item.metadata.tag}` : "All Notes"}
+        <span className="ml-2 text-[var(--glass-text-dim)]">({notes.length})</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {notes.map((note, i) => (
+          <motion.div
+            key={note.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.03 }}
+            onClick={() => handleNoteClick(note)}
+            className="glass-surface-2 p-4 rounded-xl glass-hover cursor-pointer"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <FileText size={13} className="text-[var(--accent)] shrink-0" />
+              <div className="font-semibold text-[13px] text-white truncate">
+                {note.title || "Untitled"}
+              </div>
+            </div>
+            <div className="text-[11px] text-[var(--glass-text-dim)] line-clamp-3 leading-relaxed mb-3">
+              {note.summary || note.raw_text}
+            </div>
+            {note.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {note.tags.slice(0, 3).map((t) => (
+                  <span
+                    key={t}
+                    className="flex items-center gap-1 text-[9px] bg-[rgba(99,102,241,0.08)] text-[var(--accent)] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold"
+                  >
+                    <Tag size={7} /> {t}
+                  </span>
+                ))}
+                {note.tags.length > 3 && (
+                  <span className="text-[9px] text-[var(--glass-text-muted)]">
+                    +{note.tags.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\ReadingPathBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import type { StreamItem } from "../types"
+import { BookOpen, ChevronRight, Loader2 } from "lucide-react"
+
+interface ReadingStep {
+  title: string
+  noteId?: string
+  reason?: string
+}
+
+export default function ReadingPathBlock({ item }: { item: StreamItem }) {
+  const [steps, setSteps] = useState<ReadingStep[]>([])
+  const [rawText, setRawText] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const topic = item.metadata?.topic || "this topic"
+        const pageId = item.metadata?.pageId
+        const prompt = `Generate a suggested reading order for "${topic}". List the notes I should read first, second, third, etc. based on dependency relationships. For each step, explain why it should be read in that order.`
+
+        const resp = await api.chat(prompt, [], pageId ? "page" : "home", pageId)
+
+        // Try to parse structured response
+        try {
+          const parsed = JSON.parse(resp.answer)
+          if (Array.isArray(parsed)) {
+            setSteps(parsed)
+          } else if (parsed.steps) {
+            setSteps(parsed.steps)
+          } else {
+            setRawText(resp.answer)
+          }
+        } catch {
+          setRawText(resp.answer)
+        }
+      } catch (err) {
+        console.error(err)
+        setRawText("Failed to generate reading path.")
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [item.metadata?.topic, item.metadata?.pageId])
+
+  if (loading) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
+        <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
+        <span className="text-[13px] text-[var(--glass-text-dim)]">Computing reading path...</span>
+      </div>
+    )
+  }
+
+  const topic = item.metadata?.topic || "Current Context"
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      <div className="flex items-center gap-2 mb-4">
+        <BookOpen size={16} className="text-[var(--accent)]" />
+        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)]">
+          Reading Path — {topic}
+        </div>
+      </div>
+
+      {rawText ? (
+        <div className="text-[13px] text-[var(--glass-text-dim)] leading-relaxed whitespace-pre-wrap">
+          {rawText}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {steps.map((step, i) => (
+            <div key={i} className="flex items-start gap-3 py-3 group">
+              {/* Step number */}
+              <div className="w-7 h-7 rounded-full glass-surface-2 flex items-center justify-center shrink-0 text-[12px] font-bold text-[var(--accent)]">
+                {i + 1}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-semibold text-white">{step.title}</div>
+                {step.reason && (
+                  <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">{step.reason}</div>
+                )}
+              </div>
+
+              {/* Arrow to next */}
+              {i < steps.length - 1 && (
+                <ChevronRight size={14} className="text-[var(--glass-text-muted)] mt-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\SearchResultsBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import type { Note, StreamItem } from "../types"
+import { Search, Loader2 } from "lucide-react"
+
+export default function SearchResultsBlock({ item }: { item: StreamItem }) {
+  const [results, setResults] = useState<Note[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function search() {
+      try {
+        const q = item.metadata?.query || ""
+        if (!q) return
+        const resp = await api.search(q, 10, item.metadata?.pageId)
+        setResults(resp.results || [])
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    search()
+  }, [item])
+
+  if (loading) {
+     return <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-[var(--glass-text-dim)]" /></div>
+  }
+
+  if (results.length === 0) {
+     return <div className="text-[12px] text-[var(--glass-text-dim)] p-4">No search results found.</div>
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+       <div className="flex items-center gap-2 text-[var(--glass-text-dim)] mb-2">
+         <Search size={14} /> 
+         <span className="text-[12px] font-semibold uppercase tracking-widest">Search Results</span>
+       </div>
+       {results.map(r => (
+         <div key={r.id} className="glass-interactive p-4 rounded-xl border border-[var(--glass-border)]">
+            <div className="flex justify-between items-start mb-2">
+               <div className="font-semibold text-white text-[14px]">{r.title || "Untitled"}</div>
+               <div className="text-[10px] bg-[rgba(34,197,94,0.1)] text-[var(--green)] px-2 py-0.5 rounded font-bold">
+                  {Math.round((r.similarity || 0) * 100)}%
+               </div>
+            </div>
+            <div className="text-[12px] text-[var(--glass-text-dim)] line-clamp-2">
+               {r.summary || r.raw_text}
+            </div>
+         </div>
+       ))}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\SettingsBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import { GlassInput } from "../glass/GlassInput"
+import { GlassDropdown } from "../glass/GlassDropdown"
+
+export default function SettingsBlock() {
+  const [threshold, setThreshold] = useState("0.65")
+  const [model, setModel] = useState("gemini-2.5-flash")
+  const [theme, setTheme] = useState("glass")
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-6">
+        Workspace Settings
+      </div>
+
+      <div className="flex flex-col gap-5">
+        <SettingRow label="Theme" description="Visual theme for the workspace">
+          <GlassDropdown
+            value={theme}
+            onChange={setTheme}
+            options={[
+              { value: "glass", label: "Glass (default)" },
+              { value: "dark", label: "Dark" },
+            ]}
+          />
+        </SettingRow>
+
+        <SettingRow label="LLM Model" description="Model used for processing and chat">
+          <GlassDropdown
+            value={model}
+            onChange={setModel}
+            options={[
+              { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+              { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+            ]}
+          />
+        </SettingRow>
+
+        <SettingRow label="Similarity Threshold" description="Minimum score for semantic search (0.0 – 1.0)">
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={threshold}
+              onChange={(e) => setThreshold(e.target.value)}
+              className="w-36 accent-[var(--accent)]"
+            />
+            <GlassInput
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={threshold}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setThreshold(e.target.value)}
+              className="w-20 text-center text-[13px]"
+            />
+          </div>
+        </SettingRow>
+
+        <SettingRow label="Embedding Dimensions" description="Output dimensions for Gemini embeddings">
+          <span className="text-[13px] text-[var(--glass-text-dim)] font-mono">768</span>
+        </SettingRow>
+
+        <SettingRow label="Backend" description="API server connection">
+          <BackendStatus />
+        </SettingRow>
+      </div>
+
+      <div className="mt-6 pt-4 border-t border-[var(--glass-border)]">
+        <p className="text-[11px] text-[var(--glass-text-muted)] leading-relaxed">
+          Settings are stored locally. You can also type{" "}
+          <code className="font-mono text-[var(--accent)]">"set threshold to 0.8"</code> in chat.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function SettingRow({ label, description, children }: { label: string; description: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-6">
+      <div className="min-w-0">
+        <div className="text-[13px] font-semibold text-white">{label}</div>
+        <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">{description}</div>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
+function BackendStatus() {
+  const [status, setStatus] = useState<"checking" | "online" | "offline">("checking")
+
+  useEffect(() => {
+    api.health()
+      .then((res) => setStatus(res ? "online" : "offline"))
+      .catch(() => setStatus("offline"))
+  }, [])
+
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className={`w-2 h-2 rounded-full ${
+          status === "online"
+            ? "bg-[var(--green)]"
+            : status === "offline"
+            ? "bg-[var(--red)]"
+            : "bg-[var(--amber)] animate-pulse"
+        }`}
+      />
+      <span className="text-[12px] text-[var(--glass-text-dim)] capitalize">{status}</span>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\StatsBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import { BarChart2, Hash, CheckCircle, Layers, Loader2 } from "lucide-react"
+import type { WorkspaceStats } from "../types"
+import { motion } from "framer-motion"
+
+export default function StatsBlock() {
+  const [stats, setStats] = useState<WorkspaceStats | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.getStats()
+      .then(setStats)
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+      </div>
+    )
+  }
+
+  if (!stats) return null
+
+  const cards = [
+    { label: "Notes", value: stats.total_notes, icon: BarChart2, color: "var(--accent)", bg: "rgba(99,102,241,0.1)" },
+    { label: "Pages", value: stats.total_pages, icon: Layers, color: "var(--purple)", bg: "rgba(168,85,247,0.1)" },
+    { label: "Tags", value: stats.total_tags, icon: Hash, color: "var(--green)", bg: "rgba(34,197,94,0.1)" },
+    { label: "Tasks", value: stats.total_tasks, icon: CheckCircle, color: "var(--amber)", bg: "rgba(245,158,11,0.1)" },
+  ]
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-3">
+        Workspace Stats
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {cards.map((card, i) => (
+          <motion.div
+            key={card.label}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: i * 0.05 }}
+            className="glass-surface-2 p-4 rounded-xl flex items-center gap-3"
+          >
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: card.bg }}
+            >
+              <card.icon size={18} style={{ color: card.color }} />
+            </div>
+            <div>
+              <div className="text-[11px] text-[var(--glass-text-muted)]">{card.label}</div>
+              <div className="text-[20px] font-bold text-white">{card.value}</div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Status breakdown */}
+      {stats.status_counts && Object.keys(stats.status_counts).length > 0 && (
+        <div className="mt-4 glass-surface-1 p-4 rounded-xl">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
+            Processing Status
+          </div>
+          <div className="flex gap-4">
+            {Object.entries(stats.status_counts).map(([status, count]) => (
+              <div key={status} className="flex items-center gap-1.5">
+                <div
+                  className={`w-2 h-2 rounded-full ${
+                    status === "done" ? "bg-[var(--green)]"
+                    : status === "failed" ? "bg-[var(--red)]"
+                    : "bg-[var(--amber)]"
+                  }`}
+                />
+                <span className="text-[11px] text-[var(--glass-text-dim)]">
+                  {status}: {count}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {stats.last_capture && (
+        <div className="mt-3 text-[11px] text-[var(--glass-text-muted)]">
+          Last capture: {new Date(stats.last_capture).toLocaleString()}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\TagCloudBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import { useStream } from "../hooks/useStream"
+import type { TagWithCount } from "../types"
+import { Loader2 } from "lucide-react"
+
+export default function TagCloudBlock() {
+  const [tags, setTags] = useState<TagWithCount[]>([])
+  const [loading, setLoading] = useState(true)
+  const { addUserMessage, addBlock } = useStream()
+
+  useEffect(() => {
+    api.getTags()
+      .then((res) => setTags(res.tags || res || []))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+      </div>
+    )
+  }
+
+  if (tags.length === 0) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--glass-text-dim)]">
+        No tags found yet. Capture some notes to see tags appear.
+      </div>
+    )
+  }
+
+  function handleTagClick(tagName: string) {
+    addUserMessage(`/notes #${tagName}`)
+    addBlock("note-grid", undefined, { tag: tagName })
+  }
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
+        Tags
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {tags.map((t) => (
+          <button
+            key={t.name}
+            onClick={() => handleTagClick(t.name)}
+            className="glass-surface-3 px-3 py-1.5 rounded-full flex items-center gap-2 glass-hover cursor-pointer"
+          >
+            <span className="text-[12px] font-mono text-[var(--accent)]">
+              #{t.name}
+            </span>
+            <span className="text-[10px] text-[var(--glass-text-muted)] bg-[rgba(255,255,255,0.05)] px-1.5 rounded">
+              {t.count}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\TaskListBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import type { Note, StreamItem } from "../types"
+import { CheckSquare, FileText, Loader2 } from "lucide-react"
+
+interface TaskGroup {
+  noteId: string
+  noteTitle: string
+  tasks: string[]
+}
+
+export default function TaskListBlock({ item }: { item: StreamItem }) {
+  const [groups, setGroups] = useState<TaskGroup[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const resp = await api.listNotes(1, 100, undefined, item.metadata?.pageId)
+        const notes: Note[] = resp.notes || []
+        const withTasks = notes
+          .filter((n) => n.tasks && n.tasks.length > 0)
+          .map((n) => ({
+            noteId: n.id,
+            noteTitle: n.title || "Untitled",
+            tasks: n.tasks,
+          }))
+        setGroups(withTasks)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [item.metadata?.pageId])
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+      </div>
+    )
+  }
+
+  if (groups.length === 0) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--glass-text-dim)]">
+        No tasks found. Tasks are automatically extracted when you capture notes.
+      </div>
+    )
+  }
+
+  const totalTasks = groups.reduce((sum, g) => sum + g.tasks.length, 0)
+
+  return (
+    <div className="glass-surface-1 p-6 rounded-2xl">
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)]">
+          Tasks
+        </div>
+        <span className="text-[11px] text-[var(--glass-text-dim)]">
+          {totalTasks} task{totalTasks !== 1 ? "s" : ""} from {groups.length} note{groups.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {groups.map((group) => (
+          <div key={group.noteId}>
+            <div className="flex items-center gap-2 mb-2">
+              <FileText size={12} className="text-[var(--accent)]" />
+              <span className="text-[12px] font-semibold text-white">{group.noteTitle}</span>
+            </div>
+            {group.tasks.map((task, i) => (
+              <div key={i} className="flex items-start gap-2.5 py-1.5 pl-5">
+                <CheckSquare size={13} className="text-[var(--green)] mt-0.5 shrink-0" />
+                <span className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed">{task}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\WelcomeBlock.tsx ===
+
+import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import { useAppContext } from "../hooks/useAppContext"
+import type { Page, WorkspaceStats } from "../types"
+import { FileText, Layers, Hash, Zap } from "lucide-react"
+import { motion } from "framer-motion"
+
+export default function WelcomeBlock() {
+  const [pages, setPages] = useState<Page[]>([])
+  const [stats, setStats] = useState<WorkspaceStats | null>(null)
+  const { switchTo } = useAppContext()
+
+  useEffect(() => {
+    Promise.all([
+      api.listPages().then(r => setPages(r.pages || r || [])),
+      api.getStats().then(setStats),
+    ]).catch(() => {})
+  }, [])
+
+  return (
+    <div className="flex flex-col items-center pt-24 pb-8">
+      <motion.h1 initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="text-[36px] font-extrabold tracking-tight text-white mb-1">
+        Mnemos
+      </motion.h1>
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="text-[14px] text-[var(--glass-text-dim)] mb-16">
+        Your knowledge, connected.
+      </motion.p>
+
+      {/* Stats */}
+      {stats && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="flex gap-10 mb-16">
+          {[
+            { icon: FileText, v: stats.total_notes, l: "notes", c: "var(--accent)" },
+            { icon: Layers, v: stats.total_pages, l: "pages", c: "var(--purple)" },
+            { icon: Hash, v: stats.total_tags, l: "tags", c: "var(--green)" },
+            { icon: Zap, v: stats.total_tasks, l: "tasks", c: "var(--amber)" },
+          ].map(s => (
+            <div key={s.l} className="flex flex-col items-center">
+              <s.icon size={15} style={{ color: s.c }} className="mb-2" />
+              <span className="text-[24px] font-bold text-white">{s.v}</span>
+              <span className="text-[9px] uppercase tracking-[0.15em] text-[var(--glass-text-muted)] mt-0.5">{s.l}</span>
+            </div>
+          ))}
+        </motion.div>
+      )}
+
+      {/* Pages */}
+      {pages.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="w-full max-w-[480px]">
+          <div className="text-[9px] uppercase tracking-[0.2em] text-[var(--glass-text-muted)] font-semibold mb-3">Pages</div>
+          <div className="grid grid-cols-2 gap-2.5">
+            {pages.map((p, i) => (
+              <motion.button
+                key={p.id}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 + i * 0.03 }}
+                onClick={() => switchTo("page", p.id, p.name)}
+                className="glass rounded-xl p-3.5 text-left glass-hover flex items-center gap-3 relative"
+              >
+                <span className="text-lg">{p.icon || "📄"}</span>
+                <div className="min-w-0">
+                  <div className="text-[12.5px] font-semibold text-white truncate">{p.name}</div>
+                  <div className="text-[10px] text-[var(--glass-text-muted)]">{p.note_count} note{p.note_count !== 1 ? "s" : ""}</div>
+                </div>
+              </motion.button>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }} className="text-[11px] text-[var(--glass-text-muted)] mt-14 text-center">
+        Type a question below, or <span className="text-[var(--accent-light)] font-mono">/help</span> for commands
+      </motion.p>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\canvas\canvasAI.ts ===
+
+import { convertToExcalidrawElements } from "@excalidraw/excalidraw"
+import type { ExcalidrawElementSkeleton } from "@excalidraw/excalidraw/data/transform"
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
+import { nanoid } from "../utils"
+
+export interface NoteBlock {
+  noteId: string
+  title: string
+  summary: string
+  tags: string[]
+  x?: number
+  y?: number
+}
+
+export function createNoteCard(
+  note: NoteBlock,
+  position?: { x: number; y: number }
+): ExcalidrawElement[] {
+  const x = position?.x ?? note.x ?? 100
+  const y = position?.y ?? note.y ?? 100
+  const groupId = nanoid()
+  const skeleton: ExcalidrawElementSkeleton[] = [
+    {
+      id: `note-frame-${note.noteId}`,
+      type: "rectangle",
+      x: x - 12,
+      y: y - 12,
+      width: 360,
+      height: 240,
+      strokeColor: "#e5e7eb",
+      strokeWidth: 1,
+      backgroundColor: "#ffffff",
+      fillStyle: "solid",
+      opacity: 100,
+      roundness: { type: 3, value: 10 },
+      groupIds: [groupId],
+      customData: { noteId: note.noteId, type: "note-frame" },
+    } as ExcalidrawElementSkeleton,
+    {
+      id: `note-title-${note.noteId}`,
+      type: "text",
+      x,
+      y,
+      text: note.title || "Untitled",
+      fontSize: 18,
+      fontFamily: 1,
+      strokeColor: "#111827",
+      textAlign: "left",
+      groupIds: [groupId],
+      customData: { noteId: note.noteId, type: "note-title", title: note.title },
+    } as ExcalidrawElementSkeleton,
+    {
+      id: `note-summary-${note.noteId}`,
+      type: "text",
+      x,
+      y: y + 32,
+      text: truncateAndWrap(note.summary || "", 55, 6),
+      fontSize: 13,
+      fontFamily: 1,
+      strokeColor: "#6b7280",
+      textAlign: "left",
+      groupIds: [groupId],
+      customData: { noteId: note.noteId, type: "note-summary" },
+    } as ExcalidrawElementSkeleton,
+    {
+      id: `note-accent-${note.noteId}`,
+      type: "line",
+      x: x - 12,
+      y: y - 12,
+      points: [
+        [0, 0],
+        [0, 240],
+      ],
+      strokeColor: "#6366f1",
+      strokeWidth: 3,
+      groupIds: [groupId],
+      customData: { noteId: note.noteId, type: "note-accent" },
+    } as ExcalidrawElementSkeleton,
+  ]
+
+  if (note.tags.length > 0) {
+    skeleton.push({
+      id: `note-tags-${note.noteId}`,
+      type: "text",
+      x,
+      y: y + 182,
+      text: note.tags.map((tag) => `#${tag}`).join("  "),
+      fontSize: 11,
+      fontFamily: 3,
+      strokeColor: "#6366f1",
+      textAlign: "left",
+      groupIds: [groupId],
+      customData: { noteId: note.noteId, type: "note-tags", tags: note.tags },
+    } as ExcalidrawElementSkeleton)
+  }
+
+  return convertToExcalidrawElements(skeleton, { regenerateIds: false }) as ExcalidrawElement[]
+}
+
+export function createHeading(text: string, x: number, y: number): ExcalidrawElement {
+  return convertToExcalidrawElements(
+    [
+      {
+        id: nanoid(),
+        type: "text",
+        x,
+        y,
+        text,
+        fontSize: 28,
+        fontFamily: 1,
+        strokeColor: "#ffffff",
+        textAlign: "left",
+        customData: { type: "heading" },
+      } as ExcalidrawElementSkeleton,
+    ],
+    { regenerateIds: false }
+  )[0] as ExcalidrawElement
+}
+
+export function createSticky(
+  text: string,
+  x: number,
+  y: number,
+  color = "#fef08a"
+): ExcalidrawElement[] {
+  const groupId = nanoid()
+  const skeleton: ExcalidrawElementSkeleton[] = [
+    {
+      id: nanoid(),
+      type: "rectangle",
+      x,
+      y,
+      width: 180,
+      height: 160,
+      backgroundColor: color,
+      fillStyle: "solid",
+      strokeColor: "transparent",
+      roundness: { type: 3, value: 4 },
+      groupIds: [groupId],
+      customData: { type: "sticky-bg" },
+    } as ExcalidrawElementSkeleton,
+    {
+      id: nanoid(),
+      type: "text",
+      x: x + 12,
+      y: y + 12,
+      text: truncateAndWrap(text, 22, 6),
+      fontSize: 16,
+      fontFamily: 4,
+      strokeColor: "#78350f",
+      textAlign: "left",
+      groupIds: [groupId],
+      customData: { type: "sticky-text" },
+    } as ExcalidrawElementSkeleton,
+  ]
+
+  return convertToExcalidrawElements(skeleton, { regenerateIds: false }) as ExcalidrawElement[]
+}
+
+export function createArrow(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  label?: string
+): ExcalidrawElement {
+  return convertToExcalidrawElements(
+    [
+      {
+        id: nanoid(),
+        type: "arrow",
+        x: startX,
+        y: startY,
+        points: [
+          [0, 0],
+          [endX - startX, endY - startY],
+        ],
+        strokeColor: "#94a3b8",
+        strokeWidth: 2,
+        endArrowhead: "arrow",
+        customData: { type: "connection", label },
+      } as ExcalidrawElementSkeleton,
+    ],
+    { regenerateIds: false }
+  )[0] as ExcalidrawElement
+}
+
+export function createAnnotation(text: string, x: number, y: number): ExcalidrawElement {
+  return convertToExcalidrawElements(
+    [
+      {
+        id: nanoid(),
+        type: "text",
+        x,
+        y,
+        text,
+        fontSize: 12,
+        fontFamily: 3,
+        strokeColor: "#a855f7",
+        opacity: 60,
+        customData: { type: "ai-annotation" },
+      } as ExcalidrawElementSkeleton,
+    ],
+    { regenerateIds: false }
+  )[0] as ExcalidrawElement
+}
+
+export function createClusterFrame(
+  label: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color = "#6366f1"
+): ExcalidrawElement[] {
+  const groupId = nanoid()
+  const skeleton: ExcalidrawElementSkeleton[] = [
+    {
+      id: nanoid(),
+      type: "rectangle",
+      x,
+      y,
+      width,
+      height,
+      strokeColor: color,
+      strokeWidth: 1,
+      strokeStyle: "dashed",
+      backgroundColor: `${color}08`,
+      fillStyle: "solid",
+      opacity: 40,
+      roundness: { type: 3, value: 16 },
+      groupIds: [groupId],
+      customData: { type: "cluster-frame", label },
+    } as ExcalidrawElementSkeleton,
+    {
+      id: nanoid(),
+      type: "text",
+      x: x + 12,
+      y: y - 24,
+      text: label,
+      fontSize: 14,
+      fontFamily: 1,
+      strokeColor: color,
+      opacity: 60,
+      groupIds: [groupId],
+      customData: { type: "cluster-label" },
+    } as ExcalidrawElementSkeleton,
+  ]
+
+  return convertToExcalidrawElements(skeleton, { regenerateIds: false }) as ExcalidrawElement[]
+}
+
+export function truncateAndWrap(text: string, charsPerLine: number, maxLines: number): string {
+  const words = text.split(/\s+/).filter(Boolean)
+  const lines: string[] = []
+  let line = ""
+
+  for (const word of words) {
+    if (lines.length >= maxLines) break
+
+    if ((line + " " + word).trim().length > charsPerLine) {
+      if (line.trim()) lines.push(line.trim())
+      line = word
+    } else {
+      line += ` ${word}`
+    }
+  }
+
+  if (line.trim() && lines.length < maxLines) lines.push(line.trim())
+  if (lines.length === maxLines && words.length > lines.join(" ").split(/\s+/).length) {
+    lines[maxLines - 1] = `${lines[maxLines - 1]}...`
+  }
+
+  return lines.join("\n")
+}
+
+
+=== FILE: frontend\src\canvas\CanvasOverlay.tsx ===
+
+import { useAppContext } from "../hooks/useAppContext"
+import ExcalidrawCanvas from "./ExcalidrawCanvas"
+import { motion, AnimatePresence } from "framer-motion"
+
+export default function CanvasOverlay() {
+  const { current } = useAppContext()
+
+  return (
+    <AnimatePresence>
+      {current.type === "page" && current.pageId && (
+        <motion.div
+          key={current.pageId}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25 }}
+          className="absolute inset-0 z-10"
+        >
+          <ExcalidrawCanvas pageId={current.pageId} />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+
+=== FILE: frontend\src\canvas\ExcalidrawCanvas.tsx ===
+
+import { useCallback, useEffect } from "react"
+import { Excalidraw, MainMenu, WelcomeScreen } from "@excalidraw/excalidraw"
+import type { ExcalidrawImperativeAPI, AppState, BinaryFiles } from "@excalidraw/excalidraw/types"
+import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types"
+import { Loader2 } from "lucide-react"
+import { useExcalidraw } from "./useExcalidraw"
+import { useStream } from "../hooks/useStream"
+import { useAppContext } from "../hooks/useAppContext"
+import { createNoteCard, createSticky } from "./canvasAI"
+import "@excalidraw/excalidraw/index.css"
+
+interface Props {
+  pageId: string
+}
+
+export default function ExcalidrawCanvas({ pageId }: Props) {
+  const {
+    excalidrawRef,
+    loading,
+    initialScene,
+    error,
+    saveScene,
+    addElements,
+    searchElements,
+    scrollToElement,
+    reload,
+  } = useExcalidraw(pageId)
+
+  const { addSystemMessage } = useStream()
+  const { current } = useAppContext()
+
+  useEffect(() => {
+    console.log("[Canvas] State:", { loading, hasScene: !!initialScene, error, pageId })
+  }, [loading, initialScene, error, pageId])
+
+  useEffect(() => {
+    function onCanvasSearch(e: Event) {
+      const query = (e as CustomEvent<string>).detail
+      if (!query) return
+
+      const matches = searchElements(query)
+      if (matches.length > 0) {
+        scrollToElement(matches[0].id)
+        addSystemMessage(`Found ${matches.length} match${matches.length > 1 ? "es" : ""} on canvas.`)
+      } else {
+        addSystemMessage(`No matches for "${query}" on canvas.`)
+      }
+    }
+
+    function onCanvasAdd(e: Event) {
+      const detail = (e as CustomEvent<CanvasAddDetail>).detail
+      if (!detail?.content) return
+
+      const drawingApi = excalidrawRef.current
+      if (!drawingApi) return
+
+      const appState = drawingApi.getAppState()
+      const zoomValue = (appState.zoom && typeof appState.zoom === 'object' && 'value' in appState.zoom) 
+        ? (appState.zoom as any).value 
+        : appState.zoom || 1
+      const centerX = detail.x ?? (-appState.scrollX + window.innerWidth / 2) / zoomValue
+      const centerY = detail.y ?? (-appState.scrollY + window.innerHeight / 2) / zoomValue
+
+      if (detail.type === "sticky") {
+        addElements(createSticky(detail.content, centerX, centerY))
+        addSystemMessage("Sticky note added to canvas.")
+        return
+      }
+
+      addElements(
+        createNoteCard(
+          {
+            noteId: `manual-${Date.now()}`,
+            title: detail.content.slice(0, 50),
+            summary: detail.content,
+            tags: [],
+          },
+          { x: centerX, y: centerY }
+        )
+      )
+      addSystemMessage("Note card added to canvas.")
+    }
+
+    window.addEventListener("canvas:search", onCanvasSearch)
+    window.addEventListener("canvas:add", onCanvasAdd)
+
+    return () => {
+      window.removeEventListener("canvas:search", onCanvasSearch)
+      window.removeEventListener("canvas:add", onCanvasAdd)
+    }
+  }, [addElements, addSystemMessage, excalidrawRef, scrollToElement, searchElements])
+
+  const handleChange = useCallback(
+    (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
+      saveScene(elements, appState, files)
+    },
+    [saveScene]
+  )
+
+  const handleExcalidrawAPI = useCallback((api: ExcalidrawImperativeAPI) => {
+    excalidrawRef.current = api
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
+          <span className="text-[13px] text-[var(--glass-text-dim)]">Loading canvas...</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (error && !initialScene) {
+    return (
+      <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
+        <div className="text-center">
+          <p className="text-[var(--red)] mb-2">{error}</p>
+          <button onClick={reload} className="text-[var(--accent)] underline text-sm">
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="w-full h-full excalidraw-wrapper">
+      <style>{`
+        .excalidraw-wrapper {
+          height: 100%;
+          width: 100%;
+          overflow: hidden;
+        }
+        
+        .excalidraw-wrapper .excalidraw {
+          --color-primary: #6366f1;
+          --color-primary-light: #818cf8;
+          --color-brand: #6366f1;
+          --color-brand-light: #818cf8;
+        }
+        
+        .excalidraw-wrapper .excalidraw canvas {
+          background: #0e0e1a !important;
+        }
+      `}</style>
+
+      <Excalidraw
+        excalidrawAPI={handleExcalidrawAPI}
+        initialData={
+          initialScene
+            ? {
+                elements: initialScene.elements,
+                appState: {
+                  ...initialScene.appState,
+                  viewBackgroundColor: "#0e0e1a",
+                  theme: "dark",
+                },
+                files: initialScene.files,
+              }
+            : undefined
+        }
+        onChange={handleChange}
+        theme="dark"
+        langCode="en"
+        gridModeEnabled={false}
+        viewModeEnabled={false}
+        zenModeEnabled={false}
+      >
+        <MainMenu>
+          <MainMenu.DefaultItems.LoadScene />
+          <MainMenu.DefaultItems.SaveAsImage />
+          <MainMenu.DefaultItems.ClearCanvas />
+          <MainMenu.DefaultItems.ToggleTheme />
+          <MainMenu.DefaultItems.ChangeCanvasBackground />
+        </MainMenu>
+      </Excalidraw>
+    </div>
+  )
+}
+
+interface CanvasAddDetail {
+  type: "sticky" | "note"
+  content: string
+  x?: number
+  y?: number
+}
+
+
+=== FILE: frontend\src\canvas\useExcalidraw.ts ===
+
+import { useState, useCallback, useRef, useEffect } from "react"
+import type { ExcalidrawImperativeAPI, AppState, BinaryFiles } from "@excalidraw/excalidraw/types"
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
+import { api } from "../api/client"
+import { createNoteCard, createSticky } from "./canvasAI"
+
+export interface CanvasScene {
+  elements: ExcalidrawElement[]
+  appState: Partial<AppState> & Record<string, unknown>
+  files: BinaryFiles
+}
+
+const EMPTY_SCENE: CanvasScene = {
+  elements: [],
+  appState: {
+    viewBackgroundColor: "#0e0e1a",
+    theme: "dark",
+  },
+  files: {},
+}
+
+export function useExcalidraw(pageId: string | undefined) {
+  const excalidrawRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [initialScene, setInitialScene] = useState<CanvasScene | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadScene = useCallback(async () => {
+    if (!pageId) {
+      console.warn("[useExcalidraw] No pageId provided")
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      console.log("[useExcalidraw] Loading canvas for page:", pageId)
+      const pageData = await api.getPageCanvas(pageId)
+      console.log("[useExcalidraw] Received pageData:", pageData)
+      const storedScene = pageData.page?.canvas_data || pageData.canvas_data
+      const scene = normalizeScene(storedScene)
+
+      const existingNoteIds = new Set(
+        scene.elements
+          .map((el) => readCustomData(el).noteId)
+          .filter((noteId): noteId is string => Boolean(noteId))
+      )
+
+      const notes = Array.isArray(pageData.notes) ? pageData.notes : []
+      const newElements: ExcalidrawElement[] = []
+
+      notes.forEach((note: NoteLike, index: number) => {
+        if (!existingNoteIds.has(note.id)) {
+          newElements.push(
+            ...createNoteCard(
+              {
+                noteId: note.id,
+                title: note.title || "Untitled",
+                summary: note.summary || note.raw_text || "",
+                tags: note.tags || [],
+                x: note.canvas_x ?? undefined,
+                y: note.canvas_y ?? undefined,
+              },
+              getGridPosition(index, note)
+            )
+          )
+        }
+      })
+
+      const legacyElements = Array.isArray(pageData.elements) ? pageData.elements : []
+      legacyElements.forEach((element: LegacyElement, index: number) => {
+        if (scene.elements.some((el) => readCustomData(el).legacyElementId === element.id)) return
+        if (element.element_type === "sticky" && element.content) {
+          const sticky = createSticky(
+            element.content,
+            element.position_x ?? 120 + index * 40,
+            element.position_y ?? 120 + index * 40
+          ).map((el) => ({
+            ...el,
+            customData: { ...readCustomData(el), legacyElementId: element.id },
+          }))
+          newElements.push(...sticky)
+        }
+      })
+
+      if (newElements.length > 0) {
+        scene.elements = [...scene.elements, ...newElements]
+      }
+
+      console.log("[useExcalidraw] Final scene:", { elementCount: scene.elements.length, scene })
+      setInitialScene(scene)
+      excalidrawRef.current?.updateScene({
+        elements: scene.elements,
+      })
+    } catch (err) {
+      console.error("Canvas load error:", err)
+      setError("Failed to load canvas")
+      setInitialScene(EMPTY_SCENE)
+    } finally {
+      console.log("[useExcalidraw] Load complete")
+      setLoading(false)
+    }
+  }, [pageId])
+
+  useEffect(() => {
+    loadScene()
+
+    const onRefresh = () => loadScene()
+    window.addEventListener("canvas:refresh", onRefresh)
+    return () => window.removeEventListener("canvas:refresh", onRefresh)
+  }, [loadScene])
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+    }
+  }, [])
+
+  const saveScene = useCallback(
+    (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
+      if (!pageId) return
+
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(async () => {
+        try {
+          await api.updatePage(pageId, {
+            canvas_data: {
+              elements: elements.map((element) => ({ ...element })),
+              appState: {
+                viewBackgroundColor: appState.viewBackgroundColor,
+                theme: appState.theme,
+                zoom: appState.zoom,
+                scrollX: appState.scrollX,
+                scrollY: appState.scrollY,
+                gridSize: appState.gridSize,
+              },
+              files: files || {},
+            },
+          })
+        } catch (err) {
+          console.error("Canvas save failed:", err)
+        }
+      }, 1500)
+    },
+    [pageId]
+  )
+
+  const addElements = useCallback((newElements: ExcalidrawElement[]) => {
+    const drawingApi = excalidrawRef.current
+    if (!drawingApi) return
+
+    const currentElements = drawingApi.getSceneElements()
+    drawingApi.updateScene({
+      elements: [...currentElements, ...newElements],
+    })
+  }, [])
+
+  const scrollToElement = useCallback((elementId: string) => {
+    const drawingApi = excalidrawRef.current
+    if (!drawingApi) return
+
+    const target = drawingApi.getSceneElements().find((el) => el.id === elementId)
+    if (target) {
+      drawingApi.scrollToContent(target, { fitToContent: true, animate: true })
+    }
+  }, [])
+
+  const searchElements = useCallback((query: string): ExcalidrawElement[] => {
+    const drawingApi = excalidrawRef.current
+    if (!drawingApi) return []
+
+    const lower = query.toLowerCase()
+
+    return drawingApi.getSceneElements().filter((element) => {
+      const customData = readCustomData(element)
+      if (element.type === "text" && element.text?.toLowerCase().includes(lower)) return true
+      if (customData.title?.toLowerCase().includes(lower)) return true
+      if (customData.tags?.some((tag) => tag.toLowerCase().includes(lower))) return true
+      return false
+    })
+  }, [])
+
+  return {
+    excalidrawRef,
+    loading,
+    initialScene,
+    error,
+    saveScene,
+    addElements,
+    scrollToElement,
+    searchElements,
+    reload: loadScene,
+  }
+}
+
+function normalizeScene(value: unknown): CanvasScene {
+  if (!value || typeof value !== "object") return { ...EMPTY_SCENE }
+
+  const scene = value as Partial<CanvasScene>
+  return {
+    elements: Array.isArray(scene.elements) ? scene.elements : [],
+    appState: sanitizeAppState({
+      ...EMPTY_SCENE.appState,
+      ...(scene.appState || {}),
+      viewBackgroundColor: "#0e0e1a",
+      theme: "dark",
+    }),
+    files: scene.files || {},
+  }
+}
+
+function sanitizeAppState(appState: CanvasScene["appState"]): CanvasScene["appState"] {
+  const next = { ...appState }
+  if (next.gridSize === null) {
+    delete next.gridSize
+  }
+  return next
+}
+
+function getGridPosition(index: number, note: NoteLike): { x: number; y: number } {
+  if (typeof note.canvas_x === "number" && typeof note.canvas_y === "number") {
+    return { x: note.canvas_x, y: note.canvas_y }
+  }
+
+  const col = index % 3
+  const row = Math.floor(index / 3)
+  return {
+    x: 100 + col * 420,
+    y: 100 + row * 350,
+  }
+}
+
+function readCustomData(element: ExcalidrawElement): CustomData {
+  return ((element as ExcalidrawElement & { customData?: CustomData }).customData || {}) as CustomData
+}
+
+interface CustomData {
+  noteId?: string
+  title?: string
+  tags?: string[]
+  legacyElementId?: string
+  [key: string]: unknown
+}
+
+interface NoteLike {
+  id: string
+  title?: string | null
+  summary?: string | null
+  raw_text?: string | null
+  tags?: string[] | null
+  canvas_x?: number | null
+  canvas_y?: number | null
+}
+
+interface LegacyElement {
+  id: string
+  element_type: string
+  content?: string | null
+  position_x?: number | null
+  position_y?: number | null
+}
+
+
+=== FILE: frontend\src\core\CommandBar.tsx ===
+
+import { useRef } from "react"
+import { Search, ArrowUp, Command } from "lucide-react"
+import { useCommands } from "../hooks/useCommands"
+import { useKeyboard } from "../hooks/useKeyboard"
+import { useAppContext } from "../hooks/useAppContext"
+import { motion, AnimatePresence } from "framer-motion"
+
+export default function CommandBar() {
+  const inputRef = useRef<HTMLInputElement>(null)
+  useKeyboard(inputRef)
+  const { inputValue, handleInput, suggestions, selectedIndex, setSelectedIndex, handleSubmit } = useCommands()
+  const { current } = useAppContext()
+
+  const placeholder =
+    current.type === "page"
+      ? `Ask about ${current.pageName || "this page"}, /command…`
+      : current.type === "settings"
+      ? "Adjust a setting…"
+      : "Ask anything or type / for commands…"
+
+  return (
+    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[560px] max-w-[calc(100vw-40px)]">
+
+      {/* ── Scrollable autocomplete ── */}
+      <AnimatePresence>
+        {suggestions.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.97 }}
+            transition={{ duration: 0.12 }}
+            className="glass-solid rounded-2xl mb-2 overflow-hidden relative"
+          >
+            {/* MAX HEIGHT + SCROLL */}
+            <div className="max-h-[280px] overflow-y-auto overscroll-contain py-1">
+              {suggestions.map((cmd, i) => (
+                <div
+                  key={cmd.name}
+                  onClick={() => { handleInput(cmd.name + " "); inputRef.current?.focus() }}
+                  onMouseEnter={() => setSelectedIndex(i)}
+                  className={`px-4 py-2 mx-1 rounded-lg flex items-center justify-between cursor-pointer transition-colors relative z-10 ${
+                    i === selectedIndex
+                      ? "bg-[rgba(99,102,241,0.12)]"
+                      : "hover:bg-[rgba(255,255,255,0.04)]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="text-[13px] font-mono font-semibold text-[var(--accent-light)] shrink-0">
+                      {cmd.name}
+                    </span>
+                    {cmd.args && (
+                      <span className="text-[11px] text-[var(--glass-text-muted)] italic truncate">
+                        {cmd.args}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-[var(--glass-text-dim)] shrink-0 ml-4 text-right">
+                    {cmd.description}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Input Pill ── */}
+      <form onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
+        <div className="glass cmd-glow rounded-2xl flex items-center px-4 py-3 gap-3 relative transition-all focus-within:border-[rgba(99,102,241,0.25)]">
+          <Search size={15} className="text-[var(--glass-text-muted)] shrink-0 relative z-10" />
+          <input
+            ref={inputRef}
+            value={inputValue}
+            onChange={(e) => handleInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (suggestions.length > 0) {
+                if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((s: number) => Math.max(0, s - 1)) }
+                else if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((s: number) => Math.min(suggestions.length - 1, s + 1)) }
+                else if (e.key === "Tab") { e.preventDefault(); handleInput(suggestions[selectedIndex].name + " ") }
+              }
+            }}
+            placeholder={placeholder}
+            className="bg-transparent border-none outline-none text-[14px] text-[var(--glass-text)] placeholder-[var(--glass-text-muted)] flex-1 min-w-0 relative z-10"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {inputValue.trim() ? (
+            <button
+              type="submit"
+              className="w-8 h-8 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-light)] flex items-center justify-center transition-colors shrink-0 relative z-10"
+            >
+              <ArrowUp size={14} className="text-white" />
+            </button>
+          ) : (
+            <kbd className="text-[10px] font-mono text-[var(--glass-text-muted)] bg-[rgba(255,255,255,0.05)] px-2 py-1 rounded-md flex items-center gap-1 shrink-0 relative z-10">
+              <Command size={10} /> K
+            </kbd>
+          )}
+        </div>
+      </form>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\core\ContextProvider.tsx ===
+
+import type { ReactNode } from "react"
+
+/**
+ * ContextProvider wraps the app.
+ * State is managed by zustand (useAppContextStore), not React context.
+ * This component exists as a structural placeholder for:
+ * - Future React context providers (theme, locale, etc.)
+ * - Error boundaries
+ * - Initialization side effects
+ */
+export function ContextProvider({ children }: { children: ReactNode }) {
+  return <>{children}</>
+}
+
+
+=== FILE: frontend\src\core\Stream.tsx ===
+
+import { useEffect, useRef, useState, useCallback } from "react"
+import { useStream } from "../hooks/useStream"
+import { useAppContext } from "../hooks/useAppContext"
+import StreamMessage from "./StreamMessage"
+import StreamBlock from "./StreamBlock"
+import { Loader2, GripHorizontal, Minimize2, Maximize2, MessageCircle } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
+
+export default function Stream() {
+  const { items, isLoading } = useStream()
+  const { current } = useAppContext()
+  const endRef = useRef<HTMLDivElement>(null)
+  const isCanvas = current.type === "page"
+
+  const [collapsed, setCollapsed] = useState(false)
+  const [maximized, setMaximized] = useState(false)
+
+  // ─── Truly draggable position ───
+  const [pos, setPos] = useState({ x: 0, y: 0 })
+  const dragging = useRef(false)
+  const dragOffset = useRef({ x: 0, y: 0 })
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [items.length, isLoading])
+
+  // Reset on page switch
+  useEffect(() => {
+    if (isCanvas) {
+      setCollapsed(false)
+      setMaximized(false)
+      setPos({ x: 0, y: 0 })
+    }
+  }, [isCanvas, current.pageId])
+
+  // Global drag listeners
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!dragging.current) return
+      setPos({
+        x: e.clientX - dragOffset.current.x,
+        y: e.clientY - dragOffset.current.y,
+      })
+    }
+    function onUp() { dragging.current = false }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+  }, [])
+
+  const startDrag = useCallback((e: React.MouseEvent) => {
+    dragging.current = true
+    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
+  }, [pos])
+
+  // ═══════════════════════════
+  //  HOME CONTEXT — full stream
+  // ═══════════════════════════
+  if (!isCanvas) {
+    return (
+      <div className="absolute inset-0 z-20 overflow-y-auto px-4 pt-10 pb-24">
+        <div className="max-w-[660px] mx-auto flex flex-col gap-5">
+          <AnimatePresence initial={false}>
+            {items.map((item) => (
+              <motion.div
+                key={item.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: "spring", damping: 28, stiffness: 320 }}
+              >
+                {item.type === "block" ? (
+                  <StreamBlock item={item} />
+                ) : item.type === "system" ? (
+                  <div className="text-center text-[11px] text-[var(--glass-text-muted)] py-1.5 font-mono">
+                    {item.content}
+                  </div>
+                ) : (
+                  <StreamMessage item={item} />
+                )}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+          {isLoading && <LoadingDots />}
+          <div ref={endRef} />
+        </div>
+      </div>
+    )
+  }
+
+  // ═══════════════════════════
+  //  PAGE CONTEXT — collapsed bubble
+  // ═══════════════════════════
+  if (collapsed) {
+    return (
+      <motion.button
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.8, opacity: 0 }}
+        onClick={() => setCollapsed(false)}
+        className="fixed bottom-20 right-6 z-20 glass rounded-full w-12 h-12 flex items-center justify-center glass-hover"
+        style={{ left: pos.x || "auto", top: pos.y || "auto", right: pos.x ? "auto" : 24, bottom: pos.y ? "auto" : 80 }}
+      >
+        <MessageCircle size={18} className="text-[var(--accent-light)]" />
+        {items.length > 1 && (
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-[var(--accent)] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+            {items.filter(i => i.type === "assistant").length}
+          </span>
+        )}
+      </motion.button>
+    )
+  }
+
+  // ═══════════════════════════
+  //  PAGE CONTEXT — floating panel
+  // ═══════════════════════════
+  const panelStyle = maximized
+    ? { top: 16, left: 16, right: 16, bottom: 80, width: "auto" as const }
+    : { top: pos.y || 16, left: pos.x || "auto", right: pos.x ? "auto" : 16, width: 370, maxHeight: "calc(100vh - 120px)" }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.92, y: 20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.92 }}
+      transition={{ type: "spring", damping: 24, stiffness: 280 }}
+      className="fixed z-20 glass-solid rounded-2xl flex flex-col overflow-hidden"
+      style={panelStyle}
+    >
+      {/* ─── Header / Drag Handle ─── */}
+      <div
+        className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--glass-border)] draggable shrink-0 relative z-10"
+        onMouseDown={maximized ? undefined : startDrag}
+      >
+        <div className="flex items-center gap-2">
+          <GripHorizontal size={13} className="text-[var(--glass-text-muted)]" />
+          <span className="text-[11px] font-semibold tracking-wider uppercase text-[var(--glass-text-dim)]">
+            {current.pageName || "Chat"}
+          </span>
+        </div>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={() => setMaximized(!maximized)}
+            className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.06)] text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] transition-colors"
+          >
+            {maximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          </button>
+          <button
+            onClick={() => setCollapsed(true)}
+            className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.06)] text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] transition-colors"
+          >
+            <Minimize2 size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Messages ─── */}
+      <div className="flex-1 overflow-y-auto px-3 py-3 min-h-0">
+        <div className="flex flex-col gap-3">
+          {items.map((item) => (
+            <div key={item.id}>
+              {item.type === "system" ? (
+                <div className="text-[10px] text-[var(--glass-text-muted)] text-center py-1 font-mono">
+                  {item.content}
+                </div>
+              ) : item.type === "block" ? null : (
+                <StreamMessage item={item} />
+              )}
+            </div>
+          ))}
+          {isLoading && <LoadingDots />}
+          <div ref={endRef} />
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+function LoadingDots() {
+  return (
+    <div className="flex items-center gap-2 py-1.5">
+      <Loader2 size={13} className="text-[var(--accent)] animate-spin" />
+      <span className="text-[12px] text-[var(--glass-text-dim)]">Thinking…</span>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\core\StreamBlock.tsx ===
+
+import type { StreamItem } from "../types"
+import WelcomeBlock from "../blocks/WelcomeBlock"
+import NoteGridBlock from "../blocks/NoteGridBlock"
+import PageListBlock from "../blocks/PageListBlock"
+import StatsBlock from "../blocks/StatsBlock"
+import TagCloudBlock from "../blocks/TagCloudBlock"
+import SearchResultsBlock from "../blocks/SearchResultsBlock"
+import HelpBlock from "../blocks/HelpBlock"
+import NoteDetailBlock from "../blocks/NoteDetailBlock"
+import TaskListBlock from "../blocks/TaskListBlock"
+import ReadingPathBlock from "../blocks/ReadingPathBlock"
+import GapAnalysisBlock from "../blocks/GapAnalysisBlock"
+import CuratorReportBlock from "../blocks/CuratorReportBlock"
+import SettingsBlock from "../blocks/SettingsBlock"
+import HistoryBlock from "../blocks/HistoryBlock"
+
+const BLOCK_MAP: Record<string, React.FC<{ item: StreamItem }>> = {
+  "welcome": () => <WelcomeBlock />,
+  "note-grid": NoteGridBlock,
+  "page-list": () => <PageListBlock />,
+  "stats": () => <StatsBlock />,
+  "tag-cloud": () => <TagCloudBlock />,
+  "search-results": SearchResultsBlock,
+  "help": () => <HelpBlock />,
+  "note-detail": NoteDetailBlock,
+  "task-list": TaskListBlock,
+  "reading-path": ReadingPathBlock,
+  "gap-analysis": GapAnalysisBlock,
+  "curator-report": CuratorReportBlock,
+  "settings": () => <SettingsBlock />,
+  "history": () => <HistoryBlock />,
+}
+
+export default function StreamBlock({ item }: { item: StreamItem }) {
+  const Block = item.blockType ? BLOCK_MAP[item.blockType] : null
+
+  if (!Block) {
+    return (
+      <div className="p-4 border border-dashed border-[rgba(255,255,255,0.1)] rounded-xl text-[12px] text-[var(--glass-text-muted)] font-mono">
+        Unknown block: {item.blockType}
+      </div>
+    )
+  }
+
+  return <Block item={item} />
+}
+
+
+=== FILE: frontend\src\core\StreamMessage.tsx ===
+
+import { FileText, Sparkles } from "lucide-react"
+import type { StreamItem } from "../types"
+import { useStream } from "../hooks/useStream"
+import { useAppContext } from "../hooks/useAppContext"
+import { api } from "../api/client"
+
+function renderBold(text: string) {
+  return text.split(/(\*\*.*?\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
+      : <span key={i}>{part}</span>
+  )
+}
+
+export default function StreamMessage({ item }: { item: StreamItem }) {
+  const isUser = item.type === "user"
+  const { addUserMessage, addAssistantMessage, setLoading, items } = useStream()
+  const { current } = useAppContext()
+
+  async function followUp(q: string) {
+    addUserMessage(q)
+    setLoading(true)
+    try {
+      const h = items.filter(i => i.type === "user" || i.type === "assistant").slice(-10).map(i => ({ role: i.type as string, content: i.content || "" }))
+      const r = await api.chat(q, h, current.type, current.pageId)
+      addAssistantMessage(r.answer || "No response.", r.sources, r.follow_ups)
+    } catch { addAssistantMessage("Connection error.") }
+    finally { setLoading(false) }
+  }
+
+  // ── User message ──
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] bg-[var(--accent)] text-white px-4 py-2.5 rounded-[18px] rounded-br-[4px] text-[13.5px] leading-relaxed shadow-lg" style={{ boxShadow: "0 4px 20px rgba(99,102,241,0.3)" }}>
+          {item.content}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Assistant message ──
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5">
+        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[var(--accent)] to-[var(--purple)] flex items-center justify-center shadow-md" style={{ boxShadow: "0 2px 10px rgba(99,102,241,0.3)" }}>
+          <Sparkles size={9} className="text-white" />
+        </div>
+        <span className="text-[9px] uppercase font-bold tracking-[0.15em] text-[var(--glass-text-muted)]">Mnemos</span>
+      </div>
+
+      <div className="text-[13.5px] text-[var(--glass-text)] leading-[1.75] whitespace-pre-wrap pl-6.5">
+        {renderBold(item.content || "")}
+      </div>
+
+      {/* Sources */}
+      {item.sources && item.sources.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pl-6.5 mt-1">
+          {item.sources.map(s => (
+            <div key={s.id} className="glass rounded-full px-2 py-0.5 flex items-center gap-1 text-[10px] glass-hover cursor-pointer relative">
+              <FileText size={9} className="text-[var(--glass-text-dim)]" />
+              <span className="text-[var(--glass-text)] max-w-[100px] truncate">{s.title}</span>
+              <span className="text-[var(--green)] font-bold">{Math.round(s.similarity * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Follow-ups */}
+      {item.followUps && item.followUps.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pl-6.5 mt-1.5">
+          {item.followUps.map((q, i) => (
+            <button key={i} onClick={() => followUp(q)} className="text-[11px] text-[var(--accent-light)] border border-[rgba(99,102,241,0.15)] rounded-full px-3 py-1 hover:bg-[rgba(99,102,241,0.06)] transition-colors">
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassBadge.tsx ===
+
+import type { ReactNode } from "react"
+
+type Variant = "info" | "success" | "warning" | "error"
+
+const V: Record<Variant, string> = {
+  info: "bg-indigo-50 text-indigo-600",
+  success: "bg-emerald-50 text-emerald-600",
+  warning: "bg-amber-50 text-amber-600",
+  error: "bg-red-50 text-red-600",
+}
+
+export function GlassBadge({ children, variant = "info", className = "" }: { children: ReactNode; variant?: Variant; className?: string }) {
+  return (
+    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${V[variant]} ${className}`}>
+      {children}
+    </span>
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassButton.tsx ===
+
+import type { ReactNode, ButtonHTMLAttributes } from "react"
+
+type Variant = "primary" | "ghost" | "danger"
+
+interface GlassButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  children: ReactNode
+  variant?: Variant
+}
+
+const VARIANTS: Record<Variant, string> = {
+  primary: "bg-[rgba(99,102,241,0.1)] text-[var(--accent)] border-[rgba(99,102,241,0.2)] hover:bg-[rgba(99,102,241,0.2)]",
+  ghost: "bg-transparent text-[var(--glass-text-dim)] border-transparent hover:bg-[rgba(255,255,255,0.05)] hover:text-white",
+  danger: "bg-[rgba(239,68,68,0.1)] text-[var(--red)] border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.2)]",
+}
+
+export function GlassButton({ children, variant = "primary", className = "", ...props }: GlassButtonProps) {
+  return (
+    <button
+      className={`px-4 py-2 rounded-xl transition-all font-semibold text-[13px] border ${VARIANTS[variant]} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassCard.tsx ===
+
+import type { ReactNode } from "react"
+
+interface GlassCardProps {
+  children: ReactNode
+  className?: string
+  onClick?: () => void
+}
+
+export function GlassCard({ children, className = "", onClick }: GlassCardProps) {
+  return (
+    <div
+      className={`glass-surface-2 p-6 rounded-2xl ${onClick ? "cursor-pointer glass-hover" : ""} ${className}`}
+      onClick={onClick}
+    >
+      {children}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassChip.tsx ===
+
+import type { ReactNode } from "react"
+
+interface GlassChipProps {
+  children: ReactNode
+  onRemove?: () => void
+  onClick?: () => void
+  className?: string
+}
+
+export function GlassChip({ children, onRemove, onClick, className = "" }: GlassChipProps) {
+  return (
+    <div
+      className={`glass-surface-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-[var(--glass-text)] ${onClick ? "cursor-pointer glass-hover" : ""} ${className}`}
+      onClick={onClick}
+    >
+      {children}
+      {onRemove && (
+        <button
+          className="text-[var(--glass-text-muted)] hover:text-white transition-colors ml-0.5"
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassDropdown.tsx ===
+
+import { useState, useRef, useEffect } from "react"
+
+interface Option {
+  value: string
+  label: string
+}
+
+interface GlassDropdownProps {
+  options: Option[]
+  value: string
+  onChange: (value: string) => void
+  className?: string
+}
+
+export function GlassDropdown({ options, value, onChange, className = "" }: GlassDropdownProps) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Close on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClick)
+      return () => document.removeEventListener("mousedown", handleClick)
+    }
+  }, [open])
+
+  const selected = options.find((o) => o.value === value)
+
+  return (
+    <div className={`relative ${className}`} ref={ref}>
+      <button
+        type="button"
+        className="glass-surface-3 px-3 py-1.5 rounded-lg text-[12px] cursor-pointer flex justify-between items-center min-w-[130px] text-left"
+        onClick={() => setOpen(!open)}
+      >
+        <span className="text-[var(--glass-text)]">{selected?.label || "Select..."}</span>
+        <span className="text-[10px] text-[var(--glass-text-muted)] ml-2">▼</span>
+      </button>
+
+      {open && (
+        <div className="absolute top-full mt-1 left-0 right-0 glass-surface-2 rounded-xl overflow-hidden shadow-xl z-50">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              className={`w-full text-left px-3 py-2 text-[12px] transition-colors ${
+                opt.value === value
+                  ? "text-[var(--accent)] bg-[rgba(99,102,241,0.08)]"
+                  : "text-[var(--glass-text-dim)] hover:text-white hover:bg-[rgba(255,255,255,0.05)]"
+              }`}
+              onClick={() => {
+                onChange(opt.value)
+                setOpen(false)
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassInput.tsx ===
+
+import type { InputHTMLAttributes } from "react"
+
+interface GlassInputProps extends InputHTMLAttributes<HTMLInputElement> {
+  className?: string
+}
+
+export function GlassInput({ className = "", ...props }: GlassInputProps) {
+  return (
+    <input
+      className={`glass-surface-3 bg-transparent px-4 py-2 rounded-xl text-[14px] text-[var(--glass-text)] placeholder-[var(--glass-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)] transition-shadow ${className}`}
+      {...props}
+    />
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassModal.tsx ===
+
+import type { ReactNode } from "react"
+import { motion, AnimatePresence } from "framer-motion"
+
+interface GlassModalProps {
+  isOpen: boolean
+  onClose: () => void
+  title: string
+  children: ReactNode
+}
+
+export function GlassModal({ isOpen, onClose, title, children }: GlassModalProps) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={onClose}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="glass-surface-2 w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center p-4 border-b border-[var(--glass-border)]">
+              <h3 className="font-semibold text-white text-[15px]">{title}</h3>
+              <button
+                onClick={onClose}
+                className="text-[var(--glass-text-muted)] hover:text-white transition-colors w-7 h-7 rounded-lg hover:bg-[rgba(255,255,255,0.05)] flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6">{children}</div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+
+=== FILE: frontend\src\glass\GlassTooltip.tsx ===
+
+import { useState, useRef, useCallback, type ReactNode } from "react"
+
+interface GlassTooltipProps {
+  content: string
+  children: ReactNode
+  delay?: number
+}
+
+export function GlassTooltip({ content, children, delay = 400 }: GlassTooltipProps) {
+  const [show, setShow] = useState(false)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const handleEnter = useCallback(() => {
+    timeoutRef.current = setTimeout(() => setShow(true), delay)
+  }, [delay])
+
+  const handleLeave = useCallback(() => {
+    clearTimeout(timeoutRef.current)
+    setShow(false)
+  }, [])
+
+  return (
+    <div className="relative inline-block" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+      {children}
+      {show && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1 glass-surface-2 rounded-md text-[10px] text-white whitespace-nowrap shadow-xl z-50 pointer-events-none">
+          {content}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-[rgba(255,255,255,0.06)]" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\hooks\useAppContext.ts ===
+
+import { create } from "zustand"
+import type { AppContext, ContextType } from "../types"
+
+interface ContextState {
+  current: AppContext
+  switchTo: (type: ContextType, pageId?: string, pageName?: string) => void
+  goBack: () => void
+  goHome: () => void
+}
+
+export const useAppContextStore = create<ContextState>((set, get) => ({
+  current: { type: "home" },
+
+  switchTo: (type, pageId, pageName) =>
+    set({
+      current: {
+        type,
+        pageId,
+        pageName,
+        previousContext: get().current,
+      },
+    }),
+
+  goBack: () =>
+    set((state) => ({
+      current: state.current.previousContext || { type: "home" },
+    })),
+
+  goHome: () =>
+    set({ current: { type: "home" } }),
+}))
+
+// Named useAppContext to avoid shadowing React.useContext
+export function useAppContext() {
+  return useAppContextStore()
+}
+
+
+=== FILE: frontend\src\hooks\useCommands.ts ===
+
+import { useState, useCallback } from "react"
+import { useStream } from "./useStream"
+import { useAppContext } from "./useAppContext"
+import { api } from "../api/client"
+import type { Command, ContextType } from "../types"
+
+const COMMANDS: Command[] = [
+  { name: "/pages", aliases: ["/p"], description: "List all pages with stats", context: ["home"], handler: "pages" },
+  { name: "/page", aliases: [], description: "Create or delete a page", context: ["home"], args: "create|delete [name]", handler: "page" },
+  { name: "/open", aliases: ["/o"], description: "Open a page canvas", context: ["home", "page", "settings", "history"], args: "<page name>", handler: "open" },
+  { name: "/search", aliases: ["/s"], description: "Semantic search", context: ["home", "page"], args: "<query>", handler: "search" },
+  { name: "/notes", aliases: ["/n"], description: "Browse notes (optional #tag)", context: ["home", "page"], args: "[#tag|recent]", handler: "notes" },
+  { name: "/tags", aliases: [], description: "View tag cloud with counts", context: ["home", "page"], handler: "tags" },
+  { name: "/tasks", aliases: ["/t"], description: "List all tasks across pages", context: ["home", "page"], handler: "tasks" },
+  { name: "/stats", aliases: [], description: "Workspace statistics", context: ["home"], handler: "stats" },
+  { name: "/capture", aliases: [], description: "Quick capture a note", context: ["home", "page"], args: "<text> [--page X]", handler: "capture" },
+  { name: "/curator", aliases: ["/clean"], description: "Run maintenance scan", context: ["home"], handler: "curator" },
+  { name: "/find", aliases: [], description: "Find text on canvas", context: ["page"], args: "<text>", handler: "find" },
+  { name: "/add", aliases: [], description: "Add a note or sticky to canvas", context: ["page"], args: "<text>", handler: "add" },
+  { name: "/layout", aliases: ["/reorganize"], description: "Auto-reorganize canvas", context: ["page"], handler: "layout" },
+  { name: "/summarize", aliases: [], description: "AI summarizes all page content", context: ["page"], handler: "summarize" },
+  { name: "/gaps", aliases: [], description: "What's missing on this page", context: ["home", "page"], handler: "gaps" },
+  { name: "/reading", aliases: ["/path"], description: "Suggested reading order", context: ["home", "page"], args: "[topic]", handler: "reading" },
+  { name: "/export", aliases: [], description: "Export page as markdown", context: ["page"], handler: "export" },
+  { name: "/rename", aliases: [], description: "Rename current page", context: ["page"], args: "<new name>", handler: "rename" },
+  { name: "/close", aliases: [], description: "Close page, return to home", context: ["page", "settings", "history"], handler: "close" },
+  { name: "/settings", aliases: [], description: "Open settings", context: ["home", "page", "settings", "history"], handler: "settings" },
+  { name: "/history", aliases: ["/h"], description: "View past conversations", context: ["home", "page", "settings", "history"], handler: "history" },
+  { name: "/home", aliases: [], description: "Go to home context", context: ["home", "page", "settings", "history"], handler: "home" },
+  { name: "/back", aliases: [], description: "Go to previous context", context: ["home", "page", "settings", "history"], handler: "back" },
+  { name: "/clear", aliases: ["/c"], description: "Clear conversation stream", context: ["home", "page", "settings", "history"], handler: "clear" },
+  { name: "/help", aliases: ["/?"], description: "Show all commands", context: ["home", "page", "settings", "history"], handler: "help" },
+]
+
+export function useCommands() {
+  const [inputValue, setInputValue] = useState("")
+  const [suggestions, setSuggestions] = useState<Command[]>([])
+  const [selectedIndex, setSelectedIndex] = useState(0)
+
+  const { items, addUserMessage, addAssistantMessage, addBlock, addSystemMessage, clearStream, setLoading } = useStream()
+  const { current, switchTo, goBack, goHome } = useAppContext()
+
+  const getAutoComplete = useCallback(
+    (partial: string, ctx: ContextType) => {
+      if (!partial.startsWith("/")) return []
+      const term = partial.toLowerCase().split(" ")[0]
+      return COMMANDS.filter(
+        (command) =>
+          command.context.includes(ctx) &&
+          (command.name.startsWith(term) || command.aliases.some((alias) => alias.startsWith(term)))
+      )
+    },
+    []
+  )
+
+  const handleInput = (val: string) => {
+    setInputValue(val)
+    const parts = val.split(" ")
+    if (val.startsWith("/") && parts.length <= 1) {
+      setSuggestions(getAutoComplete(val, current.type))
+      setSelectedIndex(0)
+    } else {
+      setSuggestions([])
+    }
+  }
+
+  const executeCommand = async (raw: string) => {
+    const parts = raw.trim().split(/\s+/)
+    const cmdStr = parts[0].toLowerCase()
+    const args = parts.slice(1).join(" ")
+
+    const cmd = COMMANDS.find((command) => command.name === cmdStr || command.aliases.includes(cmdStr))
+
+    if (!cmd) {
+      addAssistantMessage(`Unknown command: \`${cmdStr}\`. Type **/help** for available commands.`)
+      return
+    }
+
+    if (!cmd.context.includes(current.type)) {
+      addAssistantMessage(`**${cmdStr}** is not available in **${current.type}** context. Type /help to see what works here.`)
+      return
+    }
+
+    switch (cmd.handler) {
+      case "open": {
+        if (!args) {
+          addAssistantMessage("Usage: `/open <page name>`")
+          return
+        }
+        try {
+          const res = await api.listPages()
+          const pages = res.pages || res || []
+          const match = pages.find((page: { name: string }) => page.name.toLowerCase() === args.toLowerCase())
+          if (match) {
+            switchTo("page", match.id, match.name)
+            addSystemMessage(`Opened page: ${match.icon || "Page"} ${match.name}`)
+          } else {
+            addAssistantMessage(`Page "${args}" not found. Available pages:\n${pages.map((page: { icon: string; name: string }) => `- ${page.icon} ${page.name}`).join("\n")}`)
+          }
+        } catch {
+          addAssistantMessage("Failed to load pages.")
+        }
+        break
+      }
+
+      case "close":
+      case "home":
+        goHome()
+        addSystemMessage("Returned to home.")
+        addBlock("welcome")
+        break
+
+      case "back":
+        goBack()
+        addSystemMessage("Navigated back.")
+        break
+
+      case "pages":
+        addBlock("page-list")
+        break
+
+      case "page": {
+        const sub = parts[1]?.toLowerCase()
+        const name = parts.slice(2).join(" ")
+        if (sub === "create" && name) {
+          try {
+            await api.createPage({ name })
+            addSystemMessage(`Created page: ${name}`)
+            addBlock("page-list")
+          } catch {
+            addAssistantMessage(`Failed to create page "${name}". It may already exist.`)
+          }
+        } else if (sub === "delete" && name) {
+          try {
+            const res = await api.listPages()
+            const pages = res.pages || res || []
+            const match = pages.find((page: { name: string }) => page.name.toLowerCase() === name.toLowerCase())
+            if (match) {
+              await api.deletePage(match.id)
+              addSystemMessage(`Deleted page: ${name}. Notes moved to Uncategorized.`)
+            } else {
+              addAssistantMessage(`Page "${name}" not found.`)
+            }
+          } catch {
+            addAssistantMessage("Failed to delete page.")
+          }
+        } else {
+          addAssistantMessage("Usage: `/page create <name>` or `/page delete <name>`")
+        }
+        break
+      }
+
+      case "notes": {
+        const tag = args.startsWith("#") ? args.slice(1) : args === "recent" ? undefined : args || undefined
+        const limit = args === "recent" ? 10 : undefined
+        addBlock("note-grid", { limit }, { tag, pageId: current.pageId })
+        break
+      }
+
+      case "search":
+        if (!args) {
+          addAssistantMessage("Usage: `/search <query>`\nExample: `/search docker networking`")
+        } else {
+          addBlock("search-results", undefined, { query: args, pageId: current.pageId })
+        }
+        break
+
+      case "stats":
+        addBlock("stats")
+        break
+
+      case "tags":
+        addBlock("tag-cloud")
+        break
+
+      case "tasks":
+        addBlock("task-list", undefined, { pageId: current.pageId })
+        break
+
+      case "capture": {
+        if (!args) {
+          addAssistantMessage("Usage: `/capture <text>` or `/capture <text> --page Docker`")
+          return
+        }
+        const pageMatch = args.match(/--page\s+(.+)$/i)
+        const text = pageMatch ? args.replace(pageMatch[0], "").trim() : args
+        const pageHint = pageMatch?.[1]?.trim() || undefined
+        try {
+          setLoading(true)
+          const resp = await api.capture({
+            text,
+            capture_type: "manual",
+            page_hint: pageHint,
+          })
+          addSystemMessage(`Note captured${resp.page_name ? ` -> ${resp.page_name}` : ""}. Processing in background.`)
+        } catch {
+          addAssistantMessage("Failed to capture note.")
+        } finally {
+          setLoading(false)
+        }
+        break
+      }
+
+      case "curator":
+        addBlock("curator-report")
+        break
+
+      case "reading":
+        addBlock("reading-path", undefined, { topic: args || undefined, pageId: current.pageId })
+        break
+
+      case "gaps":
+        addBlock("gap-analysis", undefined, { pageId: current.pageId })
+        break
+
+      case "find":
+        if (!args) {
+          addAssistantMessage("Usage: `/find <text>`")
+        } else {
+          window.dispatchEvent(new CustomEvent("canvas:search", { detail: args }))
+        }
+        break
+
+      case "add": {
+        if (!args) {
+          addAssistantMessage("Usage: `/add <text>` or `/add sticky: <text>`")
+          return
+        }
+
+        const lower = args.toLowerCase()
+        const isPrefixed = lower.startsWith("sticky:") || lower.startsWith("note:")
+        const type = lower.startsWith("sticky:") ? "sticky" : "note"
+        const content = isPrefixed ? args.split(":").slice(1).join(":").trim() : args
+
+        window.dispatchEvent(new CustomEvent("canvas:add", {
+          detail: { type, content },
+        }))
+        break
+      }
+
+      case "layout":
+        try {
+          setLoading(true)
+          addSystemMessage("Reorganizing canvas elements...")
+          await api.triggerPageLayout(current.pageId!)
+          window.dispatchEvent(new CustomEvent("canvas:refresh"))
+          addSystemMessage("Canvas reorganized.")
+        } catch {
+          addAssistantMessage("Layout is not available yet. Drag elements manually.")
+        } finally {
+          setLoading(false)
+        }
+        break
+
+      case "summarize": {
+        setLoading(true)
+        try {
+          const resp = await api.chat("Summarize everything on this page.", [], "page", current.pageId)
+          addAssistantMessage(resp.answer || "No summary available.", resp.sources, resp.follow_ups)
+        } catch {
+          addAssistantMessage("Failed to summarize page.")
+        } finally {
+          setLoading(false)
+        }
+        break
+      }
+
+      case "export":
+        addAssistantMessage("Export is not yet implemented. Coming in v2.5.")
+        break
+
+      case "rename": {
+        if (!args) {
+          addAssistantMessage("Usage: `/rename <new name>`")
+          return
+        }
+        try {
+          await api.updatePage(current.pageId!, { name: args })
+          switchTo("page", current.pageId, args)
+          addSystemMessage(`Page renamed to "${args}".`)
+        } catch {
+          addAssistantMessage("Failed to rename page.")
+        }
+        break
+      }
+
+      case "settings":
+        switchTo("settings")
+        addBlock("settings")
+        break
+
+      case "history":
+        switchTo("history")
+        addBlock("history")
+        break
+
+      case "clear":
+        clearStream()
+        break
+
+      case "help":
+        addBlock("help")
+        break
+
+      default:
+        addAssistantMessage(`Command handler missing: ${cmd.handler}`)
+    }
+  }
+
+  function detectNaturalLanguageCommand(text: string): boolean {
+    const lower = text.toLowerCase().trim()
+    const openMatch = lower.match(/^open\s+(.+)$/)
+
+    if (openMatch) {
+      executeCommand(`/open ${openMatch[1]}`)
+      return true
+    }
+
+    if (lower === "close" || lower === "go home") {
+      executeCommand("/home")
+      return true
+    }
+    if (lower === "go back") {
+      executeCommand("/back")
+      return true
+    }
+
+    return false
+  }
+
+  const handleSubmit = async () => {
+    if (!inputValue.trim()) return
+    const q = inputValue.trim()
+
+    if (suggestions.length > 0 && q.startsWith("/") && !q.includes(" ")) {
+      const selected = suggestions[selectedIndex]
+      if (selected) {
+        setInputValue(`${selected.name} `)
+        setSuggestions([])
+        return
+      }
+    }
+
+    setInputValue("")
+    setSuggestions([])
+
+    if (q.startsWith("/")) {
+      addUserMessage(q)
+      await executeCommand(q)
+      return
+    }
+
+    addUserMessage(q)
+
+    if (detectNaturalLanguageCommand(q)) return
+
+    setLoading(true)
+    try {
+      const history = items
+        .filter((item) => item.type === "user" || item.type === "assistant")
+        .slice(-10)
+        .map((item) => ({ role: item.type as string, content: item.content || "" }))
+
+      const resp = await api.chat(q, history, current.type, current.pageId)
+      addAssistantMessage(resp.answer || "I couldn't find relevant information.", resp.sources, resp.follow_ups)
+    } catch {
+      addAssistantMessage("Error connecting to backend. Is the server running?")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return {
+    inputValue,
+    handleInput,
+    suggestions,
+    selectedIndex,
+    setSelectedIndex,
+    handleSubmit,
+  }
+}
+
+
+=== FILE: frontend\src\hooks\useKeyboard.ts ===
+
+import { useEffect } from "react"
+import { useAppContext } from "./useAppContext"
+
+export function useKeyboard(inputRef: React.RefObject<HTMLInputElement | null>) {
+  const { goBack, current } = useAppContext()
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // ⌘K / Ctrl+K to focus command bar
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault()
+        inputRef.current?.focus()
+      }
+
+      // Ctrl+F in page context → focus canvas search instead of browser search
+      if ((e.ctrlKey || e.metaKey) && e.key === "f" && current.type === "page") {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent("canvas:focus-search"))
+      }
+
+      // Escape — layered behavior
+      if (e.key === "Escape") {
+        // If input is focused, blur it first
+        if (document.activeElement === inputRef.current) {
+          inputRef.current?.blur()
+          return
+        }
+        // If in a non-home context, go back
+        if (current.type !== "home") {
+          goBack()
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [inputRef, goBack, current])
+}
+
+
+=== FILE: frontend\src\hooks\useStream.ts ===
+
+import { create } from "zustand"
+import type { StreamItem, BlockType, ChatSource } from "../types"
+
+function uid() {
+  return crypto.randomUUID?.() ?? Math.random().toString(36).substring(2, 10)
+}
+
+interface StreamState {
+  items: StreamItem[]
+  isLoading: boolean
+
+  addUserMessage: (content: string) => void
+  addAssistantMessage: (content: string, sources?: ChatSource[], followUps?: string[]) => void
+  addBlock: (blockType: BlockType, blockData?: unknown, metadata?: StreamItem["metadata"]) => void
+  addSystemMessage: (content: string) => void
+  setLoading: (loading: boolean) => void
+  setBlockLoading: (id: string, loading: boolean) => void
+  clearStream: () => void
+  getLastBlock: () => StreamItem | undefined
+  getVisibleNoteIds: () => string[]
+}
+
+const WELCOME_ITEM: StreamItem = {
+  id: "welcome",
+  type: "block",
+  blockType: "welcome",
+  timestamp: Date.now(),
+}
+
+export const useStreamStore = create<StreamState>((set, get) => ({
+  items: [WELCOME_ITEM],
+  isLoading: false,
+
+  addUserMessage: (content) =>
+    set((s) => ({
+      items: [...s.items, { id: uid(), type: "user", content, timestamp: Date.now() }],
+    })),
+
+  addAssistantMessage: (content, sources, followUps) =>
+    set((s) => ({
+      items: [
+        ...s.items,
+        { id: uid(), type: "assistant", content, sources, followUps, timestamp: Date.now() },
+      ],
+    })),
+
+  addBlock: (blockType, blockData, metadata) =>
+    set((s) => ({
+      items: [
+        ...s.items,
+        { id: uid(), type: "block", blockType, blockData, metadata, timestamp: Date.now() },
+      ],
+    })),
+
+  addSystemMessage: (content) =>
+    set((s) => ({
+      items: [...s.items, { id: uid(), type: "system", content, timestamp: Date.now() }],
+    })),
+
+  setLoading: (loading) => set({ isLoading: loading }),
+
+  // Spec: toggle loading state on a specific block
+  setBlockLoading: (id, loading) =>
+    set((s) => ({
+      items: s.items.map((item) => (item.id === id ? { ...item, loading } : item)),
+    })),
+
+  clearStream: () => set({ items: [{ ...WELCOME_ITEM, timestamp: Date.now() }] }),
+
+  // Spec: returns most recent block for context awareness
+  getLastBlock: () => {
+    const blocks = get().items.filter((i) => i.type === "block")
+    return blocks[blocks.length - 1]
+  },
+
+  // Spec: collects all noteIds from visible blocks for "explain the first one" resolution
+  getVisibleNoteIds: () => {
+    const ids: string[] = []
+    for (const item of get().items) {
+      if (item.metadata?.noteIds) {
+        ids.push(...item.metadata.noteIds)
+      }
+    }
+    return ids
+  },
+}))
+
+export function useStream() {
+  return useStreamStore()
+}
+
+
+=== FILE: frontend\src\App.tsx ===
+
+import { ContextProvider } from "./core/ContextProvider"
+import Stream from "./core/Stream"
+import CommandBar from "./core/CommandBar"
+import CanvasOverlay from "./canvas/CanvasOverlay"
+
+export default function App() {
+  return (
+    <ContextProvider>
+      <div className="w-full h-full relative overflow-hidden bg-[var(--color-void)]">
+        {/* z-0: Canvas (full screen when page open) */}
+        <CanvasOverlay />
+
+        {/* z-20: Stream (centered home / floating overlay on canvas) */}
+        <Stream />
+
+        {/* z-40: Command bar (always bottom center) */}
+        <CommandBar />
+      </div>
+    </ContextProvider>
+  )
+}
+
+
+=== FILE: frontend\src\index.css ===
+
+@import "tailwindcss";
+
+@theme {
+  /* ─── Void ─── */
+  --color-void: #08080f;
+  --color-void-light: #0e0e1a;
+
+  /* ─── Content (readable) ─── */
+  --color-card: #ffffff;
+  --color-card-hover: #fafafa;
+  --color-card-text: #111827;
+  --color-card-muted: #6b7280;
+  --color-card-faint: #d1d5db;
+
+  /* ─── Glass ─── */
+  --glass-bg: rgba(14, 14, 26, 0.55);
+  --glass-bg-thick: rgba(10, 10, 20, 0.75);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-border-hover: rgba(255, 255, 255, 0.14);
+  --glass-shine: rgba(255, 255, 255, 0.04);
+  --glass-text: rgba(255, 255, 255, 0.88);
+  --glass-text-dim: rgba(255, 255, 255, 0.50);
+  --glass-text-muted: rgba(255, 255, 255, 0.22);
+
+  /* ─── Accent ─── */
+  --accent: #6366f1;
+  --accent-light: #818cf8;
+  --accent-glow: rgba(99, 102, 241, 0.12);
+  --accent-glow-strong: rgba(99, 102, 241, 0.25);
+  --purple: #a855f7;
+  --cyan: #06b6d4;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+
+  /* ─── Fonts ─── */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-hand: "Caveat", cursive;
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    background: var(--color-void);
+    color: var(--glass-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Noise Texture ─── */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.02;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  ::selection {
+    background: rgba(99, 102, 241, 0.35);
+    color: white;
+  }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.07);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.14);
+  }
+}
+
+@layer utilities {
+
+  /* ═══════════════════════════════════════
+     HYPER LIQUID GLASS
+     Multiple layered effects for depth
+     ═══════════════════════════════════════ */
+
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      135deg,
+      rgba(255,255,255,0.06) 0%,
+      transparent 40%,
+      transparent 60%,
+      rgba(255,255,255,0.02) 100%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .glass-solid {
+    background: var(--glass-bg-thick);
+    backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
+    -webkit-backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
+    border: 1px solid rgba(255,255,255,0.09);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.05) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 16px 64px rgba(0, 0, 0, 0.6),
+      0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .glass-solid::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      135deg,
+      rgba(255,255,255,0.08) 0%,
+      transparent 50%,
+      rgba(255,255,255,0.02) 100%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Glass hover with glow */
+  .glass-hover {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+  }
+  .glass-hover:hover {
+    border-color: var(--glass-border-hover);
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.06) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 12px 48px rgba(0,0,0,0.5),
+      0 0 20px var(--accent-glow);
+  }
+
+  /* Glass surface layers */
+  .glass-surface-1 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-surface-2 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-surface-3 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-interactive {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .glass-interactive:hover {
+    border-color: var(--glass-border-hover);
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.06) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 12px 48px rgba(0,0,0,0.5),
+      0 0 20px var(--accent-glow);
+  }
+
+  /* ═══════════════════════════════════════
+     PAPER CARDS (white, readable content)
+     ═══════════════════════════════════════ */
+
+  .paper {
+    background: #ffffff;
+    color: var(--color-card-text);
+    border-radius: 10px;
+    box-shadow:
+      0 1px 2px rgba(0,0,0,0.08),
+      0 4px 16px rgba(0,0,0,0.25),
+      0 0 0 1px rgba(0,0,0,0.04);
+    transition: all 0.2s ease;
+  }
+  .paper:hover {
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.1),
+      0 8px 32px rgba(0,0,0,0.35),
+      0 0 0 1px rgba(0,0,0,0.06);
+    transform: translateY(-1px);
+  }
+
+  /* ═══════════════════════════════════════
+     CANVAS
+     ═══════════════════════════════════════ */
+
+  .canvas-bg {
+    background-color: var(--color-void-light);
+    background-image:
+      radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  /* ═══════════════════════════════════════
+     ANIMATIONS
+     ═══════════════════════════════════════ */
+
+  @keyframes breathe {
+    0%, 100% {
+      box-shadow:
+        0 0 0 0.5px rgba(255,255,255,0.04) inset,
+        0 8px 40px rgba(0,0,0,0.5),
+        0 0 24px var(--accent-glow);
+    }
+    50% {
+      box-shadow:
+        0 0 0 0.5px rgba(255,255,255,0.06) inset,
+        0 8px 40px rgba(0,0,0,0.5),
+        0 0 40px var(--accent-glow-strong);
+    }
+  }
+  .cmd-glow {
+    animation: breathe 5s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255,255,255,0) 0%,
+      rgba(255,255,255,0.03) 50%,
+      rgba(255,255,255,0) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 8s ease-in-out infinite;
+  }
+
+  /* Drag */
+  .draggable { cursor: grab; user-select: none; }
+  .draggable:active { cursor: grabbing; }
+}
+
+
+=== FILE: frontend\src\main.tsx ===
+
+import { StrictMode } from "react"
+import { createRoot } from "react-dom/client"
+import "./index.css"
+import App from "./App"
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+)
+
+
+=== FILE: frontend\src\types.ts ===
+
+// ─── Stream ──────────────────────────────────────────
+
+export interface StreamItem {
+  id: string
+  type: "user" | "assistant" | "block" | "system"
+  content?: string
+  blockType?: BlockType
+  blockData?: unknown
+  sources?: ChatSource[]
+  followUps?: string[]
+  metadata?: {
+    noteIds?: string[]
+    query?: string
+    tag?: string
+    pageId?: string
+    command?: string
+    topic?: string
+  }
+  timestamp: number
+  loading?: boolean
+}
+
+export type BlockType =
+  | "welcome"
+  | "help"
+  | "note-grid"
+  | "note-detail"
+  | "search-results"
+  | "stats"
+  | "tag-cloud"
+  | "task-list"
+  | "page-list"
+  | "reading-path"
+  | "gap-analysis"
+  | "curator-report"
+  | "settings"
+  | "history"
+
+// ─── Context ─────────────────────────────────────────
+
+export type ContextType = "home" | "page" | "settings" | "history"
+
+export interface AppContext {
+  type: ContextType
+  pageId?: string
+  pageName?: string
+  previousContext?: AppContext
+}
+
+// ─── Notes ───────────────────────────────────────────
+
+export interface Note {
+  id: string
+  title: string | null
+  raw_text: string
+  summary: string | null
+  tags: string[]
+  tasks: string[]
+  entities: string[]
+  source_url: string | null
+  page_title: string | null
+  capture_type: string
+  processing_status: string
+  related_note_ids: string[]
+  page_id: string | null
+  canvas_x: number | null
+  canvas_y: number | null
+  canvas_width: number
+  canvas_height: number | null
+  cluster_id: string | null
+  centrality: number
+  is_bridge: boolean
+  created_at: string
+  updated_at: string
+  similarity?: number
+}
+
+// ─── Pages ───────────────────────────────────────────
+
+export interface Page {
+  id: string
+  name: string
+  description: string | null
+  icon: string
+  color: string
+  is_archived: boolean
+  canvas_data: Record<string, unknown>
+  viewport: { x: number; y: number; zoom: number }
+  note_count: number
+  last_activity: string
+  created_at: string
+  updated_at: string
+}
+
+// ─── Edges ───────────────────────────────────────────
+
+export type EdgeType =
+  | "related"
+  | "depends_on"
+  | "extends"
+  | "contradicts"
+  | "summarizes"
+  | "example_of"
+
+export interface NoteEdge {
+  id: string
+  source_id: string
+  target_id: string
+  edge_type: EdgeType
+  strength: number
+  label: string | null
+  created_by: string
+  created_at: string
+}
+
+// ─── Clusters ────────────────────────────────────────
+
+export interface Cluster {
+  id: string
+  page_id: string
+  label: string
+  description: string | null
+  color: string
+  center_x: number | null
+  center_y: number | null
+  created_at: string
+  updated_at: string
+}
+
+// ─── Canvas Elements ─────────────────────────────────
+
+export type ElementType = "sticky" | "drawing" | "annotation" | "image"
+
+export interface CanvasElement {
+  id: string
+  page_id: string
+  element_type: ElementType
+  content: string | null
+  canvas_data: Record<string, unknown> | null
+  position_x: number
+  position_y: number
+  width: number | null
+  height: number | null
+  style: Record<string, unknown>
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// ─── Canvas State ────────────────────────────────────
+
+export interface CanvasState {
+  page: Page
+  notes: Note[]
+  edges: NoteEdge[]
+  elements: CanvasElement[]
+  clusters: Cluster[]
+  viewport: { x: number; y: number; zoom: number }
+}
+
+// ─── Chat ────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: "user" | "assistant"
+  content: string
+  sources?: ChatSource[]
+  followUps?: string[]
+}
+
+export interface ChatSource {
+  id: string
+  title: string
+  similarity: number
+}
+
+// ─── Stats ───────────────────────────────────────────
+
+export interface WorkspaceStats {
+  total_notes: number
+  total_pages: number
+  total_tags: number
+  total_tasks: number
+  status_counts: Record<string, number>
+  last_capture: string | null
+}
+
+// ─── Tags ────────────────────────────────────────────
+
+export interface TagWithCount {
+  name: string
+  count: number
+}
+
+// ─── Curator ─────────────────────────────────────────
+
+export interface CuratorReport {
+  potential_duplicates: Array<{
+    note_a: string; note_b: string; similarity: number
+    suggestion: string; reason: string
+  }>
+  orphan_notes: Array<{
+    note_id: string; title: string; suggestion: string; reason: string
+  }>
+  stale_notes: Array<{
+    note_id: string; title: string; days_old: number
+  }>
+  cluster_issues: Array<{
+    cluster_id: string; issue: string; size?: number; suggestion: string
+  }>
+  missing_connections: Array<{
+    note_a: string; note_b: string; similarity: number
+    suggested_type: string; reason: string
+  }>
+  auto_applied: number
+  needs_confirmation: Array<{
+    action_type: string; params: Record<string, unknown>; reason: string
+  }>
+}
+
+// ─── Commands ────────────────────────────────────────
+
+export interface Command {
+  name: string
+  aliases: string[]
+  description: string
+  context: ContextType[]
+  args?: string
+  handler: string
+}
+
+// ─── History ─────────────────────────────────────────
+
+export interface ChatConversation {
+  id: string
+  context_type: string
+  context_id: string | null
+  messages: ChatMessage[]
+  title: string | null
+  created_at: string
+  updated_at: string
+}
+
+
+=== FILE: frontend\src\utils.ts ===
+
+export function nanoid(size = 21): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  let id = ""
+
+  for (let i = 0; i < size; i += 1) {
+    id += chars[Math.floor(Math.random() * chars.length)]
+  }
+
+  return id
+}
+
+

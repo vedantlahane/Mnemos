@@ -24,17 +24,10 @@ frontend
 |    |    +--- TaskListBlock.tsx
 |    |    \--- WelcomeBlock.tsx
 |    +--- canvas
-|    |    +--- AnnotationNode.tsx
-|    |    +--- CanvasChatPanel.tsx
-|    |    +--- CanvasControls.tsx
-|    |    +--- CanvasMinimap.tsx
+|    |    +--- canvasAI.ts
 |    |    +--- CanvasOverlay.tsx
-|    |    +--- CanvasSearch.tsx
-|    |    +--- CanvasView.tsx
-|    |    +--- ClusterRegion.tsx
-|    |    +--- NoteNode.tsx
-|    |    +--- SketchyEdge.tsx
-|    |    \--- StickyNode.tsx
+|    |    +--- ExcalidrawCanvas.tsx
+|    |    \--- useExcalidraw.ts
 |    +--- core
 |    |    +--- CommandBar.tsx
 |    |    +--- ContextProvider.tsx
@@ -51,16 +44,15 @@ frontend
 |    |    +--- GlassModal.tsx
 |    |    \--- GlassTooltip.tsx
 |    +--- hooks
-|    |    +--- useCanvas.ts
-|    |    +--- useCanvasSearch.ts
+|    |    +--- useAppContext.ts
 |    |    +--- useCommands.ts
-|    |    +--- useContext.ts
 |    |    +--- useKeyboard.ts
 |    |    \--- useStream.ts
 |    +--- App.tsx
 |    +--- index.css
 |    +--- main.tsx
-|    \--- types.ts
+|    +--- types.ts
+|    \--- utils.ts
 +--- .env
 +--- .env.example
 +--- .gitignore

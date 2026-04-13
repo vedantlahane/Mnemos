@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { api } from "../api/client"
 import type { StreamItem } from "../types"
 import { BookOpen, ChevronRight, Loader2 } from "lucide-react"
@@ -13,17 +13,26 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
   const [steps, setSteps] = useState<ReadingStep[]>([])
   const [rawText, setRawText] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const fetchedRef = useRef(false)
+
+  const topic = item.metadata?.topic || "this topic"
+  const pageId = item.metadata?.pageId
 
   useEffect(() => {
+    if (fetchedRef.current) return
+    fetchedRef.current = true
+
     async function load() {
       try {
-        const topic = item.metadata?.topic || "this topic"
-        const pageId = item.metadata?.pageId
         const prompt = `Generate a suggested reading order for "${topic}". List the notes I should read first, second, third, etc. based on dependency relationships. For each step, explain why it should be read in that order.`
 
-        const resp = await api.chat(prompt, [], pageId ? "page" : "home", pageId)
+        const resp = await api.chat(
+          prompt,
+          [],
+          pageId ? "page" : "home",
+          pageId
+        )
 
-        // Try to parse structured response
         try {
           const parsed = JSON.parse(resp.answer)
           if (Array.isArray(parsed)) {
@@ -44,18 +53,18 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
       }
     }
     load()
-  }, [item.metadata?.topic, item.metadata?.pageId])
+  }, [topic, pageId])
 
   if (loading) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
         <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
-        <span className="text-[13px] text-[var(--glass-text-dim)]">Computing reading path...</span>
+        <span className="text-[13px] text-[var(--glass-text-dim)]">
+          Computing reading path...
+        </span>
       </div>
     )
   }
-
-  const topic = item.metadata?.topic || "Current Context"
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
@@ -74,22 +83,24 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
         <div className="flex flex-col gap-0.5">
           {steps.map((step, i) => (
             <div key={i} className="flex items-start gap-3 py-3 group">
-              {/* Step number */}
               <div className="w-7 h-7 rounded-full glass-surface-2 flex items-center justify-center shrink-0 text-[12px] font-bold text-[var(--accent)]">
                 {i + 1}
               </div>
-
-              {/* Content */}
               <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold text-white">{step.title}</div>
+                <div className="text-[13px] font-semibold text-white">
+                  {step.title}
+                </div>
                 {step.reason && (
-                  <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">{step.reason}</div>
+                  <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">
+                    {step.reason}
+                  </div>
                 )}
               </div>
-
-              {/* Arrow to next */}
               {i < steps.length - 1 && (
-                <ChevronRight size={14} className="text-[var(--glass-text-muted)] mt-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <ChevronRight
+                  size={14}
+                  className="text-[var(--glass-text-muted)] mt-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                />
               )}
             </div>
           ))}

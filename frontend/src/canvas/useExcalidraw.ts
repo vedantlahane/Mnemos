@@ -1,5 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { ExcalidrawImperativeAPI, AppState, BinaryFiles } from "@excalidraw/excalidraw/types"
+import type {
+  ExcalidrawImperativeAPI,
+  AppState,
+  BinaryFiles,
+} from "@excalidraw/excalidraw/types"
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import { api } from "../api/client"
 import { createNoteCard, createSticky } from "./canvasAI"
@@ -25,9 +29,19 @@ export function useExcalidraw(pageId: string | undefined) {
   const [initialScene, setInitialScene] = useState<CanvasScene | null>(null)
   const [error, setError] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isSaving = useRef(false)
+  const loadedPageId = useRef<string | undefined>(undefined)
 
   const loadScene = useCallback(async () => {
-    if (!pageId) return
+    if (!pageId) {
+      setLoading(false)
+      return
+    }
+
+    // Prevent double loads
+    if (loadedPageId.current === pageId && initialScene) {
+      return
+    }
 
     setLoading(true)
     setError(null)
@@ -64,9 +78,16 @@ export function useExcalidraw(pageId: string | undefined) {
         }
       })
 
-      const legacyElements = Array.isArray(pageData.elements) ? pageData.elements : []
+      const legacyElements = Array.isArray(pageData.elements)
+        ? pageData.elements
+        : []
       legacyElements.forEach((element: LegacyElement, index: number) => {
-        if (scene.elements.some((el) => readCustomData(el).legacyElementId === element.id)) return
+        if (
+          scene.elements.some(
+            (el) => readCustomData(el).legacyElementId === element.id
+          )
+        )
+          return
         if (element.element_type === "sticky" && element.content) {
           const sticky = createSticky(
             element.content,
@@ -74,7 +95,10 @@ export function useExcalidraw(pageId: string | undefined) {
             element.position_y ?? 120 + index * 40
           ).map((el) => ({
             ...el,
-            customData: { ...readCustomData(el), legacyElementId: element.id },
+            customData: {
+              ...readCustomData(el),
+              legacyElementId: element.id,
+            },
           }))
           newElements.push(...sticky)
         }
@@ -84,10 +108,8 @@ export function useExcalidraw(pageId: string | undefined) {
         scene.elements = [...scene.elements, ...newElements]
       }
 
+      loadedPageId.current = pageId
       setInitialScene(scene)
-      excalidrawRef.current?.updateScene({
-        elements: scene.elements,
-      })
     } catch (err) {
       console.error("Canvas load error:", err)
       setError("Failed to load canvas")
@@ -98,9 +120,14 @@ export function useExcalidraw(pageId: string | undefined) {
   }, [pageId])
 
   useEffect(() => {
+    loadedPageId.current = undefined
+    setInitialScene(null)
     loadScene()
 
-    const onRefresh = () => loadScene()
+    const onRefresh = () => {
+      loadedPageId.current = undefined
+      loadScene()
+    }
     window.addEventListener("canvas:refresh", onRefresh)
     return () => window.removeEventListener("canvas:refresh", onRefresh)
   }, [loadScene])
@@ -112,11 +139,16 @@ export function useExcalidraw(pageId: string | undefined) {
   }, [])
 
   const saveScene = useCallback(
-    (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
-      if (!pageId) return
+    (
+      elements: readonly ExcalidrawElement[],
+      appState: AppState,
+      files: BinaryFiles
+    ) => {
+      if (!pageId || isSaving.current) return
 
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
+        isSaving.current = true
         try {
           await api.updatePage(pageId, {
             canvas_data: {
@@ -127,20 +159,21 @@ export function useExcalidraw(pageId: string | undefined) {
                 zoom: appState.zoom,
                 scrollX: appState.scrollX,
                 scrollY: appState.scrollY,
-                gridSize: appState.gridSize,
               },
               files: files || {},
             },
           })
         } catch (err) {
           console.error("Canvas save failed:", err)
+        } finally {
+          isSaving.current = false
         }
-      }, 1500)
+      }, 2000) // Increased debounce to 2s
     },
     [pageId]
   )
 
-  const addElements = useCallback((newElements: ExcalidrawElement[]) => {
+    const addElements = useCallback((newElements: ExcalidrawElement[]) => {
     const drawingApi = excalidrawRef.current
     if (!drawingApi) return
 
@@ -168,9 +201,14 @@ export function useExcalidraw(pageId: string | undefined) {
 
     return drawingApi.getSceneElements().filter((element) => {
       const customData = readCustomData(element)
-      if (element.type === "text" && element.text?.toLowerCase().includes(lower)) return true
+      if (
+        element.type === "text" &&
+        (element as any).text?.toLowerCase().includes(lower)
+      )
+        return true
       if (customData.title?.toLowerCase().includes(lower)) return true
-      if (customData.tags?.some((tag) => tag.toLowerCase().includes(lower))) return true
+      if (customData.tags?.some((tag: string) => tag.toLowerCase().includes(lower)))
+        return true
       return false
     })
   }, [])
@@ -184,12 +222,16 @@ export function useExcalidraw(pageId: string | undefined) {
     addElements,
     scrollToElement,
     searchElements,
-    reload: loadScene,
+    reload: () => {
+      loadedPageId.current = undefined
+      setInitialScene(null)
+      loadScene()
+    },
   }
 }
 
 function normalizeScene(value: unknown): CanvasScene {
-  if (!value || typeof value !== "object") return { ...EMPTY_SCENE }
+  if (!value || typeof value !== "object") return { ...EMPTY_SCENE, elements: [] }
 
   const scene = value as Partial<CanvasScene>
   return {
@@ -200,20 +242,28 @@ function normalizeScene(value: unknown): CanvasScene {
       viewBackgroundColor: "#0e0e1a",
       theme: "dark",
     }),
-    files: scene.files || {},
+    files: scene.files && typeof scene.files === "object" ? scene.files : {},
   }
 }
 
-function sanitizeAppState(appState: CanvasScene["appState"]): CanvasScene["appState"] {
+function sanitizeAppState(
+  appState: CanvasScene["appState"]
+): CanvasScene["appState"] {
   const next = { ...appState }
-  if (next.gridSize === null) {
+  if (next.gridSize === null || next.gridSize === undefined) {
     delete next.gridSize
   }
   return next
 }
 
-function getGridPosition(index: number, note: NoteLike): { x: number; y: number } {
-  if (typeof note.canvas_x === "number" && typeof note.canvas_y === "number") {
+function getGridPosition(
+  index: number,
+  note: NoteLike
+): { x: number; y: number } {
+  if (
+    typeof note.canvas_x === "number" &&
+    typeof note.canvas_y === "number"
+  ) {
     return { x: note.canvas_x, y: note.canvas_y }
   }
 
@@ -226,7 +276,10 @@ function getGridPosition(index: number, note: NoteLike): { x: number; y: number 
 }
 
 function readCustomData(element: ExcalidrawElement): CustomData {
-  return ((element as ExcalidrawElement & { customData?: CustomData }).customData || {}) as CustomData
+  return (
+    ((element as ExcalidrawElement & { customData?: CustomData }).customData ||
+      {}) as CustomData
+  )
 }
 
 interface CustomData {
