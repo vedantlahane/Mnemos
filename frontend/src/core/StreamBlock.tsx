@@ -3,7 +3,6 @@ import type { BlockItem } from "../types"
 import { ErrorBoundary } from "../components/ErrorBoundary"
 import { Loader2 } from "lucide-react"
 
-// Lazy-load all block components
 const WelcomeBlock = lazy(() => import("../blocks/WelcomeBlock"))
 const NoteGridBlock = lazy(() => import("../blocks/NoteGridBlock"))
 const PageListBlock = lazy(() => import("../blocks/PageListBlock"))
@@ -18,6 +17,8 @@ const GapAnalysisBlock = lazy(() => import("../blocks/GapAnalysisBlock"))
 const CuratorReportBlock = lazy(() => import("../blocks/CuratorReportBlock"))
 const SettingsBlock = lazy(() => import("../blocks/SettingsBlock"))
 const HistoryBlock = lazy(() => import("../blocks/HistoryBlock"))
+const PageStatsBlock = lazy(() => import("../blocks/PageStatsBlock"))
+const ExportBlock = lazy(() => import("../blocks/ExportBlock"))
 
 const BLOCK_MAP: Record<
   string,
@@ -37,6 +38,8 @@ const BLOCK_MAP: Record<
   "curator-report": CuratorReportBlock,
   settings: SettingsBlock,
   history: HistoryBlock,
+  "page-stats": PageStatsBlock,
+  export: ExportBlock,
 }
 
 function BlockFallback() {

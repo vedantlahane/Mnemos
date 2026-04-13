@@ -53,11 +53,13 @@ export type BlockType =
   | "tag-cloud"
   | "task-list"
   | "page-list"
+  | "page-stats"
   | "reading-path"
   | "gap-analysis"
   | "curator-report"
   | "settings"
   | "history"
+  | "export"
 
 // ─── Block-specific data shapes ──────────────────────
 
@@ -88,7 +90,7 @@ export interface Note {
   source_url: string | null
   page_title: string | null
   capture_type: string
-  processing_status: string
+  processing_status: "pending" | "processing" | "done" | "failed"
   related_note_ids: string[]
   page_id: string | null
   canvas_x: number | null
@@ -101,6 +103,8 @@ export interface Note {
   created_at: string
   updated_at: string
   similarity?: number
+  // Enriched by frontend
+  page_name?: string
 }
 
 // ─── Pages ───────────────────────────────────────────
@@ -118,6 +122,7 @@ export interface Page {
   last_activity: string
   created_at: string
   updated_at: string
+  user_id?: string | null
 }
 
 // ─── Edges ───────────────────────────────────────────
@@ -212,6 +217,14 @@ export interface WorkspaceStats {
   last_capture: string | null
 }
 
+export interface PageStats {
+  note_count: number
+  edge_count: number
+  cluster_count: number
+  element_count: number
+  tags: TagWithCount[]
+}
+
 // ─── Tags ────────────────────────────────────────────
 
 export interface TagWithCount {
@@ -245,7 +258,7 @@ export interface CuratorReport {
   }>
 }
 
-// ─── AI Layout ───────────────────────────────────────
+// ─── AI ──────────────────────────────────────────────
 
 export interface AILayoutPosition {
   note_id: string
@@ -268,7 +281,7 @@ export interface GapAnalysisResult {
 
 export interface ReadingStep {
   title: string
-  noteId?: string
+  noteId?: string | null
   reason?: string
 }
 
@@ -297,6 +310,7 @@ export interface ChatConversation {
   context_id: string | null
   messages: ChatMessage[]
   title: string | null
+  user_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -306,13 +320,19 @@ export interface ChatConversation {
 export interface WorkspaceSettings {
   theme: "glass" | "dark"
   model: string
+  groq_model: string
   similarity_threshold: number
   embedding_dimensions: number
+  auto_layout: boolean
+  auto_connect: boolean
 }
 
 export const DEFAULT_SETTINGS: WorkspaceSettings = {
   theme: "glass",
   model: "gemini-2.5-flash",
+  groq_model: "llama-3.3-70b-versatile",
   similarity_threshold: 0.65,
   embedding_dimensions: 768,
+  auto_layout: true,
+  auto_connect: true,
 }

@@ -14,6 +14,7 @@ const COMMANDS: Command[] = [
   { name: "/tags", aliases: [], description: "Tag cloud", context: ["home", "page"], handler: "tags" },
   { name: "/tasks", aliases: ["/t"], description: "List all tasks", context: ["home", "page"], handler: "tasks" },
   { name: "/stats", aliases: [], description: "Workspace statistics", context: ["home"], handler: "stats" },
+  { name: "/page-stats", aliases: [], description: "Page statistics", context: ["page"], handler: "page-stats" },
   { name: "/capture", aliases: [], description: "Quick capture", context: ["home", "page"], args: "<text> [--page X]", handler: "capture" },
   { name: "/curator", aliases: ["/clean"], description: "Run maintenance", context: ["home"], handler: "curator" },
   { name: "/find", aliases: [], description: "Find on canvas", context: ["page"], args: "<text>", handler: "find" },
@@ -22,7 +23,7 @@ const COMMANDS: Command[] = [
   { name: "/summarize", aliases: [], description: "Summarize page content", context: ["page"], handler: "summarize" },
   { name: "/gaps", aliases: [], description: "Knowledge gap analysis", context: ["home", "page"], handler: "gaps" },
   { name: "/reading", aliases: ["/path"], description: "Reading order", context: ["home", "page"], args: "[topic]", handler: "reading" },
-  { name: "/export", aliases: [], description: "Export as markdown", context: ["page"], handler: "export" },
+  { name: "/export", aliases: [], description: "Export workspace", context: ["home", "page"], handler: "export" },
   { name: "/rename", aliases: [], description: "Rename page", context: ["page"], args: "<new name>", handler: "rename" },
   { name: "/bg", aliases: ["/background"], description: "Canvas background color", context: ["page"], args: "<color>", handler: "bg" },
   { name: "/library", aliases: ["/lib"], description: "Open shape library", context: ["page"], handler: "library" },
@@ -59,7 +60,7 @@ export function useCommands() {
 
   const {
     items, addUserMessage, addAssistantMessage, addBlock,
-    addSystemMessage, clearStream, setLoading,
+    addSystemMessage, clearStream, setLoading, saveConversation,
   } = useStream()
   const { current, switchTo, goBack, goHome } = useAppContext()
   const canvasDispatch = useCanvasEvents((s) => s.dispatch)
@@ -98,16 +99,12 @@ export function useCommands() {
     )
 
     if (!cmd) {
-      addAssistantMessage(
-        `Unknown command: \`${cmdStr}\`. Type **/help** for commands.`
-      )
+      addAssistantMessage(`Unknown command: \`${cmdStr}\`. Type **/help** for commands.`)
       return
     }
 
     if (!cmd.context.includes(current.type)) {
-      addAssistantMessage(
-        `**${cmdStr}** is not available in **${current.type}** context.`
-      )
+      addAssistantMessage(`**${cmdStr}** is not available in **${current.type}** context.`)
       return
     }
 
@@ -119,9 +116,10 @@ export function useCommands() {
         }
         try {
           const { pages } = await api.listPages()
-          const match = pages.find(
-            (p) => p.name.toLowerCase() === args.toLowerCase()
-          )
+          const lower = args.toLowerCase()
+          const match =
+            pages.find((p) => p.name.toLowerCase() === lower) ||
+            pages.find((p) => p.name.toLowerCase().includes(lower))
           if (match) {
             switchTo("page", match.id, match.name)
             addSystemMessage(`Opened page: ${match.icon || "📄"} ${match.name}`)
@@ -140,6 +138,10 @@ export function useCommands() {
 
       case "close":
       case "home":
+        // Save conversation before navigating away
+        if (current.type === "page" && items.some((i) => i.type === "assistant")) {
+          saveConversation(current.type, current.pageId)
+        }
         goHome()
         addSystemMessage("Returned to home.")
         addBlock("welcome")
@@ -159,21 +161,22 @@ export function useCommands() {
         const name = parts.slice(2).join(" ")
         if (sub === "create" && name) {
           try {
-            await api.createPage({ name })
-            addSystemMessage(`Created page: ${name}`)
+            const page = await api.createPage({ name })
+            addSystemMessage(`Created page: ${page.icon} ${page.name}`)
             addBlock("page-list")
-          } catch {
-            addAssistantMessage(`Failed to create "${name}".`)
+          } catch (err) {
+            addAssistantMessage(
+              `Failed to create "${name}": ${err instanceof Error ? err.message : "Unknown error"}`
+            )
           }
         } else if (sub === "delete" && name) {
           try {
             const { pages } = await api.listPages()
-            const match = pages.find(
-              (p) => p.name.toLowerCase() === name.toLowerCase()
-            )
+            const match = pages.find((p) => p.name.toLowerCase() === name.toLowerCase())
             if (match && match.name !== "Uncategorized") {
               await api.deletePage(match.id)
               addSystemMessage(`Deleted: ${name}`)
+              addBlock("page-list")
             } else {
               addAssistantMessage(
                 match?.name === "Uncategorized"
@@ -185,9 +188,7 @@ export function useCommands() {
             addAssistantMessage("Failed to delete page.")
           }
         } else {
-          addAssistantMessage(
-            "Usage: `/page create <name>` or `/page delete <name>`"
-          )
+          addAssistantMessage("Usage: `/page create <name>` or `/page delete <name>`")
         }
         break
       }
@@ -203,15 +204,20 @@ export function useCommands() {
         if (!args) {
           addAssistantMessage("Usage: `/search <query>`")
         } else {
-          addBlock("search-results", undefined, {
-            query: args,
-            pageId: current.pageId,
-          })
+          addBlock("search-results", undefined, { query: args, pageId: current.pageId })
         }
         break
 
       case "stats":
         addBlock("stats")
+        break
+
+      case "page-stats":
+        if (!current.pageId) {
+          addAssistantMessage("Open a page first.")
+        } else {
+          addBlock("page-stats", undefined, { pageId: current.pageId })
+        }
         break
 
       case "tags":
@@ -229,7 +235,17 @@ export function useCommands() {
         }
         const pageMatch = args.match(/--page\s+(.+)$/i)
         const text = pageMatch ? args.replace(pageMatch[0], "").trim() : args
-        const pageHint = pageMatch?.[1]?.trim()
+        const pageHint = pageMatch?.[1]?.trim() || current.pageName
+
+        if (text.length < 3) {
+          addAssistantMessage("Text must be at least 3 characters.")
+          return
+        }
+        if (text.length > 50000) {
+          addAssistantMessage("Text must be under 50,000 characters.")
+          return
+        }
+
         try {
           setLoading(true)
           const resp = await api.capture({
@@ -238,14 +254,18 @@ export function useCommands() {
             page_hint: pageHint,
           })
           addSystemMessage(
-            `Captured${resp.page_name ? ` → ${resp.page_name}` : ""}. Processing…`
+            `Captured (${resp.note_id.slice(0, 8)}…). Processing…`
           )
-          // If on a page, refresh canvas to show new note
           if (current.type === "page") {
-            canvasDispatch({ type: "refresh" })
+            // Wait for processing then refresh
+            setTimeout(() => {
+              canvasDispatch({ type: "refresh" })
+            }, 4000)
           }
-        } catch {
-          addAssistantMessage("Failed to capture.")
+        } catch (err) {
+          addAssistantMessage(
+            `Failed to capture: ${err instanceof Error ? err.message : "Unknown error"}`
+          )
         } finally {
           setLoading(false)
         }
@@ -257,10 +277,7 @@ export function useCommands() {
         break
 
       case "reading":
-        addBlock("reading-path", undefined, {
-          topic: args || undefined,
-          pageId: current.pageId,
-        })
+        addBlock("reading-path", undefined, { topic: args || undefined, pageId: current.pageId })
         break
 
       case "gaps":
@@ -281,12 +298,9 @@ export function useCommands() {
           return
         }
         const lower = args.toLowerCase()
-        const isPrefixed =
-          lower.startsWith("sticky:") || lower.startsWith("note:")
+        const isPrefixed = lower.startsWith("sticky:") || lower.startsWith("note:")
         const addType = lower.startsWith("sticky:") ? "sticky" : "note"
-        const content = isPrefixed
-          ? args.split(":").slice(1).join(":").trim()
-          : args
+        const content = isPrefixed ? args.split(":").slice(1).join(":").trim() : args
         canvasDispatch({ type: "add", addType, content })
         break
       }
@@ -300,9 +314,7 @@ export function useCommands() {
         }
         const color = resolveColor(args)
         if (!color) {
-          addAssistantMessage(
-            `Unknown color "${args}". Try: ${Object.keys(COLOR_MAP).join(", ")}`
-          )
+          addAssistantMessage(`Unknown color "${args}". Try: ${Object.keys(COLOR_MAP).join(", ")}`)
           return
         }
         canvasDispatch({ type: "set-background", color })
@@ -316,14 +328,20 @@ export function useCommands() {
         break
 
       case "layout":
+        if (!current.pageId) {
+          addAssistantMessage("Open a page first.")
+          return
+        }
         try {
           setLoading(true)
           addSystemMessage("AI is reorganizing canvas…")
-          await api.aiLayout(current.pageId!)
+          const result = await api.aiLayout(current.pageId)
           canvasDispatch({ type: "refresh" })
-          addSystemMessage("Canvas reorganized by AI.")
+          addSystemMessage(
+            `Canvas reorganized: ${result.positions.length} notes, ${result.clusters.length} clusters, ${result.edges.length} edges.`
+          )
         } catch {
-          addAssistantMessage("AI layout not available. Try dragging manually.")
+          addAssistantMessage("AI layout failed. Try dragging manually.")
         } finally {
           setLoading(false)
         }
@@ -341,6 +359,9 @@ export function useCommands() {
           if (result.key_topics.length > 0) {
             msg += `\n\n**Key topics:** ${result.key_topics.join(", ")}`
           }
+          if (result.connections.length > 0) {
+            msg += `\n\n**Connections:**\n${result.connections.map((c) => `• ${c}`).join("\n")}`
+          }
           addAssistantMessage(msg)
         } catch {
           // Fallback to chat
@@ -351,11 +372,7 @@ export function useCommands() {
               "page",
               current.pageId
             )
-            addAssistantMessage(
-              resp.answer || "No summary available.",
-              resp.sources,
-              resp.follow_ups
-            )
+            addAssistantMessage(resp.answer || "No summary available.", resp.sources, resp.follow_ups)
           } catch {
             addAssistantMessage("Failed to summarize.")
           }
@@ -366,7 +383,7 @@ export function useCommands() {
       }
 
       case "export":
-        addAssistantMessage("Export coming in v2.5.")
+        addBlock("export")
         break
 
       case "rename": {
@@ -374,12 +391,18 @@ export function useCommands() {
           addAssistantMessage("Usage: `/rename <new name>`")
           return
         }
+        if (!current.pageId) {
+          addAssistantMessage("Open a page first.")
+          return
+        }
         try {
-          await api.updatePage(current.pageId!, { name: args })
+          await api.updatePage(current.pageId, { name: args })
           switchTo("page", current.pageId, args)
           addSystemMessage(`Renamed to "${args}".`)
-        } catch {
-          addAssistantMessage("Failed to rename.")
+        } catch (err) {
+          addAssistantMessage(
+            `Failed to rename: ${err instanceof Error ? err.message : "Unknown error"}`
+          )
         }
         break
       }
@@ -410,11 +433,14 @@ export function useCommands() {
   function detectNaturalLanguageCommand(text: string): boolean {
     const lower = text.toLowerCase().trim()
 
+    // Open page
     const openMatch = lower.match(/^open\s+(.+)$/)
     if (openMatch) {
       executeCommand(`/open ${openMatch[1]}`)
       return true
     }
+
+    // Navigation
     if (lower === "close" || lower === "go home" || lower === "go to home") {
       executeCommand("/home")
       return true
@@ -424,6 +450,7 @@ export function useCommands() {
       return true
     }
 
+    // Canvas commands
     if (current.type === "page") {
       const bgMatch = lower.match(
         /(?:change|set|make)\s+(?:the\s+)?(?:canvas\s+)?background\s+(?:color\s+)?(?:to\s+)?(.+)/
@@ -439,11 +466,7 @@ export function useCommands() {
         executeCommand(`/bg ${bgShort[1]}`)
         return true
       }
-      if (
-        lower === "open library" ||
-        lower === "show library" ||
-        lower === "library"
-      ) {
+      if (["open library", "show library", "library"].includes(lower)) {
         executeCommand("/library")
         return true
       }
@@ -459,23 +482,11 @@ export function useCommands() {
         executeCommand(`/find ${findMatch[1]}`)
         return true
       }
-      if (
-        ["reorganize", "reorganize canvas", "auto layout", "layout"].includes(
-          lower
-        )
-      ) {
+      if (["reorganize", "reorganize canvas", "auto layout", "layout"].includes(lower)) {
         executeCommand("/layout")
         return true
       }
-      if (
-        [
-          "summarize",
-          "summarize this page",
-          "summarize page",
-          "what's on this page",
-          "whats on this page",
-        ].includes(lower)
-      ) {
+      if (["summarize", "summarize this page", "summarize page", "what's on this page", "whats on this page"].includes(lower)) {
         executeCommand("/summarize")
         return true
       }
@@ -494,32 +505,33 @@ export function useCommands() {
         addSystemMessage("Zoomed to fit.")
         return true
       }
+      if (["page stats", "show stats", "statistics"].includes(lower)) {
+        executeCommand("/page-stats")
+        return true
+      }
     }
 
+    // Global natural language
     const simpleMap: Record<string, string> = {
-      "show notes": "/notes",
-      "list notes": "/notes",
-      "my notes": "/notes",
-      "show tags": "/tags",
-      "list tags": "/tags",
-      "my tags": "/tags",
-      "show tasks": "/tasks",
-      "list tasks": "/tasks",
-      "my tasks": "/tasks",
-      "show stats": "/stats",
-      statistics: "/stats",
-      stats: "/stats",
-      "show pages": "/pages",
-      "list pages": "/pages",
-      "my pages": "/pages",
-      help: "/help",
-      commands: "/help",
-      "what can you do": "/help",
-      settings: "/settings",
-      preferences: "/settings",
+      "show notes": "/notes", "list notes": "/notes", "my notes": "/notes",
+      "show tags": "/tags", "list tags": "/tags", "my tags": "/tags",
+      "show tasks": "/tasks", "list tasks": "/tasks", "my tasks": "/tasks",
+      "show stats": "/stats", statistics: "/stats", stats: "/stats",
+      "show pages": "/pages", "list pages": "/pages", "my pages": "/pages",
+      help: "/help", commands: "/help", "what can you do": "/help",
+      settings: "/settings", preferences: "/settings",
+      export: "/export", "export all": "/export", "export workspace": "/export",
+      "run curator": "/curator", curator: "/curator", "clean up": "/curator",
     }
     if (simpleMap[lower]) {
       executeCommand(simpleMap[lower])
+      return true
+    }
+
+    // Capture detection
+    const captureMatch = lower.match(/^(?:capture|save|remember)\s+(.+)$/i)
+    if (captureMatch && captureMatch[1].length >= 3) {
+      executeCommand(`/capture ${captureMatch[1]}`)
       return true
     }
 

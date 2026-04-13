@@ -258,4 +258,46 @@
   .excalidraw .color-picker,
   .excalidraw .color-picker-content { z-index: 100 !important; }
   .excalidraw .Island { z-index: 15 !important; }
+
+  /* ─── Excalidraw Empty State / Splash ─── */
+  .excalidraw .welcome-screen-center,
+  .excalidraw .welcome-screen-menu-hints,
+  .excalidraw .virgil,
+  .excalidraw .welcome-screen-decor,
+  .excalidraw [class*="welcome-screen"] {
+    display: none !important;
+  }
+
+  /* Hide the giant lock/shape icon on empty canvas */
+  .excalidraw .layer-ui__wrapper__top-right .zen-mode-transition {
+    display: none !important;
+  }
+
+  /* Cleaner empty canvas hint */
+  .excalidraw .HintViewer {
+    background: var(--glass-bg) !important;
+    border: 1px solid var(--glass-border) !important;
+    color: var(--glass-text-dim) !important;
+    border-radius: 12px !important;
+    font-size: 11px !important;
+    padding: 6px 12px !important;
+    backdrop-filter: blur(20px) !important;
+  }
+
+  /* Make Excalidraw toolbars glass-like */
+  .excalidraw .App-toolbar-container {
+    backdrop-filter: blur(30px) saturate(1.4) !important;
+  }
+
+  /* Remove Excalidraw default welcome overlay */
+  .excalidraw-wrapper .excalidraw .welcome-screen-center {
+    display: none !important;
+  }
+
+  /* Fix Excalidraw welcome screen shapes/decor */
+  .excalidraw .welcome-screen-center__logo,
+  .excalidraw .welcome-screen-center__heading,
+  .excalidraw .welcome-screen-center__menu {
+    display: none !important;
+  }
 }

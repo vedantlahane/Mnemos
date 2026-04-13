@@ -16,11 +16,13 @@ export default function HelpBlock(_props: { item: BlockItem }) {
       cmds: [
         { name: "/notes", args: "[#tag]", desc: "Browse notes" },
         { name: "/pages", desc: "List all pages" },
+        { name: "/page", args: "create|delete <name>", desc: "Manage pages" },
         { name: "/search", args: "<query>", desc: "Semantic search" },
         { name: "/tags", desc: "View all tags" },
         { name: "/tasks", desc: "List all tasks" },
         { name: "/stats", desc: "Workspace stats" },
         { name: "/capture", args: "<text>", desc: "Quick capture" },
+        { name: "/export", desc: "Export workspace" },
       ],
     },
     {
@@ -32,6 +34,7 @@ export default function HelpBlock(_props: { item: BlockItem }) {
         { name: "/library", desc: "Open shape library" },
         { name: "/layout", desc: "AI auto-reorganize" },
         { name: "/summarize", desc: "Summarize page" },
+        { name: "/page-stats", desc: "Page statistics" },
         { name: "/gaps", desc: "Find missing topics" },
         { name: "/reading", args: "[topic]", desc: "Reading order" },
         { name: "/rename", args: "<name>", desc: "Rename page" },
@@ -84,20 +87,13 @@ export default function HelpBlock(_props: { item: BlockItem }) {
         <div className="mt-5 p-3 rounded-xl bg-[var(--accent-subtle)] border border-[rgba(99,102,241,0.1)]">
           <p className="text-[11px] text-[var(--glass-text-dim)] leading-relaxed">
             Everything without{" "}
-            <span className="font-mono text-[var(--accent-light)]">/</span> is
-            sent as natural language. You can say{" "}
-            <span className="font-mono text-[var(--accent-light)]">
-              "change background black"
-            </span>
-            ,{" "}
-            <span className="font-mono text-[var(--accent-light)]">
-              "open library"
-            </span>
-            , or{" "}
-            <span className="font-mono text-[var(--accent-light)]">
-              "add sticky hello"
-            </span>
-            . Press{" "}
+            <span className="font-mono text-[var(--accent-light)]">/</span> is sent
+            as natural language. You can say{" "}
+            <span className="font-mono text-[var(--accent-light)]">"capture Docker uses bridge networks"</span>,{" "}
+            <span className="font-mono text-[var(--accent-light)]">"open Docker"</span>,{" "}
+            <span className="font-mono text-[var(--accent-light)]">"add sticky hello"</span>, or{" "}
+            <span className="font-mono text-[var(--accent-light)]">"export"</span>.
+            Press{" "}
             <kbd className="font-mono bg-[rgba(255,255,255,0.06)] px-1.5 py-0.5 rounded text-[10px] text-white mx-0.5">
               ⌘K
             </kbd>{" "}

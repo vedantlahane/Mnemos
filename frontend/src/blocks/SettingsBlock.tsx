@@ -1,10 +1,9 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import { useSettings } from "../hooks/useSettings"
 import { GlassInput } from "../glass/GlassInput"
 import { GlassDropdown } from "../glass/GlassDropdown"
 import type { BlockItem } from "../types"
-import { useState } from "react"
 
 export default function SettingsBlock(_props: { item: BlockItem }) {
   const { settings, update } = useSettings()
@@ -27,16 +26,25 @@ export default function SettingsBlock(_props: { item: BlockItem }) {
           />
         </SettingRow>
 
-        <SettingRow
-          label="LLM Model"
-          description="Model used for processing and chat"
-        >
+        <SettingRow label="Primary LLM" description="Model for complex tasks (chat, analysis)">
           <GlassDropdown
             value={settings.model}
             onChange={(v) => update({ model: v })}
             options={[
               { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
               { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+            ]}
+          />
+        </SettingRow>
+
+        <SettingRow label="Fast LLM (Groq)" description="Model for extraction, routing, edge classification">
+          <GlassDropdown
+            value={settings.groq_model}
+            onChange={(v) => update({ groq_model: v })}
+            options={[
+              { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
+              { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B (faster)" },
+              { value: "mixtral-8x7b-32768", label: "Mixtral 8x7B" },
             ]}
           />
         </SettingRow>
@@ -64,13 +72,25 @@ export default function SettingsBlock(_props: { item: BlockItem }) {
               step="0.05"
               value={String(settings.similarity_threshold)}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                update({
-                  similarity_threshold: parseFloat(e.target.value) || 0.65,
-                })
+                update({ similarity_threshold: parseFloat(e.target.value) || 0.65 })
               }
               className="w-20 text-center text-[13px]"
             />
           </div>
+        </SettingRow>
+
+        <SettingRow label="Auto Layout" description="AI auto-positions new notes on canvas">
+          <Toggle
+            value={settings.auto_layout}
+            onChange={(v) => update({ auto_layout: v })}
+          />
+        </SettingRow>
+
+        <SettingRow label="Auto Connect" description="Auto-create edges between related notes">
+          <Toggle
+            value={settings.auto_connect}
+            onChange={(v) => update({ auto_connect: v })}
+          />
         </SettingRow>
 
         <SettingRow
@@ -83,13 +103,13 @@ export default function SettingsBlock(_props: { item: BlockItem }) {
         </SettingRow>
 
         <SettingRow label="Backend" description="API server connection">
-          <BackendStatus />
+          <BackendStatus          />
         </SettingRow>
       </div>
 
       <div className="mt-6 pt-4 border-t border-[var(--glass-border)]">
         <p className="text-[11px] text-[var(--glass-text-muted)] leading-relaxed">
-          Settings are persisted locally and synced to the backend.
+          Settings are synced to the backend and persisted locally as fallback.
         </p>
       </div>
     </div>
@@ -118,32 +138,77 @@ function SettingRow({
   )
 }
 
-function BackendStatus() {
-  const [status, setStatus] = useState<"checking" | "online" | "offline">(
-    "checking"
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className={`relative w-10 h-5 rounded-full transition-colors ${
+        value ? "bg-[var(--accent)]" : "bg-[rgba(255,255,255,0.1)]"
+      }`}
+    >
+      <div
+        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+          value ? "translate-x-5" : "translate-x-0.5"
+        }`}
+      />
+    </button>
   )
+}
+
+function BackendStatus() {
+  const [status, setStatus] = useState<{
+    state: "checking" | "online" | "offline"
+    version?: string
+    providers?: { google: boolean; groq: boolean }
+    authEnabled?: boolean
+  }>({ state: "checking" })
 
   useEffect(() => {
     api
       .health()
-      .then((res) => setStatus(res ? "online" : "offline"))
-      .catch(() => setStatus("offline"))
+      .then((res) => {
+        if (res) {
+          setStatus({
+            state: "online",
+            version: res.version,
+            providers: res.providers,
+            authEnabled: res.auth_enabled,
+          })
+        } else {
+          setStatus({ state: "offline" })
+        }
+      })
+      .catch(() => setStatus({ state: "offline" }))
   }, [])
 
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className={`w-2 h-2 rounded-full ${
-          status === "online"
-            ? "bg-[var(--green)]"
-            : status === "offline"
-              ? "bg-[var(--red)]"
-              : "bg-[var(--amber)] animate-pulse"
-        }`}
-      />
-      <span className="text-[12px] text-[var(--glass-text-dim)] capitalize">
-        {status}
-      </span>
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex items-center gap-2">
+        <div
+          className={`w-2 h-2 rounded-full ${
+            status.state === "online"
+              ? "bg-[var(--green)]"
+              : status.state === "offline"
+                ? "bg-[var(--red)]"
+                : "bg-[var(--amber)] animate-pulse"
+          }`}
+        />
+        <span className="text-[12px] text-[var(--glass-text-dim)] capitalize">
+          {status.state}
+          {status.version && ` v${status.version}`}
+        </span>
+      </div>
+      {status.providers && (
+        <div className="flex items-center gap-2 text-[10px] text-[var(--glass-text-muted)]">
+          <span>Gemini ✓</span>
+          <span>
+            Groq {status.providers.groq ? "✓" : "✗"}
+          </span>
+          <span>
+            Auth {status.authEnabled ? "on" : "off"}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

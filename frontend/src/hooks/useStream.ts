@@ -1,16 +1,15 @@
 import { create } from "zustand"
 import type {
-  StreamItem,
-  BlockType,
-  BlockData,
-  ChatSource,
-  StreamMetadata,
+  StreamItem, BlockType, BlockData,
+  ChatSource, StreamMetadata, ChatMessage,
 } from "../types"
 import { uid } from "../utils"
+import { api } from "../api/client"
 
 interface StreamState {
   items: StreamItem[]
   isLoading: boolean
+  chatId: string | null
 
   addUserMessage: (content: string) => void
   addAssistantMessage: (
@@ -29,6 +28,7 @@ interface StreamState {
   clearStream: () => void
   getLastBlock: () => StreamItem | undefined
   getVisibleNoteIds: () => string[]
+  saveConversation: (contextType: string, contextId?: string) => Promise<void>
 }
 
 function makeWelcome(): StreamItem {
@@ -43,6 +43,7 @@ function makeWelcome(): StreamItem {
 export const useStreamStore = create<StreamState>((set, get) => ({
   items: [makeWelcome()],
   isLoading: false,
+  chatId: null,
 
   addUserMessage: (content) =>
     set((s) => ({
@@ -95,13 +96,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   setBlockLoading: (id, loading) =>
     set((s) => ({
       items: s.items.map((item) =>
-        item.id === id && item.type === "block"
-          ? { ...item, loading }
-          : item
+        item.id === id && item.type === "block" ? { ...item, loading } : item
       ),
     })),
 
-  clearStream: () => set({ items: [makeWelcome()] }),
+  clearStream: () => set({ items: [makeWelcome()], chatId: null }),
 
   getLastBlock: () => {
     const blocks = get().items.filter((i) => i.type === "block")
@@ -116,6 +115,36 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       }
     }
     return ids
+  },
+
+  saveConversation: async (contextType, contextId) => {
+    const messages: ChatMessage[] = get()
+      .items.filter((i): i is Extract<StreamItem, { type: "user" | "assistant" }> =>
+        i.type === "user" || i.type === "assistant"
+      )
+      .map((i) => ({
+        role: i.type as "user" | "assistant",
+        content: i.content,
+        sources: i.type === "assistant" ? (i as { sources?: ChatSource[] }).sources : undefined,
+        followUps: i.type === "assistant" ? (i as { followUps?: string[] }).followUps : undefined,
+      }))
+
+    if (messages.length === 0) return
+
+    try {
+      const firstUserMsg = messages.find((m) => m.role === "user")
+      const title = firstUserMsg?.content.slice(0, 50) || "Chat"
+
+      const saved = await api.saveHistory({
+        context_type: contextType,
+        context_id: contextId,
+        messages,
+        title,
+      })
+      set({ chatId: saved.id })
+    } catch {
+      console.warn("Failed to save conversation")
+    }
   },
 }))
 

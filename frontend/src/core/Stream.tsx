@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState } from "react"
-import { useStream } from "../hooks/useStream"
+import { useStream, useStreamStore } from "../hooks/useStream"
 import { useAppContext } from "../hooks/useAppContext"
 import StreamMessage from "./StreamMessage"
 import StreamBlock from "./StreamBlock"
 import { ErrorBoundary } from "../components/ErrorBoundary"
 import {
-  Loader2,
-  Minimize2,
-  Maximize2,
-  MessageCircle,
-  BookOpen,
-  X,
+  Loader2, Minimize2, Maximize2, MessageCircle, BookOpen, X, BarChart2,
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useCanvasEvents } from "../hooks/useCanvasEvents"
@@ -62,7 +57,9 @@ export default function Stream() {
 
   // ═══ PAGE — collapsed FAB ═══
   if (collapsed) {
-    const assistantCount = items.filter((i) => i.type === "assistant").length
+    const unreadCount = items.filter(
+      (i) => i.type === "assistant" || i.type === "system"
+    ).length
     return (
       <button
         onClick={() => setCollapsed(false)}
@@ -70,14 +67,13 @@ export default function Stream() {
         style={{
           bottom: 80,
           right: 20,
-          boxShadow:
-            "0 4px 24px rgba(99,102,241,0.4), 0 0 0 2px rgba(99,102,241,0.2)",
+          boxShadow: "0 4px 24px rgba(99,102,241,0.4), 0 0 0 2px rgba(99,102,241,0.2)",
         }}
       >
         <MessageCircle size={20} className="text-[var(--accent-light)]" />
-        {assistantCount > 0 && (
+        {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 w-5 h-5 bg-[var(--accent)] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-            {assistantCount}
+            {Math.min(unreadCount, 99)}
           </span>
         )}
       </button>
@@ -105,13 +101,28 @@ export default function Stream() {
           </span>
           <div className="flex items-center gap-1">
             <button
-              onClick={() =>
-                canvasDispatch({ type: "open-library" })
-              }
+              onClick={() => canvasDispatch({ type: "open-library" })}
               className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.08)] text-[var(--glass-text-muted)] hover:text-[var(--accent-light)] transition-colors"
               title="Open Excalidraw Library"
             >
               <BookOpen size={13} />
+            </button>
+            <button
+              onClick={() => {
+                if (current.pageId) {
+                  import("../api/client").then(({ api }) => {
+                    api.getPageStats(current.pageId!).then((stats) => {
+                      useStreamStore.getState().addSystemMessage(
+                        `📊 ${stats.note_count} notes · ${stats.edge_count} edges · ${stats.cluster_count} clusters`
+                      )
+                    }).catch(() => {})
+                  })
+                }
+              }}
+              className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.08)] text-[var(--glass-text-muted)] hover:text-[var(--accent-light)] transition-colors"
+              title="Page Stats"
+            >
+              <BarChart2 size={13} />
             </button>
             <button
               onClick={() => setMaximized(!maximized)}
@@ -134,9 +145,29 @@ export default function Stream() {
         <div className="flex-1 overflow-y-auto px-3 py-3 min-h-0">
           <div className="flex flex-col gap-3">
             {items.length === 0 && (
-              <div className="text-center text-[11px] text-[var(--glass-text-muted)] py-6">
-                Ask anything about this page, or type{" "}
-                <span className="font-mono text-[var(--accent)]">/help</span>
+              <div className="text-center py-8">
+                <div className="text-[13px] font-semibold text-white mb-1.5">
+                  {current.pageName || "Page"} Chat
+                </div>
+                <div className="text-[11px] text-[var(--glass-text-muted)] leading-relaxed mb-4">
+                  Ask questions about notes on this page,<br />
+                  or use commands to interact with the canvas.
+                </div>
+                <div className="flex flex-col gap-1.5 items-start mx-auto w-fit text-left">
+                  {[
+                    { cmd: "/find", desc: "search canvas" },
+                    { cmd: "/add", desc: "add content" },
+                    { cmd: "/layout", desc: "AI reorganize" },
+                    { cmd: "/summarize", desc: "page summary" },
+                  ].map((h) => (
+                    <div key={h.cmd} className="flex items-center gap-2">
+                      <code className="text-[10px] font-mono text-[var(--accent-light)] bg-[var(--accent-subtle)] px-1.5 py-0.5 rounded">
+                        {h.cmd}
+                      </code>
+                      <span className="text-[10px] text-[var(--glass-text-muted)]">{h.desc}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             {items.map((item) => (
@@ -153,7 +184,6 @@ export default function Stream() {
   )
 }
 
-/** Single renderer — avoids duplicate if/else chains */
 function StreamItemRenderer({ item }: { item: import("../types").StreamItem }) {
   switch (item.type) {
     case "system":
@@ -176,9 +206,7 @@ function LoadingDots() {
   return (
     <div className="flex items-center gap-2 py-1.5">
       <Loader2 size={13} className="text-[var(--accent)] animate-spin" />
-      <span className="text-[12px] text-[var(--glass-text-dim)]">
-        Thinking…
-      </span>
+      <span className="text-[12px] text-[var(--glass-text-dim)]">Thinking…</span>
     </div>
   )
 }

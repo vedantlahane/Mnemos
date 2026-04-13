@@ -11,7 +11,12 @@ interface ContextState {
 export const useAppContextStore = create<ContextState>((set, get) => ({
   current: { type: "home" },
 
-  switchTo: (type, pageId, pageName) =>
+  switchTo: (type, pageId, pageName) => {
+    // Clear stream when switching contexts
+    import("./useStream").then(({ useStreamStore }) => {
+      useStreamStore.getState().clearStream()
+    })
+
     set({
       current: {
         type,
@@ -19,14 +24,26 @@ export const useAppContextStore = create<ContextState>((set, get) => ({
         pageName,
         previousContext: get().current,
       },
-    }),
+    })
+  },
 
-  goBack: () =>
+  goBack: () => {
+    import("./useStream").then(({ useStreamStore }) => {
+      useStreamStore.getState().clearStream()
+    })
+
     set((state) => ({
       current: state.current.previousContext || { type: "home" },
-    })),
+    }))
+  },
 
-  goHome: () => set({ current: { type: "home" } }),
+  goHome: () => {
+    import("./useStream").then(({ useStreamStore }) => {
+      useStreamStore.getState().clearStream()
+    })
+
+    set({ current: { type: "home" } })
+  },
 }))
 
 export function useAppContext() {
