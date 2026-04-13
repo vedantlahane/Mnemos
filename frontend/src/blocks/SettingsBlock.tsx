@@ -10,7 +10,7 @@ export default function SettingsBlock() {
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
-      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)] mb-6">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-6">
         Workspace Settings
       </div>
 
@@ -46,7 +46,7 @@ export default function SettingsBlock() {
               step="0.05"
               value={threshold}
               onChange={(e) => setThreshold(e.target.value)}
-              className="w-36 accent-[var(--color-accent-dim)]"
+              className="w-36 accent-[var(--accent)]"
             />
             <GlassInput
               type="number"
@@ -61,7 +61,7 @@ export default function SettingsBlock() {
         </SettingRow>
 
         <SettingRow label="Embedding Dimensions" description="Output dimensions for Gemini embeddings">
-          <span className="text-[13px] text-[var(--color-secondary)] font-mono">768</span>
+          <span className="text-[13px] text-[var(--glass-text-dim)] font-mono">768</span>
         </SettingRow>
 
         <SettingRow label="Backend" description="API server connection">
@@ -69,10 +69,10 @@ export default function SettingsBlock() {
         </SettingRow>
       </div>
 
-      <div className="mt-6 pt-4 border-t border-[rgba(255,255,255,0.06)]">
-        <p className="text-[11px] text-[var(--color-tertiary)] leading-relaxed">
+      <div className="mt-6 pt-4 border-t border-[var(--glass-border)]">
+        <p className="text-[11px] text-[var(--glass-text-muted)] leading-relaxed">
           Settings are stored locally. You can also type{" "}
-          <code className="font-mono text-[var(--color-accent)]">"set threshold to 0.8"</code> in chat.
+          <code className="font-mono text-[var(--accent)]">"set threshold to 0.8"</code> in chat.
         </p>
       </div>
     </div>
@@ -84,7 +84,7 @@ function SettingRow({ label, description, children }: { label: string; descripti
     <div className="flex items-start justify-between gap-6">
       <div className="min-w-0">
         <div className="text-[13px] font-semibold text-white">{label}</div>
-        <div className="text-[11px] text-[var(--color-tertiary)] mt-0.5">{description}</div>
+        <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">{description}</div>
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -105,13 +105,13 @@ function BackendStatus() {
       <div
         className={`w-2 h-2 rounded-full ${
           status === "online"
-            ? "bg-[var(--color-success)]"
+            ? "bg-[var(--green)]"
             : status === "offline"
-            ? "bg-[var(--color-error)]"
-            : "bg-[var(--color-warning)] animate-pulse"
+            ? "bg-[var(--red)]"
+            : "bg-[var(--amber)] animate-pulse"
         }`}
       />
-      <span className="text-[12px] text-[var(--color-secondary)] capitalize">{status}</span>
+      <span className="text-[12px] text-[var(--glass-text-dim)] capitalize">{status}</span>
     </div>
   )
 }

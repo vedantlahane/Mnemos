@@ -157,6 +157,66 @@
       0 0 20px var(--accent-glow);
   }
 
+  /* Glass surface layers */
+  .glass-surface-1 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-surface-2 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-surface-3 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-interactive {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .glass-interactive:hover {
+    border-color: var(--glass-border-hover);
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.06) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 12px 48px rgba(0,0,0,0.5),
+      0 0 20px var(--accent-glow);
+  }
+
   /* ═══════════════════════════════════════
      PAPER CARDS (white, readable content)
      ═══════════════════════════════════════ */

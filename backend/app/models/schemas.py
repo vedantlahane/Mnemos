@@ -57,6 +57,7 @@ class PageUpdate(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     color: Optional[str] = None
+    canvas_data: Optional[dict] = None
     viewport: Optional[dict] = None
     is_archived: Optional[bool] = None
 

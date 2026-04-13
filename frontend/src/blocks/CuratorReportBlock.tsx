@@ -35,15 +35,15 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
   if (loading) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
-        <Loader2 className="animate-spin text-[var(--color-accent)]" size={18} />
-        <span className="text-[13px] text-[var(--color-secondary)]">Running curator scan...</span>
+        <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
+        <span className="text-[13px] text-[var(--glass-text-dim)]">Running curator scan...</span>
       </div>
     )
   }
 
   if (!report) {
     return (
-      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--color-error)]">
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--red)]">
         Curator scan failed. Backend may not support this endpoint yet.
       </div>
     )
@@ -57,12 +57,12 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
-      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)] mb-4">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
         Curator Report
       </div>
 
       {!hasIssues ? (
-        <div className="flex items-center gap-2 text-[var(--color-success)]">
+        <div className="flex items-center gap-2 text-[var(--green)]">
           <CheckCircle size={16} />
           <span className="text-[13px] font-semibold">Workspace is well maintained. No issues found.</span>
         </div>
@@ -70,9 +70,9 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
         <div className="flex flex-col gap-4">
           {/* Duplicates */}
           {report.potential_duplicates.length > 0 && (
-            <Section title={`${report.potential_duplicates.length} Potential Duplicate${report.potential_duplicates.length > 1 ? "s" : ""}`} icon={<AlertTriangle size={14} className="text-[var(--color-warning)]" />}>
+            <Section title={`${report.potential_duplicates.length} Potential Duplicate${report.potential_duplicates.length > 1 ? "s" : ""}`} icon={<AlertTriangle size={14} className="text-[var(--amber)]" />}>
               {report.potential_duplicates.map((d, i) => (
-                <div key={i} className="text-[12px] text-[var(--color-secondary)] py-1">
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
                   Similarity {Math.round(d.similarity * 100)}% — {d.reason}
                 </div>
               ))}
@@ -81,9 +81,9 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
 
           {/* Orphans */}
           {report.orphan_notes.length > 0 && (
-            <Section title={`${report.orphan_notes.length} Orphan Note${report.orphan_notes.length > 1 ? "s" : ""}`} icon={<Trash2 size={14} className="text-[var(--color-error)]" />}>
+            <Section title={`${report.orphan_notes.length} Orphan Note${report.orphan_notes.length > 1 ? "s" : ""}`} icon={<Trash2 size={14} className="text-[var(--red)]" />}>
               {report.orphan_notes.map((o, i) => (
-                <div key={i} className="text-[12px] text-[var(--color-secondary)] py-1">
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
                   "{o.title}" — {o.suggestion}
                 </div>
               ))}
@@ -92,9 +92,9 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
 
           {/* Missing connections */}
           {report.missing_connections.length > 0 && (
-            <Section title={`${report.missing_connections.length} Missing Connection${report.missing_connections.length > 1 ? "s" : ""}`} icon={<Link size={14} className="text-[var(--color-accent)]" />}>
+            <Section title={`${report.missing_connections.length} Missing Connection${report.missing_connections.length > 1 ? "s" : ""}`} icon={<Link size={14} className="text-[var(--accent)]" />}>
               {report.missing_connections.map((m, i) => (
-                <div key={i} className="text-[12px] text-[var(--color-secondary)] py-1">
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
                   {m.reason} (suggested: {m.suggested_type})
                 </div>
               ))}
@@ -103,17 +103,17 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
 
           {/* Actions needing confirmation */}
           {report.needs_confirmation.length > 0 && (
-            <div className="pt-3 border-t border-[rgba(255,255,255,0.06)]">
-              <div className="text-[10px] uppercase tracking-widest text-[var(--color-tertiary)] font-semibold mb-2">
+            <div className="pt-3 border-t border-[var(--glass-border)]">
+              <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
                 Suggested Actions
               </div>
               {report.needs_confirmation.map((action, i) => (
                 <div key={i} className="flex items-center justify-between py-2">
-                  <span className="text-[12px] text-[var(--color-secondary)]">{action.reason}</span>
+                  <span className="text-[12px] text-[var(--glass-text-dim)]">{action.reason}</span>
                   <button
                     onClick={() => applyAction(action)}
                     disabled={applying === action.action_type}
-                    className="text-[11px] text-[var(--color-accent)] border border-[rgba(99,102,241,0.25)] px-3 py-1 rounded-lg hover:bg-[rgba(99,102,241,0.1)] transition-colors disabled:opacity-50"
+                    className="text-[11px] text-[var(--accent)] border border-[rgba(99,102,241,0.25)] px-3 py-1 rounded-lg hover:bg-[rgba(99,102,241,0.1)] transition-colors disabled:opacity-50"
                   >
                     {applying === action.action_type ? "Applying..." : "Apply"}
                   </button>
@@ -125,7 +125,7 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
       )}
 
       {report.auto_applied > 0 && (
-        <div className="mt-4 text-[11px] text-[var(--color-success)]">
+        <div className="mt-4 text-[11px] text-[var(--green)]">
           ✓ Auto-applied {report.auto_applied} safe action{report.auto_applied > 1 ? "s" : ""}
         </div>
       )}

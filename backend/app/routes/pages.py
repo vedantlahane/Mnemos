@@ -77,12 +77,27 @@ async def get_page_canvas(page_id: str):
 
 
 @router.put("/pages/{page_id}/canvas")
-async def save_page_viewport(page_id: str, payload: dict):
-    viewport = payload.get("viewport")
-    if not viewport:
-        raise HTTPException(status_code=400, detail="viewport required")
+async def save_page_canvas(page_id: str, payload: dict):
+    page = await db.get_page(page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Page not found")
 
-    await db.update_page(page_id, viewport=viewport)
+    updates = {}
+    if "viewport" in payload:
+        updates["viewport"] = payload.get("viewport")
+    if "canvas_data" in payload:
+        updates["canvas_data"] = payload.get("canvas_data") or {}
+    elif any(key in payload for key in ("elements", "appState", "files")):
+        updates["canvas_data"] = {
+            "elements": payload.get("elements") or [],
+            "appState": payload.get("appState") or {},
+            "files": payload.get("files") or {},
+        }
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="viewport or canvas_data required")
+
+    await db.update_page(page_id, **updates)
     return {"status": "saved"}
 
 

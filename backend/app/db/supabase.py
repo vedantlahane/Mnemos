@@ -192,7 +192,7 @@ class NotesDB:
             .maybe_single()
             .execute()
         )
-        return result.data
+        return result.data if result else None
 
     async def list_pages(self, include_archived: bool = False) -> list:
         def _query():
@@ -266,6 +266,7 @@ class NotesDB:
 
         return {
             "page": page,
+            "canvas_data": page.get("canvas_data") or {},
             "notes": notes.data,
             "edges": edges_data,
             "elements": elements.data,

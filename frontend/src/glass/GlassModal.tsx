@@ -27,11 +27,11 @@ export function GlassModal({ isOpen, onClose, title, children }: GlassModalProps
             className="glass-surface-2 w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex justify-between items-center p-4 border-b border-[rgba(255,255,255,0.06)]">
+            <div className="flex justify-between items-center p-4 border-b border-[var(--glass-border)]">
               <h3 className="font-semibold text-white text-[15px]">{title}</h3>
               <button
                 onClick={onClose}
-                className="text-[var(--color-tertiary)] hover:text-white transition-colors w-7 h-7 rounded-lg hover:bg-[rgba(255,255,255,0.05)] flex items-center justify-center"
+                className="text-[var(--glass-text-muted)] hover:text-white transition-colors w-7 h-7 rounded-lg hover:bg-[rgba(255,255,255,0.05)] flex items-center justify-center"
               >
                 ✕
               </button>

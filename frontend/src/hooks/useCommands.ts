@@ -4,39 +4,32 @@ import { useAppContext } from "./useAppContext"
 import { api } from "../api/client"
 import type { Command, ContextType } from "../types"
 
-// ─── Complete command list per spec §3.4 ─────────────
-
 const COMMANDS: Command[] = [
-  // HOME CONTEXT
-  { name: "/pages",    aliases: ["/p"],           description: "List all pages with stats",       context: ["home"],                             handler: "pages" },
-  { name: "/page",     aliases: [],               description: "Create or delete a page",         context: ["home"],          args: "create|delete [name]", handler: "page" },
-  { name: "/open",     aliases: ["/o"],           description: "Open a page canvas",              context: ["home", "page", "settings", "history"], args: "<page name>", handler: "open" },
-  { name: "/search",   aliases: ["/s"],           description: "Semantic search",                 context: ["home", "page"],  args: "<query>",    handler: "search" },
-  { name: "/notes",    aliases: ["/n"],           description: "Browse notes (optional #tag)",    context: ["home", "page"],  args: "[#tag|recent]", handler: "notes" },
-  { name: "/tags",     aliases: [],               description: "View tag cloud with counts",      context: ["home", "page"],                      handler: "tags" },
-  { name: "/tasks",    aliases: ["/t"],           description: "List all tasks across pages",     context: ["home", "page"],                      handler: "tasks" },
-  { name: "/stats",    aliases: [],               description: "Workspace statistics",             context: ["home"],                             handler: "stats" },
-  { name: "/capture",  aliases: [],               description: "Quick capture a note",             context: ["home", "page"],  args: "<text> [--page X]", handler: "capture" },
-  { name: "/curator",  aliases: ["/clean"],       description: "Run maintenance scan",             context: ["home"],                             handler: "curator" },
-
-  // PAGE CONTEXT
-  { name: "/find",     aliases: [],               description: "Highlight on canvas (Ctrl+F)",    context: ["page"],          args: "<text>",     handler: "find" },
-  { name: "/add",      aliases: [],               description: "Add sticky note to canvas",       context: ["page"],          args: "<text>",     handler: "add" },
-  { name: "/layout",   aliases: ["/reorganize"],  description: "Auto-reorganize canvas",          context: ["page"],                             handler: "layout" },
-  { name: "/summarize",aliases: [],               description: "AI summarizes all page content",  context: ["page"],                             handler: "summarize" },
-  { name: "/gaps",     aliases: [],               description: "What's missing on this page",     context: ["home", "page"],                      handler: "gaps" },
-  { name: "/reading",  aliases: ["/path"],        description: "Suggested reading order",         context: ["home", "page"],  args: "[topic]",    handler: "reading" },
-  { name: "/export",   aliases: [],               description: "Export page as markdown",         context: ["page"],                             handler: "export" },
-  { name: "/rename",   aliases: [],               description: "Rename current page",             context: ["page"],          args: "<new name>", handler: "rename" },
-  { name: "/close",    aliases: [],               description: "Close page, return to home",      context: ["page", "settings", "history"],       handler: "close" },
-
-  // WORKS ANYWHERE
-  { name: "/settings", aliases: [],               description: "Open settings",                    context: ["home", "page", "settings", "history"], handler: "settings" },
-  { name: "/history",  aliases: ["/h"],           description: "View past conversations",          context: ["home", "page", "settings", "history"], handler: "history" },
-  { name: "/home",     aliases: [],               description: "Go to home context",               context: ["home", "page", "settings", "history"], handler: "home" },
-  { name: "/back",     aliases: [],               description: "Go to previous context",           context: ["home", "page", "settings", "history"], handler: "back" },
-  { name: "/clear",    aliases: ["/c"],           description: "Clear conversation stream",        context: ["home", "page", "settings", "history"], handler: "clear" },
-  { name: "/help",     aliases: ["/?"],           description: "Show all commands",                context: ["home", "page", "settings", "history"], handler: "help" },
+  { name: "/pages", aliases: ["/p"], description: "List all pages with stats", context: ["home"], handler: "pages" },
+  { name: "/page", aliases: [], description: "Create or delete a page", context: ["home"], args: "create|delete [name]", handler: "page" },
+  { name: "/open", aliases: ["/o"], description: "Open a page canvas", context: ["home", "page", "settings", "history"], args: "<page name>", handler: "open" },
+  { name: "/search", aliases: ["/s"], description: "Semantic search", context: ["home", "page"], args: "<query>", handler: "search" },
+  { name: "/notes", aliases: ["/n"], description: "Browse notes (optional #tag)", context: ["home", "page"], args: "[#tag|recent]", handler: "notes" },
+  { name: "/tags", aliases: [], description: "View tag cloud with counts", context: ["home", "page"], handler: "tags" },
+  { name: "/tasks", aliases: ["/t"], description: "List all tasks across pages", context: ["home", "page"], handler: "tasks" },
+  { name: "/stats", aliases: [], description: "Workspace statistics", context: ["home"], handler: "stats" },
+  { name: "/capture", aliases: [], description: "Quick capture a note", context: ["home", "page"], args: "<text> [--page X]", handler: "capture" },
+  { name: "/curator", aliases: ["/clean"], description: "Run maintenance scan", context: ["home"], handler: "curator" },
+  { name: "/find", aliases: [], description: "Find text on canvas", context: ["page"], args: "<text>", handler: "find" },
+  { name: "/add", aliases: [], description: "Add a note or sticky to canvas", context: ["page"], args: "<text>", handler: "add" },
+  { name: "/layout", aliases: ["/reorganize"], description: "Auto-reorganize canvas", context: ["page"], handler: "layout" },
+  { name: "/summarize", aliases: [], description: "AI summarizes all page content", context: ["page"], handler: "summarize" },
+  { name: "/gaps", aliases: [], description: "What's missing on this page", context: ["home", "page"], handler: "gaps" },
+  { name: "/reading", aliases: ["/path"], description: "Suggested reading order", context: ["home", "page"], args: "[topic]", handler: "reading" },
+  { name: "/export", aliases: [], description: "Export page as markdown", context: ["page"], handler: "export" },
+  { name: "/rename", aliases: [], description: "Rename current page", context: ["page"], args: "<new name>", handler: "rename" },
+  { name: "/close", aliases: [], description: "Close page, return to home", context: ["page", "settings", "history"], handler: "close" },
+  { name: "/settings", aliases: [], description: "Open settings", context: ["home", "page", "settings", "history"], handler: "settings" },
+  { name: "/history", aliases: ["/h"], description: "View past conversations", context: ["home", "page", "settings", "history"], handler: "history" },
+  { name: "/home", aliases: [], description: "Go to home context", context: ["home", "page", "settings", "history"], handler: "home" },
+  { name: "/back", aliases: [], description: "Go to previous context", context: ["home", "page", "settings", "history"], handler: "back" },
+  { name: "/clear", aliases: ["/c"], description: "Clear conversation stream", context: ["home", "page", "settings", "history"], handler: "clear" },
+  { name: "/help", aliases: ["/?"], description: "Show all commands", context: ["home", "page", "settings", "history"], handler: "help" },
 ]
 
 export function useCommands() {
@@ -52,9 +45,9 @@ export function useCommands() {
       if (!partial.startsWith("/")) return []
       const term = partial.toLowerCase().split(" ")[0]
       return COMMANDS.filter(
-        (c) =>
-          c.context.includes(ctx) &&
-          (c.name.startsWith(term) || c.aliases.some((a) => a.startsWith(term)))
+        (command) =>
+          command.context.includes(ctx) &&
+          (command.name.startsWith(term) || command.aliases.some((alias) => alias.startsWith(term)))
       )
     },
     []
@@ -71,16 +64,12 @@ export function useCommands() {
     }
   }
 
-  // ─── Command Execution Engine ─────────────────────
-
   const executeCommand = async (raw: string) => {
     const parts = raw.trim().split(/\s+/)
     const cmdStr = parts[0].toLowerCase()
     const args = parts.slice(1).join(" ")
 
-    const cmd = COMMANDS.find(
-      (c) => c.name === cmdStr || c.aliases.includes(cmdStr)
-    )
+    const cmd = COMMANDS.find((command) => command.name === cmdStr || command.aliases.includes(cmdStr))
 
     if (!cmd) {
       addAssistantMessage(`Unknown command: \`${cmdStr}\`. Type **/help** for available commands.`)
@@ -93,7 +82,6 @@ export function useCommands() {
     }
 
     switch (cmd.handler) {
-      // ─── Navigation ─────────────────
       case "open": {
         if (!args) {
           addAssistantMessage("Usage: `/open <page name>`")
@@ -102,14 +90,12 @@ export function useCommands() {
         try {
           const res = await api.listPages()
           const pages = res.pages || res || []
-          const match = pages.find(
-            (p: { name: string }) => p.name.toLowerCase() === args.toLowerCase()
-          )
+          const match = pages.find((page: { name: string }) => page.name.toLowerCase() === args.toLowerCase())
           if (match) {
             switchTo("page", match.id, match.name)
-            addSystemMessage(`Opened page: ${match.icon || "📄"} ${match.name}`)
+            addSystemMessage(`Opened page: ${match.icon || "Page"} ${match.name}`)
           } else {
-            addAssistantMessage(`Page "${args}" not found. Available pages:\n${pages.map((p: { icon: string; name: string }) => `• ${p.icon} ${p.name}`).join("\n")}`)
+            addAssistantMessage(`Page "${args}" not found. Available pages:\n${pages.map((page: { icon: string; name: string }) => `- ${page.icon} ${page.name}`).join("\n")}`)
           }
         } catch {
           addAssistantMessage("Failed to load pages.")
@@ -118,11 +104,6 @@ export function useCommands() {
       }
 
       case "close":
-        goHome()
-        addSystemMessage("Returned to home.")
-        addBlock("welcome")
-        break
-
       case "home":
         goHome()
         addSystemMessage("Returned to home.")
@@ -134,7 +115,6 @@ export function useCommands() {
         addSystemMessage("Navigated back.")
         break
 
-      // ─── Content Commands ───────────
       case "pages":
         addBlock("page-list")
         break
@@ -154,9 +134,7 @@ export function useCommands() {
           try {
             const res = await api.listPages()
             const pages = res.pages || res || []
-            const match = pages.find(
-              (p: { name: string }) => p.name.toLowerCase() === name.toLowerCase()
-            )
+            const match = pages.find((page: { name: string }) => page.name.toLowerCase() === name.toLowerCase())
             if (match) {
               await api.deletePage(match.id)
               addSystemMessage(`Deleted page: ${name}. Notes moved to Uncategorized.`)
@@ -214,7 +192,7 @@ export function useCommands() {
             capture_type: "manual",
             page_hint: pageHint,
           })
-          addSystemMessage(`✓ Note captured${resp.page_name ? ` → ${resp.page_name}` : ""}. Processing in background.`)
+          addSystemMessage(`Note captured${resp.page_name ? ` -> ${resp.page_name}` : ""}. Processing in background.`)
         } catch {
           addAssistantMessage("Failed to capture note.")
         } finally {
@@ -235,45 +213,40 @@ export function useCommands() {
         addBlock("gap-analysis", undefined, { pageId: current.pageId })
         break
 
-      // ─── Page-context canvas commands ───
       case "find":
         if (!args) {
-          addAssistantMessage("Usage: `/find <search text>`")
+          addAssistantMessage("Usage: `/find <text>`")
         } else {
-          // Dispatches to canvas search — useCanvasSearch listens
           window.dispatchEvent(new CustomEvent("canvas:search", { detail: args }))
-          addSystemMessage(`Searching canvas for "${args}"...`)
         }
         break
 
-      case "add":
+      case "add": {
         if (!args) {
-          addAssistantMessage("Usage: `/add <text>` — adds a sticky note to canvas")
-        } else {
-          try {
-            await api.createElement(current.pageId!, {
-              element_type: "sticky",
-              content: args,
-              position_x: 100 + Math.random() * 400,
-              position_y: 100 + Math.random() * 400,
-            })
-            addSystemMessage(`Sticky note added to canvas.`)
-            window.dispatchEvent(new CustomEvent("canvas:refresh"))
-          } catch {
-            addAssistantMessage("Failed to add element.")
-          }
+          addAssistantMessage("Usage: `/add <text>` or `/add sticky: <text>`")
+          return
         }
+
+        const lower = args.toLowerCase()
+        const isPrefixed = lower.startsWith("sticky:") || lower.startsWith("note:")
+        const type = lower.startsWith("sticky:") ? "sticky" : "note"
+        const content = isPrefixed ? args.split(":").slice(1).join(":").trim() : args
+
+        window.dispatchEvent(new CustomEvent("canvas:add", {
+          detail: { type, content },
+        }))
         break
+      }
 
       case "layout":
         try {
           setLoading(true)
-          addSystemMessage("Reorganizing canvas layout...")
+          addSystemMessage("Reorganizing canvas elements...")
           await api.triggerPageLayout(current.pageId!)
           window.dispatchEvent(new CustomEvent("canvas:refresh"))
-          addSystemMessage("✓ Canvas reorganized.")
+          addSystemMessage("Canvas reorganized.")
         } catch {
-          addAssistantMessage("Failed to trigger layout.")
+          addAssistantMessage("Layout is not available yet. Drag elements manually.")
         } finally {
           setLoading(false)
         }
@@ -282,12 +255,7 @@ export function useCommands() {
       case "summarize": {
         setLoading(true)
         try {
-          const resp = await api.chat(
-            `Summarize everything on this page.`,
-            [],
-            "page",
-            current.pageId
-          )
+          const resp = await api.chat("Summarize everything on this page.", [], "page", current.pageId)
           addAssistantMessage(resp.answer || "No summary available.", resp.sources, resp.follow_ups)
         } catch {
           addAssistantMessage("Failed to summarize page.")
@@ -316,7 +284,6 @@ export function useCommands() {
         break
       }
 
-      // ─── Global ─────────────────────
       case "settings":
         switchTo("settings")
         addBlock("settings")
@@ -340,19 +307,15 @@ export function useCommands() {
     }
   }
 
-  // ─── Natural Language Detection ───────────────────
-
   function detectNaturalLanguageCommand(text: string): boolean {
     const lower = text.toLowerCase().trim()
-
-    // "open <page>" pattern
     const openMatch = lower.match(/^open\s+(.+)$/)
+
     if (openMatch) {
       executeCommand(`/open ${openMatch[1]}`)
       return true
     }
 
-    // "close" / "go home" / "go back"
     if (lower === "close" || lower === "go home") {
       executeCommand("/home")
       return true
@@ -365,17 +328,14 @@ export function useCommands() {
     return false
   }
 
-  // ─── Submit Handler ───────────────────────────────
-
   const handleSubmit = async () => {
     if (!inputValue.trim()) return
     const q = inputValue.trim()
 
-    // If autocomplete is open and user hits Enter on a suggestion, fill it
     if (suggestions.length > 0 && q.startsWith("/") && !q.includes(" ")) {
       const selected = suggestions[selectedIndex]
       if (selected) {
-        setInputValue(selected.name + " ")
+        setInputValue(`${selected.name} `)
         setSuggestions([])
         return
       }
@@ -384,7 +344,6 @@ export function useCommands() {
     setInputValue("")
     setSuggestions([])
 
-    // Commands
     if (q.startsWith("/")) {
       addUserMessage(q)
       await executeCommand(q)
@@ -393,23 +352,17 @@ export function useCommands() {
 
     addUserMessage(q)
 
-    // Natural language shortcuts
     if (detectNaturalLanguageCommand(q)) return
 
-    // Default: send to Researcher Agent (RAG chat)
     setLoading(true)
     try {
       const history = items
-        .filter((i) => i.type === "user" || i.type === "assistant")
+        .filter((item) => item.type === "user" || item.type === "assistant")
         .slice(-10)
-        .map((i) => ({ role: i.type as string, content: i.content || "" }))
+        .map((item) => ({ role: item.type as string, content: item.content || "" }))
 
       const resp = await api.chat(q, history, current.type, current.pageId)
-      addAssistantMessage(
-        resp.answer || "I couldn't find relevant information.",
-        resp.sources,
-        resp.follow_ups
-      )
+      addAssistantMessage(resp.answer || "I couldn't find relevant information.", resp.sources, resp.follow_ups)
     } catch {
       addAssistantMessage("Error connecting to backend. Is the server running?")
     } finally {

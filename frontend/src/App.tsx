@@ -6,7 +6,7 @@ import CanvasOverlay from "./canvas/CanvasOverlay"
 export default function App() {
   return (
     <ContextProvider>
-      <div className="w-full h-full relative overflow-hidden" style={{ background: "var(--color-void)" }}>
+      <div className="w-full h-full relative overflow-hidden bg-[var(--color-void)]">
         {/* z-0: Canvas (full screen when page open) */}
         <CanvasOverlay />
 

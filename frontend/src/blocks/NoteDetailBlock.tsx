@@ -22,14 +22,14 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
   if (loading) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="animate-spin text-[var(--color-tertiary)]" size={20} />
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
       </div>
     )
   }
 
   if (!note) {
     return (
-      <div className="glass-surface-1 p-6 rounded-2xl text-[var(--color-secondary)] text-[13px]">
+      <div className="glass-surface-1 p-6 rounded-2xl text-[var(--glass-text-dim)] text-[13px]">
         Note not found.
       </div>
     )
@@ -47,7 +47,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-2.5">
-          <FileText size={18} className="text-[var(--color-accent)]" />
+          <FileText size={18} className="text-[var(--accent)]" />
           <h3 className="text-[16px] font-bold text-white">{note.title || "Untitled"}</h3>
         </div>
         <GlassBadge variant={statusColors[note.processing_status] || "info"}>
@@ -57,17 +57,17 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
 
       {/* Summary */}
       {note.summary && (
-        <div className="text-[13px] text-[var(--color-secondary)] leading-relaxed mb-4">
+        <div className="text-[13px] text-[var(--glass-text-dim)] leading-relaxed mb-4">
           {note.summary}
         </div>
       )}
 
       {/* Raw text */}
       <div className="glass-surface-2 p-4 rounded-xl mb-4">
-        <div className="text-[10px] uppercase tracking-widest text-[var(--color-tertiary)] font-semibold mb-2">
+        <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
           Original Text
         </div>
-        <div className="text-[12px] text-[var(--color-primary)] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
+        <div className="text-[12px] text-[var(--glass-text)] leading-relaxed whitespace-pre-wrap max-h-[200px] overflow-y-auto">
           {note.raw_text}
         </div>
       </div>
@@ -78,7 +78,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
           {note.tags.map((t) => (
             <span
               key={t}
-              className="flex items-center gap-1 text-[10px] bg-[rgba(99,102,241,0.08)] text-[var(--color-accent)] px-2 py-1 rounded-full font-semibold"
+              className="flex items-center gap-1 text-[10px] bg-[rgba(99,102,241,0.08)] text-[var(--accent)] px-2 py-1 rounded-full font-semibold"
             >
               <Tag size={9} /> {t}
             </span>
@@ -89,13 +89,13 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       {/* Tasks */}
       {note.tasks.length > 0 && (
         <div className="mb-4">
-          <div className="text-[10px] uppercase tracking-widest text-[var(--color-tertiary)] font-semibold mb-2">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Tasks
           </div>
           {note.tasks.map((task, i) => (
             <div key={i} className="flex items-start gap-2 py-1">
-              <CheckSquare size={13} className="text-[var(--color-success)] mt-0.5 shrink-0" />
-              <span className="text-[12px] text-[var(--color-secondary)]">{task}</span>
+              <CheckSquare size={13} className="text-[var(--green)] mt-0.5 shrink-0" />
+              <span className="text-[12px] text-[var(--glass-text-dim)]">{task}</span>
             </div>
           ))}
         </div>
@@ -104,12 +104,12 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       {/* Entities */}
       {note.entities.length > 0 && (
         <div className="mb-4">
-          <div className="text-[10px] uppercase tracking-widest text-[var(--color-tertiary)] font-semibold mb-2">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Entities
           </div>
           <div className="flex flex-wrap gap-1.5">
             {note.entities.map((e) => (
-              <span key={e} className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--color-secondary)]">
+              <span key={e} className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--glass-text-dim)]">
                 {e}
               </span>
             ))}
@@ -118,7 +118,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       )}
 
       {/* Metadata footer */}
-      <div className="flex items-center gap-4 pt-3 border-t border-[rgba(255,255,255,0.06)] text-[11px] text-[var(--color-tertiary)]">
+      <div className="flex items-center gap-4 pt-3 border-t border-[var(--glass-border)] text-[11px] text-[var(--glass-text-muted)]">
         <div className="flex items-center gap-1">
           <Clock size={11} />
           {new Date(note.created_at).toLocaleDateString()}
@@ -128,14 +128,14 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
             href={note.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-[var(--color-accent)] hover:underline"
+            className="flex items-center gap-1 text-[var(--accent)] hover:underline"
           >
             <ExternalLink size={11} />
             Source
           </a>
         )}
         {note.is_bridge && (
-          <div className="flex items-center gap-1 text-[var(--color-accent)]">
+          <div className="flex items-center gap-1 text-[var(--accent)]">
             <Link size={11} />
             Bridge note
           </div>

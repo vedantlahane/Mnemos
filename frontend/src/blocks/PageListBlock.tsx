@@ -34,7 +34,7 @@ export default function PageListBlock() {
   if (loading) {
     return (
       <div className="flex justify-center py-8">
-        <Loader2 className="animate-spin text-[var(--color-tertiary)]" size={20} />
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
       </div>
     )
   }
@@ -42,9 +42,9 @@ export default function PageListBlock() {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)]">
+        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)]">
           All Pages
-          <span className="ml-2 text-[var(--color-secondary)]">({pages.length})</span>
+          <span className="ml-2 text-[var(--glass-text-dim)]">({pages.length})</span>
         </div>
       </div>
 
@@ -62,7 +62,7 @@ export default function PageListBlock() {
               <div className="text-xl shrink-0">{page.icon || "📄"}</div>
               <div className="min-w-0">
                 <div className="text-[13px] font-semibold text-white truncate">{page.name}</div>
-                <div className="text-[11px] text-[var(--color-tertiary)]">
+                <div className="text-[11px] text-[var(--glass-text-muted)]">
                   {page.note_count} note{page.note_count !== 1 ? "s" : ""}
                   {page.description && (
                     <span className="ml-1 hidden sm:inline">• {page.description.slice(0, 40)}</span>
@@ -74,7 +74,7 @@ export default function PageListBlock() {
             {page.name !== "Uncategorized" && (
               <button
                 onClick={(e) => handleDelete(e, page)}
-                className="text-[var(--color-tertiary)] hover:text-[var(--color-error)] transition-colors opacity-0 group-hover:opacity-100 p-1"
+                className="text-[var(--glass-text-muted)] hover:text-[var(--red)] transition-colors opacity-0 group-hover:opacity-100 p-1"
               >
                 <Trash2 size={13} />
               </button>

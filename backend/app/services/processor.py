@@ -146,6 +146,18 @@ class NoteProcessor:
                         canvas_y=random.uniform(100, 1300),
                     )
 
+                try:
+                    from app.services.excalidraw_scene import sync_note_to_canvas
+                    placed_note = await db.get_note(note_id)
+                    await sync_note_to_canvas(
+                        page_id,
+                        placed_note,
+                        x=placed_note.get("canvas_x"),
+                        y=placed_note.get("canvas_y"),
+                    )
+                except Exception as e:
+                    print(f"Excalidraw scene sync failed for {note_id}: {e}")
+
             # ── Step 8: Update page stats (NEW) ──
             if page_id:
                 try:

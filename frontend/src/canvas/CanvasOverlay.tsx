@@ -1,5 +1,5 @@
 import { useAppContext } from "../hooks/useAppContext"
-import CanvasView from "./CanvasView"
+import ExcalidrawCanvas from "./ExcalidrawCanvas"
 import { motion, AnimatePresence } from "framer-motion"
 
 export default function CanvasOverlay() {
@@ -16,7 +16,7 @@ export default function CanvasOverlay() {
           transition={{ duration: 0.25 }}
           className="absolute inset-0 z-0"
         >
-          <CanvasView pageId={current.pageId} />
+          <ExcalidrawCanvas pageId={current.pageId} />
         </motion.div>
       )}
     </AnimatePresence>

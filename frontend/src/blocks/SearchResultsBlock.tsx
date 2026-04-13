@@ -24,28 +24,28 @@ export default function SearchResultsBlock({ item }: { item: StreamItem }) {
   }, [item])
 
   if (loading) {
-     return <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-[var(--color-muted)]" /></div>
+     return <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-[var(--glass-text-dim)]" /></div>
   }
 
   if (results.length === 0) {
-     return <div className="text-[12px] text-[var(--color-secondary)] p-4">No search results found.</div>
+     return <div className="text-[12px] text-[var(--glass-text-dim)] p-4">No search results found.</div>
   }
 
   return (
     <div className="flex flex-col gap-3">
-       <div className="flex items-center gap-2 text-[var(--color-secondary)] mb-2">
+       <div className="flex items-center gap-2 text-[var(--glass-text-dim)] mb-2">
          <Search size={14} /> 
          <span className="text-[12px] font-semibold uppercase tracking-widest">Search Results</span>
        </div>
        {results.map(r => (
-         <div key={r.id} className="glass-interactive p-4 rounded-xl border border-[rgba(255,255,255,0.06)]">
+         <div key={r.id} className="glass-interactive p-4 rounded-xl border border-[var(--glass-border)]">
             <div className="flex justify-between items-start mb-2">
                <div className="font-semibold text-white text-[14px]">{r.title || "Untitled"}</div>
-               <div className="text-[10px] bg-[rgba(16,185,129,0.1)] text-[var(--color-success)] px-2 py-0.5 rounded font-bold">
+               <div className="text-[10px] bg-[rgba(34,197,94,0.1)] text-[var(--green)] px-2 py-0.5 rounded font-bold">
                   {Math.round((r.similarity || 0) * 100)}%
                </div>
             </div>
-            <div className="text-[12px] text-[var(--color-secondary)] line-clamp-2">
+            <div className="text-[12px] text-[var(--glass-text-dim)] line-clamp-2">
                {r.summary || r.raw_text}
             </div>
          </div>

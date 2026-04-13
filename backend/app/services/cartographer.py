@@ -136,6 +136,12 @@ class Cartographer:
                 is_bridge=is_b,
             )
 
+        try:
+            from app.services.excalidraw_scene import sync_page_notes_to_canvas
+            await sync_page_notes_to_canvas(page_id)
+        except Exception as e:
+            print(f"Excalidraw layout sync failed: {e}")
+
         return await db.get_page_canvas(page_id)
 
     async def place_single_note(self, note_id: str, page_id: str) -> dict | None:
@@ -222,6 +228,12 @@ class Cartographer:
         for i, note in enumerate(notes):
             x, y = positions[i] if i < len(positions) else (w / 2, h / 2)
             await db.update_note(note["id"], canvas_x=x, canvas_y=y)
+
+        try:
+            from app.services.excalidraw_scene import sync_page_notes_to_canvas
+            await sync_page_notes_to_canvas(page_id)
+        except Exception as e:
+            print(f"Excalidraw layout sync failed: {e}")
 
         return await db.get_page_canvas(page_id)
 

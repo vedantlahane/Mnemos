@@ -48,15 +48,15 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
   if (loading) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
-        <Loader2 className="animate-spin text-[var(--color-accent)]" size={18} />
-        <span className="text-[13px] text-[var(--color-secondary)]">Analyzing knowledge gaps...</span>
+        <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
+        <span className="text-[13px] text-[var(--glass-text-dim)]">Analyzing knowledge gaps...</span>
       </div>
     )
   }
 
   if (!result) {
     return (
-      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--color-error)]">
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--red)]">
         Gap analysis failed. Try again later.
       </div>
     )
@@ -66,10 +66,10 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
   if (result.covered.length === 0 && result.missing.length === 0 && result.suggestions.length > 0) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl">
-        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)] mb-4">
+        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
           Gap Analysis
         </div>
-        <div className="text-[13px] text-[var(--color-secondary)] leading-relaxed whitespace-pre-wrap">
+        <div className="text-[13px] text-[var(--glass-text-dim)] leading-relaxed whitespace-pre-wrap">
           {result.suggestions[0]}
         </div>
       </div>
@@ -78,7 +78,7 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
-      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)] mb-4">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
         Gap Analysis
       </div>
 
@@ -87,14 +87,14 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
         {result.covered.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <CheckCircle size={14} className="text-[var(--color-success)]" />
+              <CheckCircle size={14} className="text-[var(--green)]" />
               <span className="text-[12px] font-semibold text-white">Well Covered ({result.covered.length})</span>
             </div>
             <div className="flex flex-wrap gap-1.5 pl-5">
               {result.covered.map((topic, i) => (
                 <span
                   key={i}
-                  className="text-[11px] bg-[rgba(34,197,94,0.08)] text-[var(--color-success)] px-2 py-0.5 rounded-full"
+                  className="text-[11px] bg-[rgba(34,197,94,0.08)] text-[var(--green)] px-2 py-0.5 rounded-full"
                 >
                   {topic}
                 </span>
@@ -107,14 +107,14 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
         {result.missing.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle size={14} className="text-[var(--color-warning)]" />
+              <AlertTriangle size={14} className="text-[var(--amber)]" />
               <span className="text-[12px] font-semibold text-white">Missing ({result.missing.length})</span>
             </div>
             <div className="flex flex-wrap gap-1.5 pl-5">
               {result.missing.map((topic, i) => (
                 <span
                   key={i}
-                  className="text-[11px] bg-[rgba(245,158,11,0.08)] text-[var(--color-warning)] px-2 py-0.5 rounded-full"
+                  className="text-[11px] bg-[rgba(245,158,11,0.08)] text-[var(--amber)] px-2 py-0.5 rounded-full"
                 >
                   {topic}
                 </span>
@@ -127,12 +127,12 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
         {result.suggestions.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <Lightbulb size={14} className="text-[var(--color-accent)]" />
+              <Lightbulb size={14} className="text-[var(--accent)]" />
               <span className="text-[12px] font-semibold text-white">Suggestions</span>
             </div>
             <ul className="pl-5 flex flex-col gap-1">
               {result.suggestions.map((s, i) => (
-                <li key={i} className="text-[12px] text-[var(--color-secondary)] leading-relaxed">
+                <li key={i} className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed">
                   • {s}
                 </li>
               ))}

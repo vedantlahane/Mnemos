@@ -49,8 +49,8 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
   if (loading) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
-        <Loader2 className="animate-spin text-[var(--color-accent)]" size={18} />
-        <span className="text-[13px] text-[var(--color-secondary)]">Computing reading path...</span>
+        <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
+        <span className="text-[13px] text-[var(--glass-text-dim)]">Computing reading path...</span>
       </div>
     )
   }
@@ -60,14 +60,14 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
       <div className="flex items-center gap-2 mb-4">
-        <BookOpen size={16} className="text-[var(--color-accent)]" />
-        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)]">
+        <BookOpen size={16} className="text-[var(--accent)]" />
+        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)]">
           Reading Path — {topic}
         </div>
       </div>
 
       {rawText ? (
-        <div className="text-[13px] text-[var(--color-secondary)] leading-relaxed whitespace-pre-wrap">
+        <div className="text-[13px] text-[var(--glass-text-dim)] leading-relaxed whitespace-pre-wrap">
           {rawText}
         </div>
       ) : (
@@ -75,7 +75,7 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
           {steps.map((step, i) => (
             <div key={i} className="flex items-start gap-3 py-3 group">
               {/* Step number */}
-              <div className="w-7 h-7 rounded-full glass-surface-2 flex items-center justify-center shrink-0 text-[12px] font-bold text-[var(--color-accent)]">
+              <div className="w-7 h-7 rounded-full glass-surface-2 flex items-center justify-center shrink-0 text-[12px] font-bold text-[var(--accent)]">
                 {i + 1}
               </div>
 
@@ -83,13 +83,13 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-semibold text-white">{step.title}</div>
                 {step.reason && (
-                  <div className="text-[11px] text-[var(--color-tertiary)] mt-0.5">{step.reason}</div>
+                  <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">{step.reason}</div>
                 )}
               </div>
 
               {/* Arrow to next */}
               {i < steps.length - 1 && (
-                <ChevronRight size={14} className="text-[var(--color-tertiary)] mt-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <ChevronRight size={14} className="text-[var(--glass-text-muted)] mt-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
               )}
             </div>
           ))}

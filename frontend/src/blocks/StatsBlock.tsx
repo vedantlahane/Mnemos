@@ -18,7 +18,7 @@ export default function StatsBlock() {
   if (loading) {
     return (
       <div className="flex justify-center py-8">
-        <Loader2 className="animate-spin text-[var(--color-tertiary)]" size={20} />
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
       </div>
     )
   }
@@ -26,15 +26,15 @@ export default function StatsBlock() {
   if (!stats) return null
 
   const cards = [
-    { label: "Notes", value: stats.total_notes, icon: BarChart2, color: "var(--color-accent-dim)", bg: "rgba(99,102,241,0.1)" },
-    { label: "Pages", value: stats.total_pages, icon: Layers, color: "var(--color-accent-purple)", bg: "rgba(168,85,247,0.1)" },
-    { label: "Tags", value: stats.total_tags, icon: Hash, color: "var(--color-success)", bg: "rgba(34,197,94,0.1)" },
-    { label: "Tasks", value: stats.total_tasks, icon: CheckCircle, color: "var(--color-warning)", bg: "rgba(245,158,11,0.1)" },
+    { label: "Notes", value: stats.total_notes, icon: BarChart2, color: "var(--accent)", bg: "rgba(99,102,241,0.1)" },
+    { label: "Pages", value: stats.total_pages, icon: Layers, color: "var(--purple)", bg: "rgba(168,85,247,0.1)" },
+    { label: "Tags", value: stats.total_tags, icon: Hash, color: "var(--green)", bg: "rgba(34,197,94,0.1)" },
+    { label: "Tasks", value: stats.total_tasks, icon: CheckCircle, color: "var(--amber)", bg: "rgba(245,158,11,0.1)" },
   ]
 
   return (
     <div>
-      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)] mb-3">
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-3">
         Workspace Stats
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -53,7 +53,7 @@ export default function StatsBlock() {
               <card.icon size={18} style={{ color: card.color }} />
             </div>
             <div>
-              <div className="text-[11px] text-[var(--color-tertiary)]">{card.label}</div>
+              <div className="text-[11px] text-[var(--glass-text-muted)]">{card.label}</div>
               <div className="text-[20px] font-bold text-white">{card.value}</div>
             </div>
           </motion.div>
@@ -63,7 +63,7 @@ export default function StatsBlock() {
       {/* Status breakdown */}
       {stats.status_counts && Object.keys(stats.status_counts).length > 0 && (
         <div className="mt-4 glass-surface-1 p-4 rounded-xl">
-          <div className="text-[10px] uppercase tracking-widest text-[var(--color-tertiary)] font-semibold mb-2">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Processing Status
           </div>
           <div className="flex gap-4">
@@ -71,12 +71,12 @@ export default function StatsBlock() {
               <div key={status} className="flex items-center gap-1.5">
                 <div
                   className={`w-2 h-2 rounded-full ${
-                    status === "done" ? "bg-[var(--color-success)]"
-                    : status === "failed" ? "bg-[var(--color-error)]"
-                    : "bg-[var(--color-warning)]"
+                    status === "done" ? "bg-[var(--green)]"
+                    : status === "failed" ? "bg-[var(--red)]"
+                    : "bg-[var(--amber)]"
                   }`}
                 />
-                <span className="text-[11px] text-[var(--color-secondary)]">
+                <span className="text-[11px] text-[var(--glass-text-dim)]">
                   {status}: {count}
                 </span>
               </div>
@@ -86,7 +86,7 @@ export default function StatsBlock() {
       )}
 
       {stats.last_capture && (
-        <div className="mt-3 text-[11px] text-[var(--color-tertiary)]">
+        <div className="mt-3 text-[11px] text-[var(--glass-text-muted)]">
           Last capture: {new Date(stats.last_capture).toLocaleString()}
         </div>
       )}

@@ -42,6 +42,7 @@ async def capture_note(
         processor.process_note,
         note_id=note["id"],
         raw_text=text,
+        page_hint=payload.page_hint,
     )
 
     return {"status": "saved", "note_id": note["id"]}

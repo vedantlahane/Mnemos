@@ -38,14 +38,14 @@ export default function TaskListBlock({ item }: { item: StreamItem }) {
   if (loading) {
     return (
       <div className="flex justify-center py-8">
-        <Loader2 className="animate-spin text-[var(--color-tertiary)]" size={20} />
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
       </div>
     )
   }
 
   if (groups.length === 0) {
     return (
-      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--color-secondary)]">
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--glass-text-dim)]">
         No tasks found. Tasks are automatically extracted when you capture notes.
       </div>
     )
@@ -56,10 +56,10 @@ export default function TaskListBlock({ item }: { item: StreamItem }) {
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--color-tertiary)]">
+        <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)]">
           Tasks
         </div>
-        <span className="text-[11px] text-[var(--color-secondary)]">
+        <span className="text-[11px] text-[var(--glass-text-dim)]">
           {totalTasks} task{totalTasks !== 1 ? "s" : ""} from {groups.length} note{groups.length !== 1 ? "s" : ""}
         </span>
       </div>
@@ -68,13 +68,13 @@ export default function TaskListBlock({ item }: { item: StreamItem }) {
         {groups.map((group) => (
           <div key={group.noteId}>
             <div className="flex items-center gap-2 mb-2">
-              <FileText size={12} className="text-[var(--color-accent)]" />
+              <FileText size={12} className="text-[var(--accent)]" />
               <span className="text-[12px] font-semibold text-white">{group.noteTitle}</span>
             </div>
             {group.tasks.map((task, i) => (
               <div key={i} className="flex items-start gap-2.5 py-1.5 pl-5">
-                <CheckSquare size={13} className="text-[var(--color-success)] mt-0.5 shrink-0" />
-                <span className="text-[12px] text-[var(--color-secondary)] leading-relaxed">{task}</span>
+                <CheckSquare size={13} className="text-[var(--green)] mt-0.5 shrink-0" />
+                <span className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed">{task}</span>
               </div>
             ))}
           </div>

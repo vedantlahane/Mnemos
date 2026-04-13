@@ -8,9 +8,9 @@ interface GlassButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-[rgba(99,102,241,0.1)] text-[var(--color-accent)] border-[rgba(99,102,241,0.2)] hover:bg-[rgba(99,102,241,0.2)]",
-  ghost: "bg-transparent text-[var(--color-secondary)] border-transparent hover:bg-[rgba(255,255,255,0.05)] hover:text-white",
-  danger: "bg-[rgba(239,68,68,0.1)] text-[var(--color-error)] border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.2)]",
+  primary: "bg-[rgba(99,102,241,0.1)] text-[var(--accent)] border-[rgba(99,102,241,0.2)] hover:bg-[rgba(99,102,241,0.2)]",
+  ghost: "bg-transparent text-[var(--glass-text-dim)] border-transparent hover:bg-[rgba(255,255,255,0.05)] hover:text-white",
+  danger: "bg-[rgba(239,68,68,0.1)] text-[var(--red)] border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.2)]",
 }
 
 export function GlassButton({ children, variant = "primary", className = "", ...props }: GlassButtonProps) {

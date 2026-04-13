@@ -31,6 +31,17 @@ async def update_note(note_id: str, payload: NoteUpdate):
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     note = await db.update_note(note_id, **updates)
+    if note.get("page_id"):
+        try:
+            from app.services.excalidraw_scene import sync_note_to_canvas
+            await sync_note_to_canvas(
+                note["page_id"],
+                note,
+                x=note.get("canvas_x"),
+                y=note.get("canvas_y"),
+            )
+        except Exception as e:
+            print(f"Excalidraw note sync failed after update: {e}")
     return note
 
 
@@ -38,6 +49,11 @@ async def update_note(note_id: str, payload: NoteUpdate):
 async def delete_note(note_id: str):
     note = await db.get_note(note_id)
     if note and note.get("page_id"):
+        try:
+            from app.services.excalidraw_scene import remove_note_from_canvas
+            await remove_note_from_canvas(note["page_id"], note_id)
+        except Exception as e:
+            print(f"Excalidraw note removal failed: {e}")
         await db.decrement_page_note_count(note["page_id"])
     await db.delete_note(note_id)
     return {"status": "deleted"}
@@ -85,6 +101,12 @@ async def move_note(note_id: str, payload: NoteMoveRequest):
 
     # Update note
     await db.update_note(note_id, page_id=new_page_id, cluster_id=None)
+    if old_page_id:
+        try:
+            from app.services.excalidraw_scene import remove_note_from_canvas
+            await remove_note_from_canvas(old_page_id, note_id)
+        except Exception as e:
+            print(f"Excalidraw old-page removal failed: {e}")
 
     # Update page counts
     if old_page_id:
@@ -104,6 +126,18 @@ async def move_note(note_id: str, payload: NoteMoveRequest):
             )
     except Exception as e:
         print(f"Re-placement after move failed: {e}")
+
+    try:
+        from app.services.excalidraw_scene import sync_note_to_canvas
+        moved_note = await db.get_note(note_id)
+        await sync_note_to_canvas(
+            new_page_id,
+            moved_note,
+            x=moved_note.get("canvas_x"),
+            y=moved_note.get("canvas_y"),
+        )
+    except Exception as e:
+        print(f"Excalidraw new-page sync failed: {e}")
 
     return {
         "status": "moved",

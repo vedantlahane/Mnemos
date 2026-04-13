@@ -39,6 +39,20 @@ async def create_element(page_id: str, payload: ElementCreate):
         style=payload.style,
         created_by=payload.created_by,
     )
+
+    if payload.element_type == "sticky" and payload.content:
+        try:
+            from app.services.excalidraw_scene import add_sticky_to_canvas
+            await add_sticky_to_canvas(
+                page_id,
+                payload.content,
+                x=payload.position_x,
+                y=payload.position_y,
+                legacy_element_id=element["id"],
+            )
+        except Exception as e:
+            print(f"Excalidraw sticky sync failed for {element['id']}: {e}")
+
     return element
 
 

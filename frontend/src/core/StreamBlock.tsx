@@ -36,7 +36,7 @@ export default function StreamBlock({ item }: { item: StreamItem }) {
 
   if (!Block) {
     return (
-      <div className="p-4 border border-dashed border-[rgba(255,255,255,0.1)] rounded-xl text-[12px] text-[var(--color-tertiary)] font-mono">
+      <div className="p-4 border border-dashed border-[rgba(255,255,255,0.1)] rounded-xl text-[12px] text-[var(--glass-text-muted)] font-mono">
         Unknown block: {item.blockType}
       </div>
     )
