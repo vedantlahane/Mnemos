@@ -131,68 +131,14 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         }
         
         .excalidraw-wrapper .excalidraw {
-          --color-primary: var(--accent);
-          --color-primary-light: var(--accent-light);
-          --color-brand: var(--accent);
-          --color-brand-light: var(--accent-light);
-          --color-gray-10: #1a1a2e;
-          --color-gray-20: #2a2a3e;
-          --color-gray-30: #3a3a4e;
-        }
-        
-        .excalidraw-wrapper .excalidraw .excalidraw-textEditorContainer {
-          background: rgba(14, 14, 26, 0.9) !important;
-          border: 1px solid rgba(255,255,255,0.1) !important;
-        }
-        
-        .excalidraw-wrapper .excalidraw .Island {
-          background: rgba(14, 14, 26, 0.75) !important;
-          backdrop-filter: blur(40px) saturate(1.4) !important;
-          -webkit-backdrop-filter: blur(40px) saturate(1.4) !important;
-          border: 1px solid rgba(255,255,255,0.08) !important;
-          box-shadow: 0 8px 40px rgba(0,0,0,0.5) !important;
-          border-radius: 8px !important;
-        }
-        
-        .excalidraw-wrapper .excalidraw .Island button,
-        .excalidraw-wrapper .excalidraw button,
-        .excalidraw-wrapper .excalidraw .ToolIcon__icon,
-        .excalidraw-wrapper .excalidraw .Stack {
-          border-radius: 8px !important;
-        }
-        
-        .excalidraw-wrapper .excalidraw .App-menu {
-          background: rgba(14, 14, 26, 0.85) !important;
-          backdrop-filter: blur(60px) saturate(1.4) brightness(1.05) !important;
-          -webkit-backdrop-filter: blur(60px) saturate(1.4) brightness(1.05) !important;
-          border: 1px solid rgba(255,255,255,0.08) !important;
-          border-radius: 8px !important;
-          box-shadow: 0 8px 40px rgba(0,0,0,0.5) !important;
-        }
-        
-        .excalidraw-wrapper .excalidraw .App-menu_top .Island {
-          border-radius: 8px !important;
+          --color-primary: #6366f1;
+          --color-primary-light: #818cf8;
+          --color-brand: #6366f1;
+          --color-brand-light: #818cf8;
         }
         
         .excalidraw-wrapper .excalidraw canvas {
           background: #0e0e1a !important;
-        }
-        
-        .excalidraw-wrapper .excalidraw text {
-          color: white;
-        }
-        
-        .excalidraw-wrapper .excalidraw .WelcomeScreen {
-          background: transparent !important;
-        }
-        
-        .excalidraw-wrapper .excalidraw .excalidraw-textEditorLabel {
-          color: rgba(255,255,255,0.7) !important;
-        }
-        
-        /* Welcome screen styling */
-        .excalidraw-wrapper .excalidraw .WelcomeScreen-center {
-          color: white !important;
         }
       `}</style>
 
@@ -217,25 +163,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         gridModeEnabled={false}
         viewModeEnabled={false}
         zenModeEnabled={false}
-        UIOptions={{
-          canvasActions: {
-            loadScene: false,
-            export: false,
-            saveToActiveFile: false,
-          },
-        }}
       >
-        <WelcomeScreen>
-          <WelcomeScreen.Center>
-            <WelcomeScreen.Center.Heading>{current.pageName || "Canvas"}</WelcomeScreen.Center.Heading>
-            <WelcomeScreen.Center.Menu>
-              <WelcomeScreen.Center.MenuItem onSelect={() => undefined} shortcut="/">
-                Use /commands in the chat bar below
-              </WelcomeScreen.Center.MenuItem>
-            </WelcomeScreen.Center.Menu>
-          </WelcomeScreen.Center>
-        </WelcomeScreen>
-
         <MainMenu>
           <MainMenu.DefaultItems.LoadScene />
           <MainMenu.DefaultItems.SaveAsImage />
