@@ -8,20 +8,27 @@ import { motion, AnimatePresence } from "framer-motion"
 export default function CommandBar() {
   const inputRef = useRef<HTMLInputElement>(null)
   useKeyboard(inputRef)
-  const { inputValue, handleInput, suggestions, selectedIndex, setSelectedIndex, handleSubmit } = useCommands()
+
+  const {
+    inputValue,
+    handleInput,
+    suggestions,
+    selectedIndex,
+    setSelectedIndex,
+    handleSubmit,
+  } = useCommands()
   const { current } = useAppContext()
 
   const placeholder =
     current.type === "page"
       ? `Ask about ${current.pageName || "this page"}, /command…`
       : current.type === "settings"
-      ? "Adjust a setting…"
-      : "Ask anything or type / for commands…"
+        ? "Adjust a setting…"
+        : "Ask anything or type / for commands…"
 
   return (
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[560px] max-w-[calc(100vw-40px)]">
-
-      {/* ── Scrollable autocomplete ── */}
+      {/* Autocomplete dropdown */}
       <AnimatePresence>
         {suggestions.length > 0 && (
           <motion.div
@@ -31,16 +38,18 @@ export default function CommandBar() {
             transition={{ duration: 0.12 }}
             className="glass-solid rounded-2xl mb-2 overflow-hidden relative"
           >
-            {/* MAX HEIGHT + SCROLL */}
             <div className="max-h-[280px] overflow-y-auto overscroll-contain py-1">
               {suggestions.map((cmd, i) => (
                 <div
                   key={cmd.name}
-                  onClick={() => { handleInput(cmd.name + " "); inputRef.current?.focus() }}
+                  onClick={() => {
+                    handleInput(cmd.name + " ")
+                    inputRef.current?.focus()
+                  }}
                   onMouseEnter={() => setSelectedIndex(i)}
                   className={`px-4 py-2 mx-1 rounded-lg flex items-center justify-between cursor-pointer transition-colors relative z-10 ${
                     i === selectedIndex
-                      ? "bg-[rgba(99,102,241,0.12)]"
+                      ? "bg-[var(--accent-subtle)]"
                       : "hover:bg-[rgba(255,255,255,0.04)]"
                   }`}
                 >
@@ -64,19 +73,36 @@ export default function CommandBar() {
         )}
       </AnimatePresence>
 
-      {/* ── Input Pill ── */}
-      <form onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
+      {/* Input pill */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          handleSubmit()
+        }}
+      >
         <div className="glass cmd-glow rounded-2xl flex items-center px-4 py-3 gap-3 relative transition-all focus-within:border-[rgba(99,102,241,0.25)]">
-          <Search size={15} className="text-[var(--glass-text-muted)] shrink-0 relative z-10" />
+          <Search
+            size={15}
+            className="text-[var(--glass-text-muted)] shrink-0 relative z-10"
+          />
           <input
             ref={inputRef}
             value={inputValue}
             onChange={(e) => handleInput(e.target.value)}
             onKeyDown={(e) => {
               if (suggestions.length > 0) {
-                if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((s: number) => Math.max(0, s - 1)) }
-                else if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((s: number) => Math.min(suggestions.length - 1, s + 1)) }
-                else if (e.key === "Tab") { e.preventDefault(); handleInput(suggestions[selectedIndex].name + " ") }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault()
+                  setSelectedIndex((s: number) => Math.max(0, s - 1))
+                } else if (e.key === "ArrowDown") {
+                  e.preventDefault()
+                  setSelectedIndex((s: number) =>
+                    Math.min(suggestions.length - 1, s + 1)
+                  )
+                } else if (e.key === "Tab") {
+                  e.preventDefault()
+                  handleInput(suggestions[selectedIndex].name + " ")
+                }
               }
             }}
             placeholder={placeholder}

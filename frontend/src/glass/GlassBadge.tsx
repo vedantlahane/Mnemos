@@ -9,9 +9,19 @@ const V: Record<Variant, string> = {
   error: "bg-red-50 text-red-600",
 }
 
-export function GlassBadge({ children, variant = "info", className = "" }: { children: ReactNode; variant?: Variant; className?: string }) {
+export function GlassBadge({
+  children,
+  variant = "info",
+  className = "",
+}: {
+  children: ReactNode
+  variant?: Variant
+  className?: string
+}) {
   return (
-    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${V[variant]} ${className}`}>
+    <span
+      className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${V[variant]} ${className}`}
+    >
       {children}
     </span>
   )

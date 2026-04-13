@@ -1,35 +1,55 @@
-import { useEffect, useState } from "react"
+import { useAsyncData } from "../hooks/useAsyncData"
 import { api } from "../api/client"
-import { BarChart2, Hash, CheckCircle, Layers, Loader2 } from "lucide-react"
-import type { WorkspaceStats } from "../types"
+import { AsyncBlock } from "../components/AsyncBlock"
+import { BarChart2, Hash, CheckCircle, Layers } from "lucide-react"
+import type { WorkspaceStats, BlockItem } from "../types"
 import { motion } from "framer-motion"
 
-export default function StatsBlock() {
-  const [stats, setStats] = useState<WorkspaceStats | null>(null)
-  const [loading, setLoading] = useState(true)
+export default function StatsBlock(_props: { item: BlockItem }) {
+  const { data, loading, error } = useAsyncData(() => api.getStats(), [])
 
-  useEffect(() => {
-    api.getStats()
-      .then(setStats)
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+  return (
+    <AsyncBlock
+      data={data}
+      loading={loading}
+      error={error}
+      loadingMessage="Loading stats…"
+    >
+      {(stats) => <StatsContent stats={stats} />}
+    </AsyncBlock>
+  )
+}
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-8">
-        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
-      </div>
-    )
-  }
-
-  if (!stats) return null
-
+function StatsContent({ stats }: { stats: WorkspaceStats }) {
   const cards = [
-    { label: "Notes", value: stats.total_notes, icon: BarChart2, color: "var(--accent)", bg: "rgba(99,102,241,0.1)" },
-    { label: "Pages", value: stats.total_pages, icon: Layers, color: "var(--purple)", bg: "rgba(168,85,247,0.1)" },
-    { label: "Tags", value: stats.total_tags, icon: Hash, color: "var(--green)", bg: "rgba(34,197,94,0.1)" },
-    { label: "Tasks", value: stats.total_tasks, icon: CheckCircle, color: "var(--amber)", bg: "rgba(245,158,11,0.1)" },
+    {
+      label: "Notes",
+      value: stats.total_notes,
+      icon: BarChart2,
+      color: "var(--accent)",
+      bg: "var(--accent-subtle)",
+    },
+    {
+      label: "Pages",
+      value: stats.total_pages,
+      icon: Layers,
+      color: "var(--purple)",
+      bg: "var(--purple-subtle)",
+    },
+    {
+      label: "Tags",
+      value: stats.total_tags,
+      icon: Hash,
+      color: "var(--green)",
+      bg: "var(--green-subtle)",
+    },
+    {
+      label: "Tasks",
+      value: stats.total_tasks,
+      icon: CheckCircle,
+      color: "var(--amber)",
+      bg: "var(--amber-subtle)",
+    },
   ]
 
   return (
@@ -53,37 +73,43 @@ export default function StatsBlock() {
               <card.icon size={18} style={{ color: card.color }} />
             </div>
             <div>
-              <div className="text-[11px] text-[var(--glass-text-muted)]">{card.label}</div>
-              <div className="text-[20px] font-bold text-white">{card.value}</div>
+              <div className="text-[11px] text-[var(--glass-text-muted)]">
+                {card.label}
+              </div>
+              <div className="text-[20px] font-bold text-white">
+                {card.value}
+              </div>
             </div>
           </motion.div>
         ))}
       </div>
 
-      {/* Status breakdown */}
-      {stats.status_counts && Object.keys(stats.status_counts).length > 0 && (
-        <div className="mt-4 glass-surface-1 p-4 rounded-xl">
-          <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
-            Processing Status
+      {stats.status_counts &&
+        Object.keys(stats.status_counts).length > 0 && (
+          <div className="mt-4 glass-surface-1 p-4 rounded-xl">
+            <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
+              Processing Status
+            </div>
+            <div className="flex gap-4">
+              {Object.entries(stats.status_counts).map(([status, count]) => (
+                <div key={status} className="flex items-center gap-1.5">
+                  <div
+                    className={`w-2 h-2 rounded-full ${
+                      status === "done"
+                        ? "bg-[var(--green)]"
+                        : status === "failed"
+                          ? "bg-[var(--red)]"
+                          : "bg-[var(--amber)]"
+                    }`}
+                  />
+                  <span className="text-[11px] text-[var(--glass-text-dim)]">
+                    {status}: {count}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-4">
-            {Object.entries(stats.status_counts).map(([status, count]) => (
-              <div key={status} className="flex items-center gap-1.5">
-                <div
-                  className={`w-2 h-2 rounded-full ${
-                    status === "done" ? "bg-[var(--green)]"
-                    : status === "failed" ? "bg-[var(--red)]"
-                    : "bg-[var(--amber)]"
-                  }`}
-                />
-                <span className="text-[11px] text-[var(--glass-text-dim)]">
-                  {status}: {count}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        )}
 
       {stats.last_capture && (
         <div className="mt-3 text-[11px] text-[var(--glass-text-muted)]">

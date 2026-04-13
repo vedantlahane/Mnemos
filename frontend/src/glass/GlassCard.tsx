@@ -6,7 +6,11 @@ interface GlassCardProps {
   onClick?: () => void
 }
 
-export function GlassCard({ children, className = "", onClick }: GlassCardProps) {
+export function GlassCard({
+  children,
+  className = "",
+  onClick,
+}: GlassCardProps) {
   return (
     <div
       className={`glass-surface-2 p-6 rounded-2xl ${onClick ? "cursor-pointer glass-hover" : ""} ${className}`}

@@ -12,21 +12,24 @@ interface GlassDropdownProps {
   className?: string
 }
 
-export function GlassDropdown({ options, value, onChange, className = "" }: GlassDropdownProps) {
+export function GlassDropdown({
+  options,
+  value,
+  onChange,
+  className = "",
+}: GlassDropdownProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Close on outside click
   useEffect(() => {
+    if (!open) return
     function handleClick(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
-    if (open) {
-      document.addEventListener("mousedown", handleClick)
-      return () => document.removeEventListener("mousedown", handleClick)
-    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
   }, [open])
 
   const selected = options.find((o) => o.value === value)
@@ -38,8 +41,12 @@ export function GlassDropdown({ options, value, onChange, className = "" }: Glas
         className="glass-surface-3 px-3 py-1.5 rounded-lg text-[12px] cursor-pointer flex justify-between items-center min-w-[130px] text-left"
         onClick={() => setOpen(!open)}
       >
-        <span className="text-[var(--glass-text)]">{selected?.label || "Select..."}</span>
-        <span className="text-[10px] text-[var(--glass-text-muted)] ml-2">▼</span>
+        <span className="text-[var(--glass-text)]">
+          {selected?.label || "Select…"}
+        </span>
+        <span className="text-[10px] text-[var(--glass-text-muted)] ml-2">
+          ▼
+        </span>
       </button>
 
       {open && (
@@ -49,7 +56,7 @@ export function GlassDropdown({ options, value, onChange, className = "" }: Glas
               key={opt.value}
               className={`w-full text-left px-3 py-2 text-[12px] transition-colors ${
                 opt.value === value
-                  ? "text-[var(--accent)] bg-[rgba(99,102,241,0.08)]"
+                  ? "text-[var(--accent)] bg-[var(--accent-subtle)]"
                   : "text-[var(--glass-text-dim)] hover:text-white hover:bg-[rgba(255,255,255,0.05)]"
               }`}
               onClick={() => {

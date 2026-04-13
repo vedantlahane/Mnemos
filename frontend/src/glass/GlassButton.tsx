@@ -8,12 +8,20 @@ interface GlassButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-[rgba(99,102,241,0.1)] text-[var(--accent)] border-[rgba(99,102,241,0.2)] hover:bg-[rgba(99,102,241,0.2)]",
-  ghost: "bg-transparent text-[var(--glass-text-dim)] border-transparent hover:bg-[rgba(255,255,255,0.05)] hover:text-white",
-  danger: "bg-[rgba(239,68,68,0.1)] text-[var(--red)] border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.2)]",
+  primary:
+    "bg-[var(--accent-subtle)] text-[var(--accent)] border-[rgba(99,102,241,0.2)] hover:bg-[rgba(99,102,241,0.2)]",
+  ghost:
+    "bg-transparent text-[var(--glass-text-dim)] border-transparent hover:bg-[rgba(255,255,255,0.05)] hover:text-white",
+  danger:
+    "bg-[var(--red-subtle)] text-[var(--red)] border-[rgba(239,68,68,0.2)] hover:bg-[rgba(239,68,68,0.2)]",
 }
 
-export function GlassButton({ children, variant = "primary", className = "", ...props }: GlassButtonProps) {
+export function GlassButton({
+  children,
+  variant = "primary",
+  className = "",
+  ...props
+}: GlassButtonProps) {
   return (
     <button
       className={`px-4 py-2 rounded-xl transition-all font-semibold text-[13px] border ${VARIANTS[variant]} ${className}`}

@@ -1,24 +1,47 @@
-// ─── Stream ──────────────────────────────────────────
+// ─── Stream (discriminated union) ────────────────────
 
-export interface StreamItem {
+export type StreamItem = UserItem | AssistantItem | SystemItem | BlockItem
+
+interface BaseStreamItem {
   id: string
-  type: "user" | "assistant" | "block" | "system"
-  content?: string
-  blockType?: BlockType
-  blockData?: unknown
+  timestamp: number
+}
+
+export interface UserItem extends BaseStreamItem {
+  type: "user"
+  content: string
+}
+
+export interface AssistantItem extends BaseStreamItem {
+  type: "assistant"
+  content: string
   sources?: ChatSource[]
   followUps?: string[]
-  metadata?: {
-    noteIds?: string[]
-    query?: string
-    tag?: string
-    pageId?: string
-    command?: string
-    topic?: string
-  }
-  timestamp: number
+}
+
+export interface SystemItem extends BaseStreamItem {
+  type: "system"
+  content: string
+}
+
+export interface BlockItem extends BaseStreamItem {
+  type: "block"
+  blockType: BlockType
+  blockData?: BlockData
+  metadata?: StreamMetadata
   loading?: boolean
 }
+
+export interface StreamMetadata {
+  noteIds?: string[]
+  query?: string
+  tag?: string
+  pageId?: string
+  command?: string
+  topic?: string
+}
+
+export type BlockData = Record<string, unknown>
 
 export type BlockType =
   | "welcome"
@@ -35,6 +58,11 @@ export type BlockType =
   | "curator-report"
   | "settings"
   | "history"
+
+// ─── Block-specific data shapes ──────────────────────
+
+export interface NoteGridData extends BlockData { limit?: number }
+export interface NoteDetailData extends BlockData { note?: Note }
 
 // ─── Context ─────────────────────────────────────────
 
@@ -217,6 +245,39 @@ export interface CuratorReport {
   }>
 }
 
+// ─── AI Layout ───────────────────────────────────────
+
+export interface AILayoutPosition {
+  note_id: string
+  x: number
+  y: number
+  cluster?: string
+}
+
+export interface AILayoutResult {
+  positions: AILayoutPosition[]
+  clusters: Array<{ label: string; color: string; center_x: number; center_y: number }>
+  edges: Array<{ source_id: string; target_id: string; edge_type: string }>
+}
+
+export interface GapAnalysisResult {
+  covered: string[]
+  missing: string[]
+  suggestions: string[]
+}
+
+export interface ReadingStep {
+  title: string
+  noteId?: string
+  reason?: string
+}
+
+export interface PageSummary {
+  summary: string
+  key_topics: string[]
+  connections: string[]
+}
+
 // ─── Commands ────────────────────────────────────────
 
 export interface Command {
@@ -238,4 +299,20 @@ export interface ChatConversation {
   title: string | null
   created_at: string
   updated_at: string
+}
+
+// ─── Settings ────────────────────────────────────────
+
+export interface WorkspaceSettings {
+  theme: "glass" | "dark"
+  model: string
+  similarity_threshold: number
+  embedding_dimensions: number
+}
+
+export const DEFAULT_SETTINGS: WorkspaceSettings = {
+  theme: "glass",
+  model: "gemini-2.5-flash",
+  similarity_threshold: 0.65,
+  embedding_dimensions: 768,
 }

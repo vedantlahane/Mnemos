@@ -1,53 +1,77 @@
 import { useState, useCallback } from "react"
 import { useStream } from "./useStream"
 import { useAppContext } from "./useAppContext"
+import { useCanvasEvents } from "./useCanvasEvents"
 import { api } from "../api/client"
 import type { Command, ContextType } from "../types"
 
 const COMMANDS: Command[] = [
-  { name: "/pages", aliases: ["/p"], description: "List all pages with stats", context: ["home"], handler: "pages" },
+  { name: "/pages", aliases: ["/p"], description: "List all pages", context: ["home"], handler: "pages" },
   { name: "/page", aliases: [], description: "Create or delete a page", context: ["home"], args: "create|delete [name]", handler: "page" },
   { name: "/open", aliases: ["/o"], description: "Open a page canvas", context: ["home", "page", "settings", "history"], args: "<page name>", handler: "open" },
   { name: "/search", aliases: ["/s"], description: "Semantic search", context: ["home", "page"], args: "<query>", handler: "search" },
-  { name: "/notes", aliases: ["/n"], description: "Browse notes (optional #tag)", context: ["home", "page"], args: "[#tag|recent]", handler: "notes" },
-  { name: "/tags", aliases: [], description: "View tag cloud with counts", context: ["home", "page"], handler: "tags" },
-  { name: "/tasks", aliases: ["/t"], description: "List all tasks across pages", context: ["home", "page"], handler: "tasks" },
+  { name: "/notes", aliases: ["/n"], description: "Browse notes", context: ["home", "page"], args: "[#tag|recent]", handler: "notes" },
+  { name: "/tags", aliases: [], description: "Tag cloud", context: ["home", "page"], handler: "tags" },
+  { name: "/tasks", aliases: ["/t"], description: "List all tasks", context: ["home", "page"], handler: "tasks" },
   { name: "/stats", aliases: [], description: "Workspace statistics", context: ["home"], handler: "stats" },
-  { name: "/capture", aliases: [], description: "Quick capture a note", context: ["home", "page"], args: "<text> [--page X]", handler: "capture" },
-  { name: "/curator", aliases: ["/clean"], description: "Run maintenance scan", context: ["home"], handler: "curator" },
-  { name: "/find", aliases: [], description: "Find text on canvas", context: ["page"], args: "<text>", handler: "find" },
-  { name: "/add", aliases: [], description: "Add a note or sticky to canvas", context: ["page"], args: "<text>", handler: "add" },
-  { name: "/layout", aliases: ["/reorganize"], description: "Auto-reorganize canvas", context: ["page"], handler: "layout" },
-  { name: "/summarize", aliases: [], description: "AI summarizes all page content", context: ["page"], handler: "summarize" },
-  { name: "/gaps", aliases: [], description: "What's missing on this page", context: ["home", "page"], handler: "gaps" },
-  { name: "/reading", aliases: ["/path"], description: "Suggested reading order", context: ["home", "page"], args: "[topic]", handler: "reading" },
-  { name: "/export", aliases: [], description: "Export page as markdown", context: ["page"], handler: "export" },
-  { name: "/rename", aliases: [], description: "Rename current page", context: ["page"], args: "<new name>", handler: "rename" },
-  { name: "/close", aliases: [], description: "Close page, return to home", context: ["page", "settings", "history"], handler: "close" },
+  { name: "/capture", aliases: [], description: "Quick capture", context: ["home", "page"], args: "<text> [--page X]", handler: "capture" },
+  { name: "/curator", aliases: ["/clean"], description: "Run maintenance", context: ["home"], handler: "curator" },
+  { name: "/find", aliases: [], description: "Find on canvas", context: ["page"], args: "<text>", handler: "find" },
+  { name: "/add", aliases: [], description: "Add sticky/note to canvas", context: ["page"], args: "<text>", handler: "add" },
+  { name: "/layout", aliases: ["/reorganize"], description: "AI auto-layout canvas", context: ["page"], handler: "layout" },
+  { name: "/summarize", aliases: [], description: "Summarize page content", context: ["page"], handler: "summarize" },
+  { name: "/gaps", aliases: [], description: "Knowledge gap analysis", context: ["home", "page"], handler: "gaps" },
+  { name: "/reading", aliases: ["/path"], description: "Reading order", context: ["home", "page"], args: "[topic]", handler: "reading" },
+  { name: "/export", aliases: [], description: "Export as markdown", context: ["page"], handler: "export" },
+  { name: "/rename", aliases: [], description: "Rename page", context: ["page"], args: "<new name>", handler: "rename" },
+  { name: "/bg", aliases: ["/background"], description: "Canvas background color", context: ["page"], args: "<color>", handler: "bg" },
+  { name: "/library", aliases: ["/lib"], description: "Open shape library", context: ["page"], handler: "library" },
+  { name: "/close", aliases: [], description: "Close page", context: ["page", "settings", "history"], handler: "close" },
   { name: "/settings", aliases: [], description: "Open settings", context: ["home", "page", "settings", "history"], handler: "settings" },
-  { name: "/history", aliases: ["/h"], description: "View past conversations", context: ["home", "page", "settings", "history"], handler: "history" },
-  { name: "/home", aliases: [], description: "Go to home context", context: ["home", "page", "settings", "history"], handler: "home" },
-  { name: "/back", aliases: [], description: "Go to previous context", context: ["home", "page", "settings", "history"], handler: "back" },
-  { name: "/clear", aliases: ["/c"], description: "Clear conversation stream", context: ["home", "page", "settings", "history"], handler: "clear" },
-  { name: "/help", aliases: ["/?"], description: "Show all commands", context: ["home", "page", "settings", "history"], handler: "help" },
+  { name: "/history", aliases: ["/h"], description: "Chat history", context: ["home", "page", "settings", "history"], handler: "history" },
+  { name: "/home", aliases: [], description: "Go home", context: ["home", "page", "settings", "history"], handler: "home" },
+  { name: "/back", aliases: [], description: "Go back", context: ["home", "page", "settings", "history"], handler: "back" },
+  { name: "/clear", aliases: ["/c"], description: "Clear stream", context: ["home", "page", "settings", "history"], handler: "clear" },
+  { name: "/help", aliases: ["/?"], description: "Show commands", context: ["home", "page", "settings", "history"], handler: "help" },
 ]
+
+const COLOR_MAP: Record<string, string> = {
+  black: "#000000", dark: "#0e0e1a", void: "#08080f",
+  white: "#ffffff", red: "#ef4444", blue: "#3b82f6",
+  green: "#22c55e", purple: "#a855f7", indigo: "#6366f1",
+  gray: "#374151", grey: "#374151", navy: "#1e293b",
+  slate: "#1e293b", charcoal: "#1a1a2e", midnight: "#0f0f23",
+  default: "#0e0e1a",
+}
+
+function resolveColor(input: string): string | null {
+  const lower = input.toLowerCase().trim()
+  if (COLOR_MAP[lower]) return COLOR_MAP[lower]
+  if (/^#[0-9a-fA-F]{3,8}$/.test(lower)) return lower
+  if (/^rgb/.test(lower)) return lower
+  return null
+}
 
 export function useCommands() {
   const [inputValue, setInputValue] = useState("")
   const [suggestions, setSuggestions] = useState<Command[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
 
-  const { items, addUserMessage, addAssistantMessage, addBlock, addSystemMessage, clearStream, setLoading } = useStream()
+  const {
+    items, addUserMessage, addAssistantMessage, addBlock,
+    addSystemMessage, clearStream, setLoading,
+  } = useStream()
   const { current, switchTo, goBack, goHome } = useAppContext()
+  const canvasDispatch = useCanvasEvents((s) => s.dispatch)
 
   const getAutoComplete = useCallback(
     (partial: string, ctx: ContextType) => {
       if (!partial.startsWith("/")) return []
       const term = partial.toLowerCase().split(" ")[0]
       return COMMANDS.filter(
-        (command) =>
-          command.context.includes(ctx) &&
-          (command.name.startsWith(term) || command.aliases.some((alias) => alias.startsWith(term)))
+        (c) =>
+          c.context.includes(ctx) &&
+          (c.name.startsWith(term) || c.aliases.some((a) => a.startsWith(term)))
       )
     },
     []
@@ -69,15 +93,21 @@ export function useCommands() {
     const cmdStr = parts[0].toLowerCase()
     const args = parts.slice(1).join(" ")
 
-    const cmd = COMMANDS.find((command) => command.name === cmdStr || command.aliases.includes(cmdStr))
+    const cmd = COMMANDS.find(
+      (c) => c.name === cmdStr || c.aliases.includes(cmdStr)
+    )
 
     if (!cmd) {
-      addAssistantMessage(`Unknown command: \`${cmdStr}\`. Type **/help** for available commands.`)
+      addAssistantMessage(
+        `Unknown command: \`${cmdStr}\`. Type **/help** for commands.`
+      )
       return
     }
 
     if (!cmd.context.includes(current.type)) {
-      addAssistantMessage(`**${cmdStr}** is not available in **${current.type}** context. Type /help to see what works here.`)
+      addAssistantMessage(
+        `**${cmdStr}** is not available in **${current.type}** context.`
+      )
       return
     }
 
@@ -88,14 +118,19 @@ export function useCommands() {
           return
         }
         try {
-          const res = await api.listPages()
-          const pages = res.pages || res || []
-          const match = pages.find((page: { name: string }) => page.name.toLowerCase() === args.toLowerCase())
+          const { pages } = await api.listPages()
+          const match = pages.find(
+            (p) => p.name.toLowerCase() === args.toLowerCase()
+          )
           if (match) {
             switchTo("page", match.id, match.name)
-            addSystemMessage(`Opened page: ${match.icon || "Page"} ${match.name}`)
+            addSystemMessage(`Opened page: ${match.icon || "📄"} ${match.name}`)
           } else {
-            addAssistantMessage(`Page "${args}" not found. Available pages:\n${pages.map((page: { icon: string; name: string }) => `- ${page.icon} ${page.name}`).join("\n")}`)
+            addAssistantMessage(
+              `Page "${args}" not found. Available:\n${pages
+                .map((p) => `- ${p.icon || "📄"} ${p.name}`)
+                .join("\n")}`
+            )
           }
         } catch {
           addAssistantMessage("Failed to load pages.")
@@ -128,30 +163,37 @@ export function useCommands() {
             addSystemMessage(`Created page: ${name}`)
             addBlock("page-list")
           } catch {
-            addAssistantMessage(`Failed to create page "${name}". It may already exist.`)
+            addAssistantMessage(`Failed to create "${name}".`)
           }
         } else if (sub === "delete" && name) {
           try {
-            const res = await api.listPages()
-            const pages = res.pages || res || []
-            const match = pages.find((page: { name: string }) => page.name.toLowerCase() === name.toLowerCase())
-            if (match) {
+            const { pages } = await api.listPages()
+            const match = pages.find(
+              (p) => p.name.toLowerCase() === name.toLowerCase()
+            )
+            if (match && match.name !== "Uncategorized") {
               await api.deletePage(match.id)
-              addSystemMessage(`Deleted page: ${name}. Notes moved to Uncategorized.`)
+              addSystemMessage(`Deleted: ${name}`)
             } else {
-              addAssistantMessage(`Page "${name}" not found.`)
+              addAssistantMessage(
+                match?.name === "Uncategorized"
+                  ? "Cannot delete Uncategorized."
+                  : `Page "${name}" not found.`
+              )
             }
           } catch {
             addAssistantMessage("Failed to delete page.")
           }
         } else {
-          addAssistantMessage("Usage: `/page create <name>` or `/page delete <name>`")
+          addAssistantMessage(
+            "Usage: `/page create <name>` or `/page delete <name>`"
+          )
         }
         break
       }
 
       case "notes": {
-        const tag = args.startsWith("#") ? args.slice(1) : args === "recent" ? undefined : args || undefined
+        const tag = args.startsWith("#") ? args.slice(1) : undefined
         const limit = args === "recent" ? 10 : undefined
         addBlock("note-grid", { limit }, { tag, pageId: current.pageId })
         break
@@ -159,9 +201,12 @@ export function useCommands() {
 
       case "search":
         if (!args) {
-          addAssistantMessage("Usage: `/search <query>`\nExample: `/search docker networking`")
+          addAssistantMessage("Usage: `/search <query>`")
         } else {
-          addBlock("search-results", undefined, { query: args, pageId: current.pageId })
+          addBlock("search-results", undefined, {
+            query: args,
+            pageId: current.pageId,
+          })
         }
         break
 
@@ -179,12 +224,12 @@ export function useCommands() {
 
       case "capture": {
         if (!args) {
-          addAssistantMessage("Usage: `/capture <text>` or `/capture <text> --page Docker`")
+          addAssistantMessage("Usage: `/capture <text> [--page PageName]`")
           return
         }
         const pageMatch = args.match(/--page\s+(.+)$/i)
         const text = pageMatch ? args.replace(pageMatch[0], "").trim() : args
-        const pageHint = pageMatch?.[1]?.trim() || undefined
+        const pageHint = pageMatch?.[1]?.trim()
         try {
           setLoading(true)
           const resp = await api.capture({
@@ -192,9 +237,15 @@ export function useCommands() {
             capture_type: "manual",
             page_hint: pageHint,
           })
-          addSystemMessage(`Note captured${resp.page_name ? ` -> ${resp.page_name}` : ""}. Processing in background.`)
+          addSystemMessage(
+            `Captured${resp.page_name ? ` → ${resp.page_name}` : ""}. Processing…`
+          )
+          // If on a page, refresh canvas to show new note
+          if (current.type === "page") {
+            canvasDispatch({ type: "refresh" })
+          }
         } catch {
-          addAssistantMessage("Failed to capture note.")
+          addAssistantMessage("Failed to capture.")
         } finally {
           setLoading(false)
         }
@@ -206,7 +257,10 @@ export function useCommands() {
         break
 
       case "reading":
-        addBlock("reading-path", undefined, { topic: args || undefined, pageId: current.pageId })
+        addBlock("reading-path", undefined, {
+          topic: args || undefined,
+          pageId: current.pageId,
+        })
         break
 
       case "gaps":
@@ -217,7 +271,7 @@ export function useCommands() {
         if (!args) {
           addAssistantMessage("Usage: `/find <text>`")
         } else {
-          window.dispatchEvent(new CustomEvent("canvas:search", { detail: args }))
+          canvasDispatch({ type: "search", query: args })
         }
         break
 
@@ -226,39 +280,85 @@ export function useCommands() {
           addAssistantMessage("Usage: `/add <text>` or `/add sticky: <text>`")
           return
         }
-
         const lower = args.toLowerCase()
-        const isPrefixed = lower.startsWith("sticky:") || lower.startsWith("note:")
-        const type = lower.startsWith("sticky:") ? "sticky" : "note"
-        const content = isPrefixed ? args.split(":").slice(1).join(":").trim() : args
-
-        window.dispatchEvent(new CustomEvent("canvas:add", {
-          detail: { type, content },
-        }))
+        const isPrefixed =
+          lower.startsWith("sticky:") || lower.startsWith("note:")
+        const addType = lower.startsWith("sticky:") ? "sticky" : "note"
+        const content = isPrefixed
+          ? args.split(":").slice(1).join(":").trim()
+          : args
+        canvasDispatch({ type: "add", addType, content })
         break
       }
+
+      case "bg": {
+        if (!args) {
+          addAssistantMessage(
+            `Usage: \`/bg <color>\`\nAvailable: ${Object.keys(COLOR_MAP).join(", ")}`
+          )
+          return
+        }
+        const color = resolveColor(args)
+        if (!color) {
+          addAssistantMessage(
+            `Unknown color "${args}". Try: ${Object.keys(COLOR_MAP).join(", ")}`
+          )
+          return
+        }
+        canvasDispatch({ type: "set-background", color })
+        addSystemMessage(`Background → ${args} (${color})`)
+        break
+      }
+
+      case "library":
+        canvasDispatch({ type: "open-library" })
+        addSystemMessage("Opening library…")
+        break
 
       case "layout":
         try {
           setLoading(true)
-          addSystemMessage("Reorganizing canvas elements...")
-          await api.triggerPageLayout(current.pageId!)
-          window.dispatchEvent(new CustomEvent("canvas:refresh"))
-          addSystemMessage("Canvas reorganized.")
+          addSystemMessage("AI is reorganizing canvas…")
+          await api.aiLayout(current.pageId!)
+          canvasDispatch({ type: "refresh" })
+          addSystemMessage("Canvas reorganized by AI.")
         } catch {
-          addAssistantMessage("Layout is not available yet. Drag elements manually.")
+          addAssistantMessage("AI layout not available. Try dragging manually.")
         } finally {
           setLoading(false)
         }
         break
 
       case "summarize": {
+        if (!current.pageId) {
+          addAssistantMessage("Open a page first.")
+          return
+        }
         setLoading(true)
         try {
-          const resp = await api.chat("Summarize everything on this page.", [], "page", current.pageId)
-          addAssistantMessage(resp.answer || "No summary available.", resp.sources, resp.follow_ups)
+          const result = await api.pageSummary(current.pageId)
+          let msg = result.summary
+          if (result.key_topics.length > 0) {
+            msg += `\n\n**Key topics:** ${result.key_topics.join(", ")}`
+          }
+          addAssistantMessage(msg)
         } catch {
-          addAssistantMessage("Failed to summarize page.")
+          // Fallback to chat
+          try {
+            const resp = await api.chat(
+              "Summarize everything on this page.",
+              [],
+              "page",
+              current.pageId
+            )
+            addAssistantMessage(
+              resp.answer || "No summary available.",
+              resp.sources,
+              resp.follow_ups
+            )
+          } catch {
+            addAssistantMessage("Failed to summarize.")
+          }
         } finally {
           setLoading(false)
         }
@@ -266,7 +366,7 @@ export function useCommands() {
       }
 
       case "export":
-        addAssistantMessage("Export is not yet implemented. Coming in v2.5.")
+        addAssistantMessage("Export coming in v2.5.")
         break
 
       case "rename": {
@@ -277,9 +377,9 @@ export function useCommands() {
         try {
           await api.updatePage(current.pageId!, { name: args })
           switchTo("page", current.pageId, args)
-          addSystemMessage(`Page renamed to "${args}".`)
+          addSystemMessage(`Renamed to "${args}".`)
         } catch {
-          addAssistantMessage("Failed to rename page.")
+          addAssistantMessage("Failed to rename.")
         }
         break
       }
@@ -303,25 +403,123 @@ export function useCommands() {
         break
 
       default:
-        addAssistantMessage(`Command handler missing: ${cmd.handler}`)
+        addAssistantMessage(`Handler missing: ${cmd.handler}`)
     }
   }
 
   function detectNaturalLanguageCommand(text: string): boolean {
     const lower = text.toLowerCase().trim()
-    const openMatch = lower.match(/^open\s+(.+)$/)
 
+    const openMatch = lower.match(/^open\s+(.+)$/)
     if (openMatch) {
       executeCommand(`/open ${openMatch[1]}`)
       return true
     }
-
-    if (lower === "close" || lower === "go home") {
+    if (lower === "close" || lower === "go home" || lower === "go to home") {
       executeCommand("/home")
       return true
     }
-    if (lower === "go back") {
+    if (lower === "go back" || lower === "back") {
       executeCommand("/back")
+      return true
+    }
+
+    if (current.type === "page") {
+      const bgMatch = lower.match(
+        /(?:change|set|make)\s+(?:the\s+)?(?:canvas\s+)?background\s+(?:color\s+)?(?:to\s+)?(.+)/
+      )
+      if (bgMatch) {
+        executeCommand(`/bg ${bgMatch[1].trim()}`)
+        return true
+      }
+      const bgShort = lower.match(
+        /^(black|dark|white|default|midnight|navy|charcoal)\s+background$/
+      )
+      if (bgShort) {
+        executeCommand(`/bg ${bgShort[1]}`)
+        return true
+      }
+      if (
+        lower === "open library" ||
+        lower === "show library" ||
+        lower === "library"
+      ) {
+        executeCommand("/library")
+        return true
+      }
+      const stickyMatch = lower.match(
+        /^add\s+(?:a\s+)?sticky\s+(?:note\s+)?(?:saying\s+|with\s+)?(.+)/i
+      )
+      if (stickyMatch) {
+        executeCommand(`/add sticky: ${stickyMatch[1]}`)
+        return true
+      }
+      const findMatch = lower.match(/^find\s+(.+?)(?:\s+on\s+canvas)?$/)
+      if (findMatch) {
+        executeCommand(`/find ${findMatch[1]}`)
+        return true
+      }
+      if (
+        ["reorganize", "reorganize canvas", "auto layout", "layout"].includes(
+          lower
+        )
+      ) {
+        executeCommand("/layout")
+        return true
+      }
+      if (
+        [
+          "summarize",
+          "summarize this page",
+          "summarize page",
+          "what's on this page",
+          "whats on this page",
+        ].includes(lower)
+      ) {
+        executeCommand("/summarize")
+        return true
+      }
+      if (lower === "zoom in") {
+        canvasDispatch({ type: "zoom", direction: "in" })
+        addSystemMessage("Zoomed in.")
+        return true
+      }
+      if (lower === "zoom out") {
+        canvasDispatch({ type: "zoom", direction: "out" })
+        addSystemMessage("Zoomed out.")
+        return true
+      }
+      if (lower === "zoom to fit" || lower === "fit to screen") {
+        canvasDispatch({ type: "zoom", direction: "fit" })
+        addSystemMessage("Zoomed to fit.")
+        return true
+      }
+    }
+
+    const simpleMap: Record<string, string> = {
+      "show notes": "/notes",
+      "list notes": "/notes",
+      "my notes": "/notes",
+      "show tags": "/tags",
+      "list tags": "/tags",
+      "my tags": "/tags",
+      "show tasks": "/tasks",
+      "list tasks": "/tasks",
+      "my tasks": "/tasks",
+      "show stats": "/stats",
+      statistics: "/stats",
+      stats: "/stats",
+      "show pages": "/pages",
+      "list pages": "/pages",
+      "my pages": "/pages",
+      help: "/help",
+      commands: "/help",
+      "what can you do": "/help",
+      settings: "/settings",
+      preferences: "/settings",
+    }
+    if (simpleMap[lower]) {
+      executeCommand(simpleMap[lower])
       return true
     }
 
@@ -332,6 +530,7 @@ export function useCommands() {
     if (!inputValue.trim()) return
     const q = inputValue.trim()
 
+    // Tab-complete partial command
     if (suggestions.length > 0 && q.startsWith("/") && !q.includes(" ")) {
       const selected = suggestions[selectedIndex]
       if (selected) {
@@ -351,20 +550,27 @@ export function useCommands() {
     }
 
     addUserMessage(q)
-
     if (detectNaturalLanguageCommand(q)) return
 
+    // Chat with AI
     setLoading(true)
     try {
       const history = items
-        .filter((item) => item.type === "user" || item.type === "assistant")
+        .filter((i) => i.type === "user" || i.type === "assistant")
         .slice(-10)
-        .map((item) => ({ role: item.type as string, content: item.content || "" }))
+        .map((i) => ({
+          role: i.type as string,
+          content: ("content" in i ? i.content : "") || "",
+        }))
 
       const resp = await api.chat(q, history, current.type, current.pageId)
-      addAssistantMessage(resp.answer || "I couldn't find relevant information.", resp.sources, resp.follow_ups)
+      addAssistantMessage(
+        resp.answer || "No relevant information found.",
+        resp.sources,
+        resp.follow_ups
+      )
     } catch {
-      addAssistantMessage("Error connecting to backend. Is the server running?")
+      addAssistantMessage("Error connecting to backend.")
     } finally {
       setLoading(false)
     }

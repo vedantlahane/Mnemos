@@ -1,29 +1,19 @@
-import { useEffect, useState, useRef } from "react"
+import { useAsyncData } from "../hooks/useAsyncData"
 import { api } from "../api/client"
+import { AsyncBlock } from "../components/AsyncBlock"
 import { useStream } from "../hooks/useStream"
-import type { CuratorReport, StreamItem } from "../types"
-import { AlertTriangle, CheckCircle, Link, Trash2, Loader2 } from "lucide-react"
+import type { CuratorReport, BlockItem } from "../types"
+import { AlertTriangle, CheckCircle, Link, Trash2 } from "lucide-react"
+import { useState } from "react"
 
-export default function CuratorReportBlock({ }: { item: StreamItem }) {
-  const [report, setReport] = useState<CuratorReport | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [applying, setApplying] = useState<string | null>(null)
+export default function CuratorReportBlock(_props: { item: BlockItem }) {
   const { addSystemMessage } = useStream()
-  const fetchedRef = useRef(false)
+  const [applying, setApplying] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (fetchedRef.current) return
-    fetchedRef.current = true
-
-    api
-      .curatorScan()
-      .then(setReport)
-      .catch((err) => {
-        console.error(err)
-        setReport(null)
-      })
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, loading, error } = useAsyncData(
+    () => api.curatorScan(),
+    []
+  )
 
   async function applyAction(action: {
     action_type: string
@@ -38,37 +28,42 @@ export default function CuratorReportBlock({ }: { item: StreamItem }) {
       })
       addSystemMessage(`✓ Applied: ${action.reason}`)
     } catch {
-      addSystemMessage(`✗ Failed to apply: ${action.reason}`)
+      addSystemMessage(`✗ Failed: ${action.reason}`)
     } finally {
       setApplying(null)
     }
   }
 
-  if (loading) {
-    return (
-      <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
-        <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
-        <span className="text-[13px] text-[var(--glass-text-dim)]">
-          Running curator scan...
-        </span>
-      </div>
-    )
-  }
+  return (
+    <AsyncBlock
+      data={data}
+      loading={loading}
+      error={error}
+      loadingMessage="Running curator scan…"
+    >
+      {(report) => <ReportContent report={report} applying={applying} onApply={applyAction} />}
+    </AsyncBlock>
+  )
+}
 
-  if (!report) {
-    return (
-      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--red)]">
-        Curator scan failed. Backend may not support this endpoint yet.
-      </div>
-    )
-  }
-
+function ReportContent({
+  report,
+  applying,
+  onApply,
+}: {
+  report: CuratorReport
+  applying: string | null
+  onApply: (action: {
+    action_type: string
+    params: Record<string, unknown>
+    reason: string
+  }) => void
+}) {
   const hasIssues =
     report.potential_duplicates.length +
-      report.orphan_notes.length +
-      report.stale_notes.length +
-      report.missing_connections.length >
-    0
+    report.orphan_notes.length +
+    report.stale_notes.length +
+    report.missing_connections.length > 0
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
@@ -88,15 +83,10 @@ export default function CuratorReportBlock({ }: { item: StreamItem }) {
           {report.potential_duplicates.length > 0 && (
             <Section
               title={`${report.potential_duplicates.length} Potential Duplicate${report.potential_duplicates.length > 1 ? "s" : ""}`}
-              icon={
-                <AlertTriangle size={14} className="text-[var(--amber)]" />
-              }
+              icon={<AlertTriangle size={14} className="text-[var(--amber)]" />}
             >
               {report.potential_duplicates.map((d, i) => (
-                <div
-                  key={i}
-                  className="text-[12px] text-[var(--glass-text-dim)] py-1"
-                >
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
                   Similarity {Math.round(d.similarity * 100)}% — {d.reason}
                 </div>
               ))}
@@ -109,10 +99,7 @@ export default function CuratorReportBlock({ }: { item: StreamItem }) {
               icon={<Trash2 size={14} className="text-[var(--red)]" />}
             >
               {report.orphan_notes.map((o, i) => (
-                <div
-                  key={i}
-                  className="text-[12px] text-[var(--glass-text-dim)] py-1"
-                >
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
                   "{o.title}" — {o.suggestion}
                 </div>
               ))}
@@ -125,10 +112,7 @@ export default function CuratorReportBlock({ }: { item: StreamItem }) {
               icon={<Link size={14} className="text-[var(--accent)]" />}
             >
               {report.missing_connections.map((m, i) => (
-                <div
-                  key={i}
-                  className="text-[12px] text-[var(--glass-text-dim)] py-1"
-                >
+                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
                   {m.reason} (suggested: {m.suggested_type})
                 </div>
               ))}
@@ -141,19 +125,16 @@ export default function CuratorReportBlock({ }: { item: StreamItem }) {
                 Suggested Actions
               </div>
               {report.needs_confirmation.map((action, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between py-2"
-                >
+                <div key={i} className="flex items-center justify-between py-2">
                   <span className="text-[12px] text-[var(--glass-text-dim)]">
                     {action.reason}
                   </span>
                   <button
-                    onClick={() => applyAction(action)}
+                    onClick={() => onApply(action)}
                     disabled={applying === action.action_type}
-                    className="text-[11px] text-[var(--accent)] border border-[rgba(99,102,241,0.25)] px-3 py-1 rounded-lg hover:bg-[rgba(99,102,241,0.1)] transition-colors disabled:opacity-50"
+                    className="text-[11px] text-[var(--accent)] border border-[rgba(99,102,241,0.25)] px-3 py-1 rounded-lg hover:bg-[var(--accent-subtle)] transition-colors disabled:opacity-50"
                   >
-                    {applying === action.action_type ? "Applying..." : "Apply"}
+                    {applying === action.action_type ? "Applying…" : "Apply"}
                   </button>
                 </div>
               ))}

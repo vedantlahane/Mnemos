@@ -26,11 +26,9 @@ export const useAppContextStore = create<ContextState>((set, get) => ({
       current: state.current.previousContext || { type: "home" },
     })),
 
-  goHome: () =>
-    set({ current: { type: "home" } }),
+  goHome: () => set({ current: { type: "home" } }),
 }))
 
-// Named useAppContext to avoid shadowing React.useContext
 export function useAppContext() {
   return useAppContextStore()
 }

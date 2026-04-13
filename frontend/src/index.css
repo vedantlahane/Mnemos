@@ -5,7 +5,7 @@
   --color-void: #08080f;
   --color-void-light: #0e0e1a;
 
-  /* ─── Content (readable) ─── */
+  /* ─── Content ─── */
   --color-card: #ffffff;
   --color-card-hover: #fafafa;
   --color-card-text: #111827;
@@ -14,6 +14,7 @@
 
   /* ─── Glass ─── */
   --glass-bg: rgba(14, 14, 26, 0.55);
+  --glass-bg-medium: rgba(12, 12, 24, 0.65);
   --glass-bg-thick: rgba(10, 10, 20, 0.75);
   --glass-border: rgba(255, 255, 255, 0.07);
   --glass-border-hover: rgba(255, 255, 255, 0.14);
@@ -27,11 +28,16 @@
   --accent-light: #818cf8;
   --accent-glow: rgba(99, 102, 241, 0.12);
   --accent-glow-strong: rgba(99, 102, 241, 0.25);
+  --accent-subtle: rgba(99, 102, 241, 0.08);
   --purple: #a855f7;
+  --purple-subtle: rgba(168, 85, 247, 0.1);
   --cyan: #06b6d4;
   --green: #22c55e;
+  --green-subtle: rgba(34, 197, 94, 0.08);
   --amber: #f59e0b;
+  --amber-subtle: rgba(245, 158, 11, 0.08);
   --red: #ef4444;
+  --red-subtle: rgba(239, 68, 68, 0.08);
 
   /* ─── Fonts ─── */
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -53,7 +59,6 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ─── Noise Texture ─── */
   body::before {
     content: "";
     position: fixed;
@@ -81,12 +86,7 @@
 }
 
 @layer utilities {
-
-  /* ═══════════════════════════════════════
-     HYPER LIQUID GLASS
-     Multiple layered effects for depth
-     ═══════════════════════════════════════ */
-
+  /* ─── Glass (lightest) ─── */
   .glass {
     background: var(--glass-bg);
     backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
@@ -104,17 +104,41 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(
-      135deg,
-      rgba(255,255,255,0.06) 0%,
-      transparent 40%,
-      transparent 60%,
-      rgba(255,255,255,0.02) 100%
-    );
+    background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 40%, transparent 60%, rgba(255,255,255,0.02) 100%);
     pointer-events: none;
     z-index: 1;
   }
 
+  /* ─── Glass Surface 1 (primary cards) ─── */
+  .glass-surface-1 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5);
+  }
+
+  /* ─── Glass Surface 2 (nested/inset elements) ─── */
+  .glass-surface-2 {
+    background: var(--glass-bg-medium);
+    backdrop-filter: blur(30px) saturate(1.3);
+    -webkit-backdrop-filter: blur(30px) saturate(1.3);
+    border: 1px solid rgba(255,255,255,0.05);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.03) inset,
+      0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  /* ─── Glass Surface 3 (deepest — chips, pills, inputs) ─── */
+  .glass-surface-3 {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255,255,255,0.04);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  /* ─── Glass Solid (floating panels, overlays) ─── */
   .glass-solid {
     background: var(--glass-bg-thick);
     backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
@@ -132,17 +156,12 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(
-      135deg,
-      rgba(255,255,255,0.08) 0%,
-      transparent 50%,
-      rgba(255,255,255,0.02) 100%
-    );
+    background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%, rgba(255,255,255,0.02) 100%);
     pointer-events: none;
     z-index: 1;
   }
 
-  /* Glass hover with glow */
+  /* ─── Hover effect ─── */
   .glass-hover {
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
@@ -152,48 +171,11 @@
     transform: translateY(-1px);
     box-shadow:
       0 0 0 0.5px rgba(255,255,255,0.06) inset,
-      0 1px 0 rgba(255,255,255,0.04) inset,
       0 12px 48px rgba(0,0,0,0.5),
       0 0 20px var(--accent-glow);
   }
 
-  /* Glass surface layers */
-  .glass-surface-1 {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  .glass-surface-2 {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  .glass-surface-3 {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
+  /* ─── Interactive glass (cards you click) ─── */
   .glass-interactive {
     background: var(--glass-bg);
     backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
@@ -201,26 +183,19 @@
     border: 1px solid var(--glass-border);
     box-shadow:
       0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
+      0 8px 40px rgba(0, 0, 0, 0.5);
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
-
   .glass-interactive:hover {
     border-color: var(--glass-border-hover);
     transform: translateY(-1px);
     box-shadow:
       0 0 0 0.5px rgba(255,255,255,0.06) inset,
-      0 1px 0 rgba(255,255,255,0.04) inset,
       0 12px 48px rgba(0,0,0,0.5),
       0 0 20px var(--accent-glow);
   }
 
-  /* ═══════════════════════════════════════
-     PAPER CARDS (white, readable content)
-     ═══════════════════════════════════════ */
-
+  /* ─── Paper (white content cards) ─── */
   .paper {
     background: #ffffff;
     color: var(--color-card-text);
@@ -239,21 +214,7 @@
     transform: translateY(-1px);
   }
 
-  /* ═══════════════════════════════════════
-     CANVAS
-     ═══════════════════════════════════════ */
-
-  .canvas-bg {
-    background-color: var(--color-void-light);
-    background-image:
-      radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
-    background-size: 28px 28px;
-  }
-
-  /* ═══════════════════════════════════════
-     ANIMATIONS
-     ═══════════════════════════════════════ */
-
+  /* ─── Animations ─── */
   @keyframes breathe {
     0%, 100% {
       box-shadow:
@@ -268,26 +229,33 @@
         0 0 40px var(--accent-glow-strong);
     }
   }
-  .cmd-glow {
-    animation: breathe 5s ease-in-out infinite;
-  }
+  .cmd-glow { animation: breathe 5s ease-in-out infinite; }
 
   @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
   }
   .shimmer {
-    background: linear-gradient(
-      90deg,
-      rgba(255,255,255,0) 0%,
-      rgba(255,255,255,0.03) 50%,
-      rgba(255,255,255,0) 100%
-    );
+    background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0) 100%);
     background-size: 200% 100%;
     animation: shimmer 8s ease-in-out infinite;
   }
 
-  /* Drag */
   .draggable { cursor: grab; user-select: none; }
   .draggable:active { cursor: grabbing; }
+
+  /* ─── Excalidraw Overrides (single source of truth) ─── */
+  .excalidraw .Toast { bottom: 80px !important; z-index: 55 !important; }
+  .excalidraw .popover,
+  .excalidraw .context-menu,
+  .excalidraw .dropdown-menu-container { z-index: 100 !important; }
+  .excalidraw .library-menu,
+  .excalidraw .Dialog,
+  .excalidraw .Dialog__overlay,
+  .excalidraw .layer-ui__library,
+  .excalidraw-modal-container { z-index: 70 !important; }
+  .excalidraw .excalidraw-textEditorContainer { z-index: 55 !important; }
+  .excalidraw .color-picker,
+  .excalidraw .color-picker-content { z-index: 100 !important; }
+  .excalidraw .Island { z-index: 15 !important; }
 }

@@ -7,17 +7,25 @@ interface GlassChipProps {
   className?: string
 }
 
-export function GlassChip({ children, onRemove, onClick, className = "" }: GlassChipProps) {
+export function GlassChip({
+  children,
+  onRemove,
+  onClick,
+  className = "",
+}: GlassChipProps) {
   return (
     <div
-      className={`glass-surface-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-[var(--glass-text)] ${onClick ? "cursor-pointer glass-hover" : ""} ${className}`}
+      className={`glass-surface-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-[var(--glass-text)] ${onClick ? "cursor-pointer glass-hover" : ""} ${className}`}
       onClick={onClick}
     >
       {children}
       {onRemove && (
         <button
           className="text-[var(--glass-text-muted)] hover:text-white transition-colors ml-0.5"
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onRemove()
+          }}
         >
           ✕
         </button>

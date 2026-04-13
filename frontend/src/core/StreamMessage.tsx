@@ -1,5 +1,5 @@
 import { FileText, Sparkles } from "lucide-react"
-import type { StreamItem } from "../types"
+import type { UserItem, AssistantItem } from "../types"
 import { useStream } from "../hooks/useStream"
 import { useAppContext } from "../hooks/useAppContext"
 import { api } from "../api/client"
@@ -16,8 +16,11 @@ function renderBold(text: string) {
   )
 }
 
-export default function StreamMessage({ item }: { item: StreamItem }) {
-  const isUser = item.type === "user"
+export default function StreamMessage({
+  item,
+}: {
+  item: UserItem | AssistantItem
+}) {
   const { addUserMessage, addAssistantMessage, setLoading, items } = useStream()
   const { current } = useAppContext()
 
@@ -26,11 +29,18 @@ export default function StreamMessage({ item }: { item: StreamItem }) {
     setLoading(true)
     try {
       const h = items
-        .filter((i) => i.type === "user" || i.type === "assistant")
+        .filter((i): i is UserItem | AssistantItem =>
+          i.type === "user" || i.type === "assistant"
+        )
         .slice(-10)
-        .map((i) => ({ role: i.type as string, content: i.content || "" }))
+        .map((i) => ({ role: i.type, content: i.content }))
+
       const r = await api.chat(q, h, current.type, current.pageId)
-      addAssistantMessage(r.answer || "No response.", r.sources, r.follow_ups)
+      addAssistantMessage(
+        r.answer || "No response.",
+        r.sources,
+        r.follow_ups
+      )
     } catch {
       addAssistantMessage("Connection error.")
     } finally {
@@ -38,7 +48,7 @@ export default function StreamMessage({ item }: { item: StreamItem }) {
     }
   }
 
-  if (isUser) {
+  if (item.type === "user") {
     return (
       <div className="flex justify-end">
         <div
@@ -94,7 +104,7 @@ export default function StreamMessage({ item }: { item: StreamItem }) {
             <button
               key={i}
               onClick={() => followUp(q)}
-              className="text-[11px] text-[var(--accent-light)] border border-[rgba(99,102,241,0.15)] rounded-full px-3 py-1 hover:bg-[rgba(99,102,241,0.06)] transition-colors"
+              className="text-[11px] text-[var(--accent-light)] border border-[rgba(99,102,241,0.15)] rounded-full px-3 py-1 hover:bg-[var(--accent-subtle)] transition-colors"
             >
               {q}
             </button>

@@ -6,9 +6,15 @@ interface GlassTooltipProps {
   delay?: number
 }
 
-export function GlassTooltip({ content, children, delay = 400 }: GlassTooltipProps) {
+export function GlassTooltip({
+  content,
+  children,
+  delay = 400,
+}: GlassTooltipProps) {
   const [show, setShow] = useState(false)
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  )
 
   const handleEnter = useCallback(() => {
     timeoutRef.current = setTimeout(() => setShow(true), delay)
@@ -20,7 +26,11 @@ export function GlassTooltip({ content, children, delay = 400 }: GlassTooltipPro
   }, [])
 
   return (
-    <div className="relative inline-block" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
+    <div
+      className="relative inline-block"
+      onMouseEnter={handleEnter}
+      onMouseLeave={handleLeave}
+    >
       {children}
       {show && (
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1 glass-surface-2 rounded-md text-[10px] text-white whitespace-nowrap shadow-xl z-50 pointer-events-none">

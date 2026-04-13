@@ -1,20 +1,689 @@
+=== FILE: frontend\src\App.tsx ===
+
+import { ContextProvider } from "./core/ContextProvider"
+import Stream from "./core/Stream"
+import CommandBar from "./core/CommandBar"
+import CanvasOverlay from "./canvas/CanvasOverlay"
+
+/**
+ * Z-index layers:
+ *  z-10:  Canvas (Excalidraw — full screen when page open)
+ *  z-15:  Excalidraw toolbar Islands
+ *  z-20:  Stream (full page in home context)
+ *  z-35:  Stream floating panel wrapper (pointer-events:none, panel is pointer-events:auto)
+ *  z-40:  CommandBar (always bottom center)
+ *  z-45:  Excalidraw text editor
+ *  z-50:  Excalidraw dialogs/library
+ *  z-55:  Excalidraw toasts
+ *  z-60
+ */
+export default function App() {
+  return (
+    <ContextProvider>
+      <div className="w-full h-full relative overflow-hidden bg-[var(--color-void)]">
+        <CanvasOverlay />
+        <Stream />
+        <CommandBar />
+      </div>
+    </ContextProvider>
+  )
+}
+
+
+=== FILE: frontend\src\index.css ===
+
+@import "tailwindcss";
+
+@theme {
+  /* ─── Void ─── */
+  --color-void: #08080f;
+  --color-void-light: #0e0e1a;
+
+  /* ─── Content (readable) ─── */
+  --color-card: #ffffff;
+  --color-card-hover: #fafafa;
+  --color-card-text: #111827;
+  --color-card-muted: #6b7280;
+  --color-card-faint: #d1d5db;
+
+  /* ─── Glass ─── */
+  --glass-bg: rgba(14, 14, 26, 0.55);
+  --glass-bg-thick: rgba(10, 10, 20, 0.75);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-border-hover: rgba(255, 255, 255, 0.14);
+  --glass-shine: rgba(255, 255, 255, 0.04);
+  --glass-text: rgba(255, 255, 255, 0.88);
+  --glass-text-dim: rgba(255, 255, 255, 0.50);
+  --glass-text-muted: rgba(255, 255, 255, 0.22);
+
+  /* ─── Accent ─── */
+  --accent: #6366f1;
+  --accent-light: #818cf8;
+  --accent-glow: rgba(99, 102, 241, 0.12);
+  --accent-glow-strong: rgba(99, 102, 241, 0.25);
+  --purple: #a855f7;
+  --cyan: #06b6d4;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+
+  /* ─── Fonts ─── */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-hand: "Caveat", cursive;
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    background: var(--color-void);
+    color: var(--glass-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Noise Texture ─── */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.02;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  ::selection {
+    background: rgba(99, 102, 241, 0.35);
+    color: white;
+  }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.07);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.14);
+  }
+}
+
+@layer utilities {
+
+  /* ═══════════════════════════════════════
+     HYPER LIQUID GLASS
+     Multiple layered effects for depth
+     ═══════════════════════════════════════ */
+
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      135deg,
+      rgba(255,255,255,0.06) 0%,
+      transparent 40%,
+      transparent 60%,
+      rgba(255,255,255,0.02) 100%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .glass-solid {
+    background: var(--glass-bg-thick);
+    backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
+    -webkit-backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
+    border: 1px solid rgba(255,255,255,0.09);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.05) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 16px 64px rgba(0, 0, 0, 0.6),
+      0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .glass-solid::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      135deg,
+      rgba(255,255,255,0.08) 0%,
+      transparent 50%,
+      rgba(255,255,255,0.02) 100%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Glass hover with glow */
+  .glass-hover {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+  }
+  .glass-hover:hover {
+    border-color: var(--glass-border-hover);
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.06) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 12px 48px rgba(0,0,0,0.5),
+      0 0 20px var(--accent-glow);
+  }
+
+  /* Glass surface layers */
+  .glass-surface-1 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-surface-2 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-surface-3 {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .glass-interactive {
+    background: var(--glass-bg);
+    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.04) inset,
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 8px 40px rgba(0, 0, 0, 0.5),
+      0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .glass-interactive:hover {
+    border-color: var(--glass-border-hover);
+    transform: translateY(-1px);
+    box-shadow:
+      0 0 0 0.5px rgba(255,255,255,0.06) inset,
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 12px 48px rgba(0,0,0,0.5),
+      0 0 20px var(--accent-glow);
+  }
+
+  /* ═══════════════════════════════════════
+     PAPER CARDS (white, readable content)
+     ═══════════════════════════════════════ */
+
+  .paper {
+    background: #ffffff;
+    color: var(--color-card-text);
+    border-radius: 10px;
+    box-shadow:
+      0 1px 2px rgba(0,0,0,0.08),
+      0 4px 16px rgba(0,0,0,0.25),
+      0 0 0 1px rgba(0,0,0,0.04);
+    transition: all 0.2s ease;
+  }
+  .paper:hover {
+    box-shadow:
+      0 2px 4px rgba(0,0,0,0.1),
+      0 8px 32px rgba(0,0,0,0.35),
+      0 0 0 1px rgba(0,0,0,0.06);
+    transform: translateY(-1px);
+  }
+
+  /* ═══════════════════════════════════════
+     CANVAS
+     ═══════════════════════════════════════ */
+
+  .canvas-bg {
+    background-color: var(--color-void-light);
+    background-image:
+      radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  /* ═══════════════════════════════════════
+     ANIMATIONS
+     ═══════════════════════════════════════ */
+
+  @keyframes breathe {
+    0%, 100% {
+      box-shadow:
+        0 0 0 0.5px rgba(255,255,255,0.04) inset,
+        0 8px 40px rgba(0,0,0,0.5),
+        0 0 24px var(--accent-glow);
+    }
+    50% {
+      box-shadow:
+        0 0 0 0.5px rgba(255,255,255,0.06) inset,
+        0 8px 40px rgba(0,0,0,0.5),
+        0 0 40px var(--accent-glow-strong);
+    }
+  }
+  .cmd-glow {
+    animation: breathe 5s ease-in-out infinite;
+  }
+
+  /* ═══════════════════════════════════════
+     EXCALIDRAW OVERRIDES
+     ═══════════════════════════════════════ */
+
+  /* Push Excalidraw toasts above the command bar */
+  .excalidraw .Toast {
+    bottom: 80px !important;
+    z-index: 55 !important;
+  }
+
+  /* Context menus and popovers above our panels */
+  .excalidraw .popover,
+  .excalidraw .context-menu,
+  .excalidraw .dropdown-menu-container {
+    z-index: 100 !important;
+  }
+
+  /* Library and dialogs above everything */
+  .excalidraw .library-menu,
+  .excalidraw .Dialog,
+  .excalidraw .Dialog__overlay,
+  .excalidraw .layer-ui__library,
+  .excalidraw-modal-container {
+    z-index: 70 !important;
+  }
+
+  /* Text editing above panels */
+  .excalidraw .excalidraw-textEditorContainer {
+    z-index: 55 !important;
+  }
+
+  /* Color picker above panels */
+  .excalidraw .color-picker,
+  .excalidraw .color-picker-content {
+    z-index: 100 !important;
+  }
+
+  /* Excalidraw's own toolbar should not be blocked */
+  .excalidraw .Island {
+    z-index: 15 !important;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255,255,255,0) 0%,
+      rgba(255,255,255,0.03) 50%,
+      rgba(255,255,255,0) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 8s ease-in-out infinite;
+  }
+
+  /* Drag */
+  .draggable { cursor: grab; user-select: none; }
+  .draggable:active { cursor: grabbing; }
+}
+
+
+=== FILE: frontend\src\main.tsx ===
+
+import { StrictMode } from "react"
+import { createRoot } from "react-dom/client"
+import "./index.css"
+import App from "./App"
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+)
+
+
+=== FILE: frontend\src\types.ts ===
+
+// ─── Stream ──────────────────────────────────────────
+
+export interface StreamItem {
+  id: string
+  type: "user" | "assistant" | "block" | "system"
+  content?: string
+  blockType?: BlockType
+  blockData?: unknown
+  sources?: ChatSource[]
+  followUps?: string[]
+  metadata?: {
+    noteIds?: string[]
+    query?: string
+    tag?: string
+    pageId?: string
+    command?: string
+    topic?: string
+  }
+  timestamp: number
+  loading?: boolean
+}
+
+export type BlockType =
+  | "welcome"
+  | "help"
+  | "note-grid"
+  | "note-detail"
+  | "search-results"
+  | "stats"
+  | "tag-cloud"
+  | "task-list"
+  | "page-list"
+  | "reading-path"
+  | "gap-analysis"
+  | "curator-report"
+  | "settings"
+  | "history"
+
+// ─── Context ─────────────────────────────────────────
+
+export type ContextType = "home" | "page" | "settings" | "history"
+
+export interface AppContext {
+  type: ContextType
+  pageId?: string
+  pageName?: string
+  previousContext?: AppContext
+}
+
+// ─── Notes ───────────────────────────────────────────
+
+export interface Note {
+  id: string
+  title: string | null
+  raw_text: string
+  summary: string | null
+  tags: string[]
+  tasks: string[]
+  entities: string[]
+  source_url: string | null
+  page_title: string | null
+  capture_type: string
+  processing_status: string
+  related_note_ids: string[]
+  page_id: string | null
+  canvas_x: number | null
+  canvas_y: number | null
+  canvas_width: number
+  canvas_height: number | null
+  cluster_id: string | null
+  centrality: number
+  is_bridge: boolean
+  created_at: string
+  updated_at: string
+  similarity?: number
+}
+
+// ─── Pages ───────────────────────────────────────────
+
+export interface Page {
+  id: string
+  name: string
+  description: string | null
+  icon: string
+  color: string
+  is_archived: boolean
+  canvas_data: Record<string, unknown>
+  viewport: { x: number; y: number; zoom: number }
+  note_count: number
+  last_activity: string
+  created_at: string
+  updated_at: string
+}
+
+// ─── Edges ───────────────────────────────────────────
+
+export type EdgeType =
+  | "related"
+  | "depends_on"
+  | "extends"
+  | "contradicts"
+  | "summarizes"
+  | "example_of"
+
+export interface NoteEdge {
+  id: string
+  source_id: string
+  target_id: string
+  edge_type: EdgeType
+  strength: number
+  label: string | null
+  created_by: string
+  created_at: string
+}
+
+// ─── Clusters ────────────────────────────────────────
+
+export interface Cluster {
+  id: string
+  page_id: string
+  label: string
+  description: string | null
+  color: string
+  center_x: number | null
+  center_y: number | null
+  created_at: string
+  updated_at: string
+}
+
+// ─── Canvas Elements ─────────────────────────────────
+
+export type ElementType = "sticky" | "drawing" | "annotation" | "image"
+
+export interface CanvasElement {
+  id: string
+  page_id: string
+  element_type: ElementType
+  content: string | null
+  canvas_data: Record<string, unknown> | null
+  position_x: number
+  position_y: number
+  width: number | null
+  height: number | null
+  style: Record<string, unknown>
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+// ─── Canvas State ────────────────────────────────────
+
+export interface CanvasState {
+  page: Page
+  notes: Note[]
+  edges: NoteEdge[]
+  elements: CanvasElement[]
+  clusters: Cluster[]
+  viewport: { x: number; y: number; zoom: number }
+}
+
+// ─── Chat ────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: "user" | "assistant"
+  content: string
+  sources?: ChatSource[]
+  followUps?: string[]
+}
+
+export interface ChatSource {
+  id: string
+  title: string
+  similarity: number
+}
+
+// ─── Stats ───────────────────────────────────────────
+
+export interface WorkspaceStats {
+  total_notes: number
+  total_pages: number
+  total_tags: number
+  total_tasks: number
+  status_counts: Record<string, number>
+  last_capture: string | null
+}
+
+// ─── Tags ────────────────────────────────────────────
+
+export interface TagWithCount {
+  name: string
+  count: number
+}
+
+// ─── Curator ─────────────────────────────────────────
+
+export interface CuratorReport {
+  potential_duplicates: Array<{
+    note_a: string; note_b: string; similarity: number
+    suggestion: string; reason: string
+  }>
+  orphan_notes: Array<{
+    note_id: string; title: string; suggestion: string; reason: string
+  }>
+  stale_notes: Array<{
+    note_id: string; title: string; days_old: number
+  }>
+  cluster_issues: Array<{
+    cluster_id: string; issue: string; size?: number; suggestion: string
+  }>
+  missing_connections: Array<{
+    note_a: string; note_b: string; similarity: number
+    suggested_type: string; reason: string
+  }>
+  auto_applied: number
+  needs_confirmation: Array<{
+    action_type: string; params: Record<string, unknown>; reason: string
+  }>
+}
+
+// ─── Commands ────────────────────────────────────────
+
+export interface Command {
+  name: string
+  aliases: string[]
+  description: string
+  context: ContextType[]
+  args?: string
+  handler: string
+}
+
+// ─── History ─────────────────────────────────────────
+
+export interface ChatConversation {
+  id: string
+  context_type: string
+  context_id: string | null
+  messages: ChatMessage[]
+  title: string | null
+  created_at: string
+  updated_at: string
+}
+
+
+=== FILE: frontend\src\utils.ts ===
+
+export function nanoid(size = 21): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  let id = ""
+
+  for (let i = 0; i < size; i += 1) {
+    id += chars[Math.floor(Math.random() * chars.length)]
+  }
+
+  return id
+}
+
+
 === FILE: frontend\src\api\client.ts ===
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api"
 
 async function request(path: string, options?: RequestInit) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
-  return res.json()
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
+
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      ...options,
+    })
+    clearTimeout(timeoutId)
+
+    if (!res.ok) {
+      let detail = `API error: ${res.status}`
+      try {
+        const body = await res.json()
+        if (body.detail) detail = body.detail
+      } catch {
+        // ignore parse error
+      }
+      throw new Error(detail)
+    }
+    return res.json()
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out")
+    }
+    throw err
+  }
 }
 
 export const api = {
   // ─── Notes ──────────────────────────────────────
   listNotes: (page = 1, limit = 20, tag?: string, pageId?: string) =>
-    request(`/notes?page=${page}&limit=${limit}${tag ? `&tag=${tag}` : ""}${pageId ? `&page_id=${pageId}` : ""}`),
+    request(
+      `/notes?page=${page}&limit=${limit}${tag ? `&tag=${tag}` : ""}${pageId ? `&page_id=${pageId}` : ""}`
+    ),
   getNote: (id: string) => request(`/notes/${id}`),
   updateNote: (id: string, data: Record<string, unknown>) =>
     request(`/notes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -23,40 +692,69 @@ export const api = {
   retryNote: (id: string) =>
     request(`/notes/${id}/retry`, { method: "POST" }),
   moveNote: (id: string, pageId: string) =>
-    request(`/notes/${id}/move`, { method: "POST", body: JSON.stringify({ page_id: pageId }) }),
+    request(`/notes/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ page_id: pageId }),
+    }),
 
   // ─── Capture ────────────────────────────────────
-  capture: (data: { text: string; source_url?: string; page_title?: string; capture_type?: string; page_hint?: string; custom_command?: string }) =>
-    request("/capture", { method: "POST", body: JSON.stringify(data) }),
+  capture: (data: {
+    text: string
+    source_url?: string
+    page_title?: string
+    capture_type?: string
+    page_hint?: string
+    custom_command?: string
+  }) => request("/capture", { method: "POST", body: JSON.stringify(data) }),
 
   // ─── Pages ──────────────────────────────────────
   listPages: () => request("/pages"),
-  createPage: (data: { name: string; description?: string; icon?: string; color?: string }) =>
-    request("/pages", { method: "POST", body: JSON.stringify(data) }),
+  createPage: (data: {
+    name: string
+    description?: string
+    icon?: string
+    color?: string
+  }) => request("/pages", { method: "POST", body: JSON.stringify(data) }),
   getPage: (id: string) => request(`/pages/${id}`),
   updatePage: (id: string, data: Record<string, unknown>) =>
     request(`/pages/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deletePage: (id: string) =>
     request(`/pages/${id}`, { method: "DELETE" }),
   getPageCanvas: (id: string) => request(`/pages/${id}/canvas`),
-  savePageViewport: (id: string, viewport: { x: number; y: number; zoom: number }) =>
-    request(`/pages/${id}/canvas`, { method: "PUT", body: JSON.stringify({ viewport }) }),
+  savePageViewport: (
+    id: string,
+    viewport: { x: number; y: number; zoom: number }
+  ) =>
+    request(`/pages/${id}/canvas`, {
+      method: "PUT",
+      body: JSON.stringify({ viewport }),
+    }),
   triggerPageLayout: (id: string) =>
     request(`/pages/${id}/layout`, { method: "POST" }),
 
   // ─── Edges ──────────────────────────────────────
   listEdges: (pageId?: string, noteId?: string) =>
-    request(`/edges?${pageId ? `page_id=${pageId}` : ""}${noteId ? `&note_id=${noteId}` : ""}`),
-  createEdge: (data: { source_id: string; target_id: string; edge_type: string; label?: string }) =>
-    request("/edges", { method: "POST", body: JSON.stringify(data) }),
+    request(
+      `/edges?${pageId ? `page_id=${pageId}` : ""}${noteId ? `&note_id=${noteId}` : ""}`
+    ),
+  createEdge: (data: {
+    source_id: string
+    target_id: string
+    edge_type: string
+    label?: string
+  }) => request("/edges", { method: "POST", body: JSON.stringify(data) }),
   deleteEdge: (id: string) =>
     request(`/edges/${id}`, { method: "DELETE" }),
 
   // ─── Clusters ───────────────────────────────────
   listClusters: (pageId?: string) =>
     request(`/clusters${pageId ? `?page_id=${pageId}` : ""}`),
-  createCluster: (data: { page_id: string; label: string; description?: string; color?: string }) =>
-    request("/clusters", { method: "POST", body: JSON.stringify(data) }),
+  createCluster: (data: {
+    page_id: string
+    label: string
+    description?: string
+    color?: string
+  }) => request("/clusters", { method: "POST", body: JSON.stringify(data) }),
   updateCluster: (id: string, data: Record<string, unknown>) =>
     request(`/clusters/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteCluster: (id: string) =>
@@ -66,7 +764,10 @@ export const api = {
   listElements: (pageId: string) =>
     request(`/pages/${pageId}/elements`),
   createElement: (pageId: string, data: Record<string, unknown>) =>
-    request(`/pages/${pageId}/elements`, { method: "POST", body: JSON.stringify(data) }),
+    request(`/pages/${pageId}/elements`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   updateElement: (id: string, data: Record<string, unknown>) =>
     request(`/elements/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteElement: (id: string) =>
@@ -74,15 +775,30 @@ export const api = {
 
   // ─── Search ─────────────────────────────────────
   search: (q: string, limit = 10, pageId?: string) =>
-    request(`/search?q=${encodeURIComponent(q)}&limit=${limit}${pageId ? `&page_id=${pageId}` : ""}`),
+    request(
+      `/search?q=${encodeURIComponent(q)}&limit=${limit}${pageId ? `&page_id=${pageId}` : ""}`
+    ),
   searchCanvas: (pageId: string, query: string) =>
-    request("/search/canvas", { method: "POST", body: JSON.stringify({ page_id: pageId, query }) }),
+    request("/search/canvas", {
+      method: "POST",
+      body: JSON.stringify({ page_id: pageId, query }),
+    }),
 
   // ─── Chat ───────────────────────────────────────
-  chat: (question: string, history: Array<{ role: string; content: string }>, contextType = "home", pageId?: string) =>
+  chat: (
+    question: string,
+    history: Array<{ role: string; content: string }>,
+    contextType = "home",
+    pageId?: string
+  ) =>
     request("/chat", {
       method: "POST",
-      body: JSON.stringify({ question, history, context_type: contextType, page_id: pageId }),
+      body: JSON.stringify({
+        question,
+        history,
+        context_type: contextType,
+        page_id: pageId,
+      }),
     }),
 
   // ─── Tags ───────────────────────────────────────
@@ -95,38 +811,55 @@ export const api = {
   // ─── History ────────────────────────────────────
   listHistory: (limit = 20) => request(`/history?limit=${limit}`),
   getHistory: (id: string) => request(`/history/${id}`),
-  saveHistory: (data: { context_type: string; context_id?: string; messages: any[]; title?: string }) =>
-    request("/history", { method: "POST", body: JSON.stringify(data) }),
+  saveHistory: (data: {
+    context_type: string
+    context_id?: string
+    messages: any[]
+    title?: string
+  }) => request("/history", { method: "POST", body: JSON.stringify(data) }),
   deleteHistory: (id: string) =>
     request(`/history/${id}`, { method: "DELETE" }),
 
   // ─── Curator ────────────────────────────────────
-  curatorScan: () =>
-    request("/curator/scan", { method: "POST" }),
-  curatorApply: (action: { action_type: string; params: Record<string, unknown> }) =>
-    request("/curator/apply", { method: "POST", body: JSON.stringify(action) }),
+  curatorScan: () => request("/curator/scan", { method: "POST" }),
+  curatorApply: (action: {
+    action_type: string
+    params: Record<string, unknown>
+  }) =>
+    request("/curator/apply", {
+      method: "POST",
+      body: JSON.stringify(action),
+    }),
 
   // ─── Health ─────────────────────────────────────
-  health: () => fetch(`${API_BASE.replace("/api", "")}/health`).then(r => r.json()).catch(() => null),
+  health: () =>
+    fetch(`${API_BASE.replace("/api", "")}/health`, { signal: AbortSignal.timeout(5000) })
+      .then((r) => r.json())
+      .catch(() => null),
 }
 
 
 === FILE: frontend\src\blocks\CuratorReportBlock.tsx ===
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { api } from "../api/client"
 import { useStream } from "../hooks/useStream"
 import type { CuratorReport, StreamItem } from "../types"
 import { AlertTriangle, CheckCircle, Link, Trash2, Loader2 } from "lucide-react"
 
-export default function CuratorReportBlock({}: { item: StreamItem }) {
+export default function CuratorReportBlock({ }: { item: StreamItem }) {
   const [report, setReport] = useState<CuratorReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [applying, setApplying] = useState<string | null>(null)
   const { addSystemMessage } = useStream()
+  const fetchedRef = useRef(false)
 
   useEffect(() => {
-    api.curatorScan()
+    if (fetchedRef.current) return
+    fetchedRef.current = true
+
+    api
+      .curatorScan()
       .then(setReport)
       .catch((err) => {
         console.error(err)
@@ -135,10 +868,17 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
       .finally(() => setLoading(false))
   }, [])
 
-  async function applyAction(action: { action_type: string; params: Record<string, unknown>; reason: string }) {
+  async function applyAction(action: {
+    action_type: string
+    params: Record<string, unknown>
+    reason: string
+  }) {
     setApplying(action.action_type)
     try {
-      await api.curatorApply({ action_type: action.action_type, params: action.params })
+      await api.curatorApply({
+        action_type: action.action_type,
+        params: action.params,
+      })
       addSystemMessage(`✓ Applied: ${action.reason}`)
     } catch {
       addSystemMessage(`✗ Failed to apply: ${action.reason}`)
@@ -151,7 +891,9 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
         <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
-        <span className="text-[13px] text-[var(--glass-text-dim)]">Running curator scan...</span>
+        <span className="text-[13px] text-[var(--glass-text-dim)]">
+          Running curator scan...
+        </span>
       </div>
     )
   }
@@ -166,9 +908,10 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
 
   const hasIssues =
     report.potential_duplicates.length +
-    report.orphan_notes.length +
-    report.stale_notes.length +
-    report.missing_connections.length > 0
+      report.orphan_notes.length +
+      report.stale_notes.length +
+      report.missing_connections.length >
+    0
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
@@ -179,52 +922,75 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
       {!hasIssues ? (
         <div className="flex items-center gap-2 text-[var(--green)]">
           <CheckCircle size={16} />
-          <span className="text-[13px] font-semibold">Workspace is well maintained. No issues found.</span>
+          <span className="text-[13px] font-semibold">
+            Workspace is well maintained. No issues found.
+          </span>
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {/* Duplicates */}
           {report.potential_duplicates.length > 0 && (
-            <Section title={`${report.potential_duplicates.length} Potential Duplicate${report.potential_duplicates.length > 1 ? "s" : ""}`} icon={<AlertTriangle size={14} className="text-[var(--amber)]" />}>
+            <Section
+              title={`${report.potential_duplicates.length} Potential Duplicate${report.potential_duplicates.length > 1 ? "s" : ""}`}
+              icon={
+                <AlertTriangle size={14} className="text-[var(--amber)]" />
+              }
+            >
               {report.potential_duplicates.map((d, i) => (
-                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
+                <div
+                  key={i}
+                  className="text-[12px] text-[var(--glass-text-dim)] py-1"
+                >
                   Similarity {Math.round(d.similarity * 100)}% — {d.reason}
                 </div>
               ))}
             </Section>
           )}
 
-          {/* Orphans */}
           {report.orphan_notes.length > 0 && (
-            <Section title={`${report.orphan_notes.length} Orphan Note${report.orphan_notes.length > 1 ? "s" : ""}`} icon={<Trash2 size={14} className="text-[var(--red)]" />}>
+            <Section
+              title={`${report.orphan_notes.length} Orphan Note${report.orphan_notes.length > 1 ? "s" : ""}`}
+              icon={<Trash2 size={14} className="text-[var(--red)]" />}
+            >
               {report.orphan_notes.map((o, i) => (
-                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
+                <div
+                  key={i}
+                  className="text-[12px] text-[var(--glass-text-dim)] py-1"
+                >
                   "{o.title}" — {o.suggestion}
                 </div>
               ))}
             </Section>
           )}
 
-          {/* Missing connections */}
           {report.missing_connections.length > 0 && (
-            <Section title={`${report.missing_connections.length} Missing Connection${report.missing_connections.length > 1 ? "s" : ""}`} icon={<Link size={14} className="text-[var(--accent)]" />}>
+            <Section
+              title={`${report.missing_connections.length} Missing Connection${report.missing_connections.length > 1 ? "s" : ""}`}
+              icon={<Link size={14} className="text-[var(--accent)]" />}
+            >
               {report.missing_connections.map((m, i) => (
-                <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
+                <div
+                  key={i}
+                  className="text-[12px] text-[var(--glass-text-dim)] py-1"
+                >
                   {m.reason} (suggested: {m.suggested_type})
                 </div>
               ))}
             </Section>
           )}
 
-          {/* Actions needing confirmation */}
           {report.needs_confirmation.length > 0 && (
             <div className="pt-3 border-t border-[var(--glass-border)]">
               <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
                 Suggested Actions
               </div>
               {report.needs_confirmation.map((action, i) => (
-                <div key={i} className="flex items-center justify-between py-2">
-                  <span className="text-[12px] text-[var(--glass-text-dim)]">{action.reason}</span>
+                <div
+                  key={i}
+                  className="flex items-center justify-between py-2"
+                >
+                  <span className="text-[12px] text-[var(--glass-text-dim)]">
+                    {action.reason}
+                  </span>
                   <button
                     onClick={() => applyAction(action)}
                     disabled={applying === action.action_type}
@@ -241,14 +1007,23 @@ export default function CuratorReportBlock({}: { item: StreamItem }) {
 
       {report.auto_applied > 0 && (
         <div className="mt-4 text-[11px] text-[var(--green)]">
-          ✓ Auto-applied {report.auto_applied} safe action{report.auto_applied > 1 ? "s" : ""}
+          ✓ Auto-applied {report.auto_applied} safe action
+          {report.auto_applied > 1 ? "s" : ""}
         </div>
       )}
     </div>
   )
 }
 
-function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Section({
+  title,
+  icon,
+  children,
+}: {
+  title: string
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-1">
@@ -263,7 +1038,7 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
 
 === FILE: frontend\src\blocks\GapAnalysisBlock.tsx ===
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { api } from "../api/client"
 import type { StreamItem } from "../types"
 import { AlertTriangle, CheckCircle, Lightbulb, Loader2 } from "lucide-react"
@@ -277,23 +1052,26 @@ interface GapResult {
 export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
   const [result, setResult] = useState<GapResult | null>(null)
   const [loading, setLoading] = useState(true)
+  const fetchedRef = useRef(false)
+
+  const pageId = item.metadata?.pageId
 
   useEffect(() => {
+    if (fetchedRef.current) return
+    fetchedRef.current = true
+
     async function analyze() {
       try {
-        const pageId = item.metadata?.pageId
         const prompt = pageId
           ? "Analyze the notes on this page. What subtopics are covered, what's missing, and what should I read next?"
           : "Analyze all my notes. What topics are well covered, what's missing, and what should I learn next?"
 
         const resp = await api.chat(prompt, [], pageId ? "page" : "home", pageId)
 
-        // Try to parse structured response, fall back to raw text
         try {
           const parsed = JSON.parse(resp.answer)
           setResult(parsed)
         } catch {
-          // AI returned freeform text — wrap it
           setResult({
             covered: [],
             missing: [],
@@ -308,13 +1086,15 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
       }
     }
     analyze()
-  }, [item.metadata?.pageId])
+  }, [pageId])
 
   if (loading) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
         <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
-        <span className="text-[13px] text-[var(--glass-text-dim)]">Analyzing knowledge gaps...</span>
+        <span className="text-[13px] text-[var(--glass-text-dim)]">
+          Analyzing knowledge gaps...
+        </span>
       </div>
     )
   }
@@ -327,8 +1107,11 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
     )
   }
 
-  // If we got a freeform response
-  if (result.covered.length === 0 && result.missing.length === 0 && result.suggestions.length > 0) {
+  if (
+    result.covered.length === 0 &&
+    result.missing.length === 0 &&
+    result.suggestions.length > 0
+  ) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl">
         <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-4">
@@ -348,12 +1131,13 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
       </div>
 
       <div className="flex flex-col gap-4">
-        {/* Covered */}
         {result.covered.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2">
               <CheckCircle size={14} className="text-[var(--green)]" />
-              <span className="text-[12px] font-semibold text-white">Well Covered ({result.covered.length})</span>
+              <span className="text-[12px] font-semibold text-white">
+                Well Covered ({result.covered.length})
+              </span>
             </div>
             <div className="flex flex-wrap gap-1.5 pl-5">
               {result.covered.map((topic, i) => (
@@ -368,12 +1152,13 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
           </div>
         )}
 
-        {/* Missing */}
         {result.missing.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle size={14} className="text-[var(--amber)]" />
-              <span className="text-[12px] font-semibold text-white">Missing ({result.missing.length})</span>
+              <span className="text-[12px] font-semibold text-white">
+                Missing ({result.missing.length})
+              </span>
             </div>
             <div className="flex flex-wrap gap-1.5 pl-5">
               {result.missing.map((topic, i) => (
@@ -388,16 +1173,20 @@ export default function GapAnalysisBlock({ item }: { item: StreamItem }) {
           </div>
         )}
 
-        {/* Suggestions */}
         {result.suggestions.length > 0 && (
           <div>
             <div className="flex items-center gap-2 mb-2">
               <Lightbulb size={14} className="text-[var(--accent)]" />
-              <span className="text-[12px] font-semibold text-white">Suggestions</span>
+              <span className="text-[12px] font-semibold text-white">
+                Suggestions
+              </span>
             </div>
             <ul className="pl-5 flex flex-col gap-1">
               {result.suggestions.map((s, i) => (
-                <li key={i} className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed">
+                <li
+                  key={i}
+                  className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed"
+                >
                   • {s}
                 </li>
               ))}
@@ -440,10 +1229,13 @@ export default function HelpBlock() {
       cmds: [
         { name: "/find", args: "<text>", desc: "Search on canvas" },
         { name: "/add", args: "<text>", desc: "Add sticky note" },
+        { name: "/bg", args: "<color>", desc: "Change background" },
+        { name: "/library", desc: "Open shape library" },
         { name: "/layout", desc: "Auto-reorganize" },
         { name: "/summarize", desc: "Summarize page" },
         { name: "/gaps", desc: "Find missing topics" },
         { name: "/reading", args: "[topic]", desc: "Reading order" },
+        { name: "/rename", args: "<name>", desc: "Rename page" },
       ],
     },
     {
@@ -461,18 +1253,30 @@ export default function HelpBlock() {
   return (
     <div className="glass rounded-2xl p-5 relative overflow-hidden">
       <div className="relative z-10">
-        <div className="text-[9px] uppercase tracking-[0.2em] font-bold text-[var(--glass-text-muted)] mb-4">Commands</div>
+        <div className="text-[9px] uppercase tracking-[0.2em] font-bold text-[var(--glass-text-muted)] mb-4">
+          Commands
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {sections.map((sec) => (
             <div key={sec.title}>
-              <div className="text-[10px] uppercase tracking-widest font-bold text-[var(--accent-light)] mb-2">{sec.title}</div>
+              <div className="text-[10px] uppercase tracking-widest font-bold text-[var(--accent-light)] mb-2">
+                {sec.title}
+              </div>
               {sec.cmds.map((c) => (
                 <div key={c.name} className="flex justify-between py-1 group">
                   <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-[12px] text-[var(--glass-text)]">{c.name}</span>
-                    {c.args && <span className="text-[10px] text-[var(--glass-text-muted)] italic">{c.args}</span>}
+                    <span className="font-mono text-[12px] text-[var(--glass-text)]">
+                      {c.name}
+                    </span>
+                    {c.args && (
+                      <span className="text-[10px] text-[var(--glass-text-muted)] italic">
+                        {c.args}
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[10px] text-[var(--glass-text-dim)] group-hover:text-[var(--glass-text)] transition-colors">{c.desc}</span>
+                  <span className="text-[10px] text-[var(--glass-text-dim)] group-hover:text-[var(--glass-text)] transition-colors">
+                    {c.desc}
+                  </span>
                 </div>
               ))}
             </div>
@@ -481,7 +1285,15 @@ export default function HelpBlock() {
         <div className="mt-5 p-3 rounded-xl bg-[rgba(99,102,241,0.05)] border border-[rgba(99,102,241,0.1)]">
           <p className="text-[11px] text-[var(--glass-text-dim)] leading-relaxed">
             Everything without <span className="font-mono text-[var(--accent-light)]">/</span> is sent as a natural language question.
-            Press <kbd className="font-mono bg-[rgba(255,255,255,0.06)] px-1.5 py-0.5 rounded text-[10px] text-white mx-0.5">⌘K</kbd> to focus.
+            You can also say things like{" "}
+            <span className="font-mono text-[var(--accent-light)]">"change background black"</span>,{" "}
+            <span className="font-mono text-[var(--accent-light)]">"open library"</span>, or{" "}
+            <span className="font-mono text-[var(--accent-light)]">"add sticky hello"</span>.
+            Press{" "}
+            <kbd className="font-mono bg-[rgba(255,255,255,0.06)] px-1.5 py-0.5 rounded text-[10px] text-white mx-0.5">
+              ⌘K
+            </kbd>{" "}
+            to focus.
           </p>
         </div>
       </div>
@@ -585,23 +1397,38 @@ export default function HistoryBlock() {
 }
 
 
+=== FILE: frontend\src\blocks\NoteDetailBlock.tsx ===
 
 import { useEffect, useState } from "react"
 import { api } from "../api/client"
 import type { Note, StreamItem } from "../types"
-import { FileText, ExternalLink, Tag, CheckSquare, Link, Clock, Loader2 } from "lucide-react"
+import {
+  FileText,
+  ExternalLink,
+  Tag,
+  CheckSquare,
+  Link,
+  Clock,
+  Loader2,
+} from "lucide-react"
 import { GlassBadge } from "../glass/GlassBadge"
 
 export default function NoteDetailBlock({ item }: { item: StreamItem }) {
-  const [note, setNote] = useState<Note | null>((item.blockData as any)?.note || null)
+  const [note, setNote] = useState<Note | null>(
+    (item.blockData as any)?.note || null
+  )
   const [loading, setLoading] = useState(!note)
 
   useEffect(() => {
     if (note) return
     const noteId = item.metadata?.noteIds?.[0]
-    if (!noteId) return
+    if (!noteId) {
+      setLoading(false)
+      return
+    }
 
-    api.getNote(noteId)
+    api
+      .getNote(noteId)
       .then(setNote)
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -610,7 +1437,10 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
   if (loading) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+        <Loader2
+          className="animate-spin text-[var(--glass-text-muted)]"
+          size={20}
+        />
       </div>
     )
   }
@@ -623,12 +1453,13 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
     )
   }
 
-  const statusColors: Record<string, "success" | "warning" | "info" | "error"> = {
-    done: "success",
-    pending: "warning",
-    processing: "info",
-    failed: "error",
-  }
+  const statusColors: Record<string, "success" | "warning" | "info" | "error"> =
+    {
+      done: "success",
+      pending: "warning",
+      processing: "info",
+      failed: "error",
+    }
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
@@ -636,7 +1467,9 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-2.5">
           <FileText size={18} className="text-[var(--accent)]" />
-          <h3 className="text-[16px] font-bold text-white">{note.title || "Untitled"}</h3>
+          <h3 className="text-[16px] font-bold text-white">
+            {note.title || "Untitled"}
+          </h3>
         </div>
         <GlassBadge variant={statusColors[note.processing_status] || "info"}>
           {note.processing_status}
@@ -661,7 +1494,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       </div>
 
       {/* Tags */}
-      {note.tags.length > 0 && (
+      {note.tags && note.tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {note.tags.map((t) => (
             <span
@@ -675,29 +1508,37 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       )}
 
       {/* Tasks */}
-      {note.tasks.length > 0 && (
+      {note.tasks && note.tasks.length > 0 && (
         <div className="mb-4">
           <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Tasks
           </div>
           {note.tasks.map((task, i) => (
             <div key={i} className="flex items-start gap-2 py-1">
-              <CheckSquare size={13} className="text-[var(--green)] mt-0.5 shrink-0" />
-              <span className="text-[12px] text-[var(--glass-text-dim)]">{task}</span>
+              <CheckSquare
+                size={13}
+                className="text-[var(--green)] mt-0.5 shrink-0"
+              />
+              <span className="text-[12px] text-[var(--glass-text-dim)]">
+                {task}
+              </span>
             </div>
           ))}
         </div>
       )}
 
       {/* Entities */}
-      {note.entities.length > 0 && (
+      {note.entities && note.entities.length > 0 && (
         <div className="mb-4">
           <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Entities
           </div>
           <div className="flex flex-wrap gap-1.5">
             {note.entities.map((e) => (
-              <span key={e} className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--glass-text-dim)]">
+              <span
+                key={e}
+                className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--glass-text-dim)]"
+              >
                 {e}
               </span>
             ))}
@@ -705,7 +1546,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
         </div>
       )}
 
-      {/* Metadata footer */}
+      {/* Footer */}
       <div className="flex items-center gap-4 pt-3 border-t border-[var(--glass-border)] text-[11px] text-[var(--glass-text-muted)]">
         <div className="flex items-center gap-1">
           <Clock size={11} />
@@ -835,9 +1676,107 @@ export default function NoteGridBlock({ item }: { item: StreamItem }) {
 }
 
 
-=== FILE: frontend\src\blocks\ReadingPathBlock.tsx ===
+=== FILE: frontend\src\blocks\PageListBlock.tsx ===
 
 import { useEffect, useState } from "react"
+import { api } from "../api/client"
+import { useAppContext } from "../hooks/useAppContext"
+import type { Page } from "../types"
+import { Layers, Loader2, Trash2 } from "lucide-react"
+import { motion } from "framer-motion"
+
+export default function PageListBlock() {
+  const [pages, setPages] = useState<Page[]>([])
+  const [loading, setLoading] = useState(true)
+  const { switchTo } = useAppContext()
+
+  useEffect(() => {
+    api.listPages()
+      .then((res) => setPages(res.pages || res || []))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleDelete(id: string, name: string) {
+    if (name === "Uncategorized") return
+    try {
+      await api.deletePage(id)
+      setPages((prev) => prev.filter((p) => p.id !== id))
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="animate-spin text-[var(--glass-text-muted)]" size={20} />
+      </div>
+    )
+  }
+
+  if (pages.length === 0) {
+    return (
+      <div className="glass-surface-1 p-6 rounded-2xl text-[13px] text-[var(--glass-text-dim)]">
+        No pages found. Use <code className="font-mono text-[var(--accent)]">/page create &lt;name&gt;</code> to create one.
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-3">
+        Pages
+        <span className="ml-2 text-[var(--glass-text-dim)]">({pages.length})</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {pages.map((page, i) => (
+          <motion.div
+            key={page.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.03 }}
+            className="glass-surface-2 p-4 rounded-xl glass-hover cursor-pointer relative group"
+            onClick={() => switchTo("page", page.id, page.name)}
+          >
+            <div className="flex items-center gap-2.5 mb-2">
+              <span className="text-lg">{page.icon || "📄"}</span>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-[13px] text-white truncate">
+                  {page.name}
+                </div>
+                <div className="text-[10px] text-[var(--glass-text-muted)]">
+                  {page.note_count || 0} note{(page.note_count || 0) !== 1 ? "s" : ""}
+                </div>
+              </div>
+            </div>
+            {page.description && (
+              <div className="text-[11px] text-[var(--glass-text-dim)] line-clamp-2">
+                {page.description}
+              </div>
+            )}
+            {page.name !== "Uncategorized" && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleDelete(page.id, page.name)
+                }}
+                className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--glass-text-muted)] hover:text-[var(--red)] p-1"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
+=== FILE: frontend\src\blocks\ReadingPathBlock.tsx ===
+
+import { useEffect, useState, useRef } from "react"
 import { api } from "../api/client"
 import type { StreamItem } from "../types"
 import { BookOpen, ChevronRight, Loader2 } from "lucide-react"
@@ -852,17 +1791,26 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
   const [steps, setSteps] = useState<ReadingStep[]>([])
   const [rawText, setRawText] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const fetchedRef = useRef(false)
+
+  const topic = item.metadata?.topic || "this topic"
+  const pageId = item.metadata?.pageId
 
   useEffect(() => {
+    if (fetchedRef.current) return
+    fetchedRef.current = true
+
     async function load() {
       try {
-        const topic = item.metadata?.topic || "this topic"
-        const pageId = item.metadata?.pageId
         const prompt = `Generate a suggested reading order for "${topic}". List the notes I should read first, second, third, etc. based on dependency relationships. For each step, explain why it should be read in that order.`
 
-        const resp = await api.chat(prompt, [], pageId ? "page" : "home", pageId)
+        const resp = await api.chat(
+          prompt,
+          [],
+          pageId ? "page" : "home",
+          pageId
+        )
 
-        // Try to parse structured response
         try {
           const parsed = JSON.parse(resp.answer)
           if (Array.isArray(parsed)) {
@@ -883,18 +1831,18 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
       }
     }
     load()
-  }, [item.metadata?.topic, item.metadata?.pageId])
+  }, [topic, pageId])
 
   if (loading) {
     return (
       <div className="glass-surface-1 p-6 rounded-2xl flex items-center gap-3">
         <Loader2 className="animate-spin text-[var(--accent)]" size={18} />
-        <span className="text-[13px] text-[var(--glass-text-dim)]">Computing reading path...</span>
+        <span className="text-[13px] text-[var(--glass-text-dim)]">
+          Computing reading path...
+        </span>
       </div>
     )
   }
-
-  const topic = item.metadata?.topic || "Current Context"
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
@@ -913,22 +1861,24 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
         <div className="flex flex-col gap-0.5">
           {steps.map((step, i) => (
             <div key={i} className="flex items-start gap-3 py-3 group">
-              {/* Step number */}
               <div className="w-7 h-7 rounded-full glass-surface-2 flex items-center justify-center shrink-0 text-[12px] font-bold text-[var(--accent)]">
                 {i + 1}
               </div>
-
-              {/* Content */}
               <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold text-white">{step.title}</div>
+                <div className="text-[13px] font-semibold text-white">
+                  {step.title}
+                </div>
                 {step.reason && (
-                  <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">{step.reason}</div>
+                  <div className="text-[11px] text-[var(--glass-text-muted)] mt-0.5">
+                    {step.reason}
+                  </div>
                 )}
               </div>
-
-              {/* Arrow to next */}
               {i < steps.length - 1 && (
-                <ChevronRight size={14} className="text-[var(--glass-text-muted)] mt-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <ChevronRight
+                  size={14}
+                  className="text-[var(--glass-text-muted)] mt-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                />
               )}
             </div>
           ))}
@@ -941,7 +1891,7 @@ export default function ReadingPathBlock({ item }: { item: StreamItem }) {
 
 === FILE: frontend\src\blocks\SearchResultsBlock.tsx ===
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { api } from "../api/client"
 import type { Note, StreamItem } from "../types"
 import { Search, Loader2 } from "lucide-react"
@@ -949,50 +1899,66 @@ import { Search, Loader2 } from "lucide-react"
 export default function SearchResultsBlock({ item }: { item: StreamItem }) {
   const [results, setResults] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
+  const fetchedRef = useRef(false)
+
+  const query = item.metadata?.query || ""
+  const pageId = item.metadata?.pageId
 
   useEffect(() => {
-    async function search() {
-      try {
-        const q = item.metadata?.query || ""
-        if (!q) return
-        const resp = await api.search(q, 10, item.metadata?.pageId)
-        setResults(resp.results || [])
-      } catch (err) {
-        console.error(err)
-      } finally {
-        setLoading(false)
-      }
+    if (fetchedRef.current || !query) {
+      setLoading(false)
+      return
     }
-    search()
-  }, [item])
+    fetchedRef.current = true
+
+    api.search(query, 10, pageId)
+      .then((resp) => setResults(resp.results || []))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [query, pageId])
 
   if (loading) {
-     return <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-[var(--glass-text-dim)]" /></div>
+    return (
+      <div className="p-8 flex justify-center">
+        <Loader2 className="animate-spin text-[var(--glass-text-dim)]" />
+      </div>
+    )
   }
 
   if (results.length === 0) {
-     return <div className="text-[12px] text-[var(--glass-text-dim)] p-4">No search results found.</div>
+    return (
+      <div className="text-[12px] text-[var(--glass-text-dim)] p-4">
+        No search results found for "{query}".
+      </div>
+    )
   }
 
   return (
     <div className="flex flex-col gap-3">
-       <div className="flex items-center gap-2 text-[var(--glass-text-dim)] mb-2">
-         <Search size={14} /> 
-         <span className="text-[12px] font-semibold uppercase tracking-widest">Search Results</span>
-       </div>
-       {results.map(r => (
-         <div key={r.id} className="glass-interactive p-4 rounded-xl border border-[var(--glass-border)]">
-            <div className="flex justify-between items-start mb-2">
-               <div className="font-semibold text-white text-[14px]">{r.title || "Untitled"}</div>
-               <div className="text-[10px] bg-[rgba(34,197,94,0.1)] text-[var(--green)] px-2 py-0.5 rounded font-bold">
-                  {Math.round((r.similarity || 0) * 100)}%
-               </div>
+      <div className="flex items-center gap-2 text-[var(--glass-text-dim)] mb-2">
+        <Search size={14} />
+        <span className="text-[12px] font-semibold uppercase tracking-widest">
+          Search Results for "{query}"
+        </span>
+      </div>
+      {results.map((r) => (
+        <div
+          key={r.id}
+          className="glass-interactive p-4 rounded-xl border border-[var(--glass-border)]"
+        >
+          <div className="flex justify-between items-start mb-2">
+            <div className="font-semibold text-white text-[14px]">
+              {r.title || "Untitled"}
             </div>
-            <div className="text-[12px] text-[var(--glass-text-dim)] line-clamp-2">
-               {r.summary || r.raw_text}
+            <div className="text-[10px] bg-[rgba(34,197,94,0.1)] text-[var(--green)] px-2 py-0.5 rounded font-bold">
+              {Math.round((r.similarity || 0) * 100)}%
             </div>
-         </div>
-       ))}
+          </div>
+          <div className="text-[12px] text-[var(--glass-text-dim)] line-clamp-2">
+            {r.summary || r.raw_text}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1764,19 +2730,29 @@ export default function CanvasOverlay() {
 
 === FILE: frontend\src\canvas\ExcalidrawCanvas.tsx ===
 
-import { useCallback, useEffect } from "react"
-import { Excalidraw, MainMenu, WelcomeScreen } from "@excalidraw/excalidraw"
-import type { ExcalidrawImperativeAPI, AppState, BinaryFiles } from "@excalidraw/excalidraw/types"
+import { useCallback, useEffect, useRef } from "react"
+import { Excalidraw, MainMenu } from "@excalidraw/excalidraw"
+import type {
+  ExcalidrawImperativeAPI,
+  AppState,
+  BinaryFiles,
+} from "@excalidraw/excalidraw/types"
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import { Loader2 } from "lucide-react"
 import { useExcalidraw } from "./useExcalidraw"
 import { useStream } from "../hooks/useStream"
-import { useAppContext } from "../hooks/useAppContext"
 import { createNoteCard, createSticky } from "./canvasAI"
 import "@excalidraw/excalidraw/index.css"
 
 interface Props {
   pageId: string
+}
+
+interface CanvasAddDetail {
+  type: "sticky" | "note"
+  content: string
+  x?: number
+  y?: number
 }
 
 export default function ExcalidrawCanvas({ pageId }: Props) {
@@ -1793,21 +2769,70 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   } = useExcalidraw(pageId)
 
   const { addSystemMessage } = useStream()
-  const { current } = useAppContext()
 
+  // Gate: don't save until user has actually interacted
+  const userHasInteracted = useRef(false)
+  const sceneApplied = useRef(false)
+
+  // Apply scene AFTER Excalidraw API is ready
   useEffect(() => {
-    console.log("[Canvas] State:", { loading, hasScene: !!initialScene, error, pageId })
-  }, [loading, initialScene, error, pageId])
+    if (!initialScene || !excalidrawRef.current || sceneApplied.current) return
 
+    const timer = setTimeout(() => {
+      const api = excalidrawRef.current
+      if (!api) return
+
+      api.updateScene({
+        elements: initialScene.elements,
+      })
+
+      if (initialScene.appState) {
+        const restore: Partial<AppState> = {}
+        if (initialScene.appState.scrollX !== undefined) {
+          restore.scrollX = initialScene.appState.scrollX as number
+        }
+        if (initialScene.appState.scrollY !== undefined) {
+          restore.scrollY = initialScene.appState.scrollY as number
+        }
+        if (initialScene.appState.zoom !== undefined) {
+          restore.zoom = initialScene.appState.zoom as any
+        }
+        if (initialScene.appState.viewBackgroundColor) {
+          restore.viewBackgroundColor = initialScene.appState.viewBackgroundColor as string
+        }
+        if (Object.keys(restore).length > 0) {
+          api.updateScene({ appState: restore })
+        }
+      }
+
+      sceneApplied.current = true
+
+      // Allow saves after scene settles
+      setTimeout(() => {
+        userHasInteracted.current = true
+      }, 2000)
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [initialScene, excalidrawRef])
+
+  // Reset on page change
+  useEffect(() => {
+    sceneApplied.current = false
+    userHasInteracted.current = false
+  }, [pageId])
+
+  // ── All canvas custom event listeners ──
   useEffect(() => {
     function onCanvasSearch(e: Event) {
       const query = (e as CustomEvent<string>).detail
       if (!query) return
-
       const matches = searchElements(query)
       if (matches.length > 0) {
         scrollToElement(matches[0].id)
-        addSystemMessage(`Found ${matches.length} match${matches.length > 1 ? "es" : ""} on canvas.`)
+        addSystemMessage(
+          `Found ${matches.length} match${matches.length > 1 ? "es" : ""} on canvas.`
+        )
       } else {
         addSystemMessage(`No matches for "${query}" on canvas.`)
       }
@@ -1816,16 +2841,15 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
     function onCanvasAdd(e: Event) {
       const detail = (e as CustomEvent<CanvasAddDetail>).detail
       if (!detail?.content) return
-
       const drawingApi = excalidrawRef.current
       if (!drawingApi) return
 
       const appState = drawingApi.getAppState()
-      const zoomValue = (appState.zoom && typeof appState.zoom === 'object' && 'value' in appState.zoom) 
-        ? (appState.zoom as any).value 
-        : appState.zoom || 1
-      const centerX = detail.x ?? (-appState.scrollX + window.innerWidth / 2) / zoomValue
-      const centerY = detail.y ?? (-appState.scrollY + window.innerHeight / 2) / zoomValue
+      const zoomValue = getZoomValue(appState)
+      const centerX =
+        detail.x ?? (-appState.scrollX + window.innerWidth / 2) / zoomValue
+      const centerY =
+        detail.y ?? (-appState.scrollY + window.innerHeight / 2) / zoomValue
 
       if (detail.type === "sticky") {
         addElements(createSticky(detail.content, centerX, centerY))
@@ -1847,32 +2871,118 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       addSystemMessage("Note card added to canvas.")
     }
 
+    // ── Background color change ──
+    function onSetBackground(e: Event) {
+      const color = (e as CustomEvent<string>).detail
+      if (!color || !excalidrawRef.current) return
+      excalidrawRef.current.updateScene({
+        appState: { viewBackgroundColor: color },
+      })
+    }
+
+    // ── Open Excalidraw library ──
+    function onOpenLibrary() {
+      // Try multiple strategies to open the library
+      const api = excalidrawRef.current
+      if (!api) return
+
+      // Strategy 1: Click the library button in Excalidraw toolbar
+      const libraryBtn =
+        document.querySelector<HTMLButtonElement>('[data-testid="toolbar-library"]') ||
+        document.querySelector<HTMLButtonElement>('.library-button') ||
+        document.querySelector<HTMLButtonElement>('[aria-label="Library"]') ||
+        document.querySelector<HTMLButtonElement>('.ToolIcon__library')
+
+      if (libraryBtn) {
+        libraryBtn.click()
+        return
+      }
+
+      // Strategy 2: Try the Excalidraw sidebar approach
+      // Some versions use openSidebar
+      try {
+        ;(api as any).toggleSidebar?.({ name: "library", force: true })
+      } catch {
+        // Strategy 3: Alert user to use the toolbar
+        addSystemMessage("Click the book icon 📚 in the Excalidraw toolbar to open the library.")
+      }
+    }
+
+    // ── Zoom ──
+    function onZoom(e: Event) {
+      const direction = (e as CustomEvent<string>).detail
+      const api = excalidrawRef.current
+      if (!api) return
+
+      const appState = api.getAppState()
+      const currentZoom = getZoomValue(appState)
+
+      let newZoom: number
+      if (direction === "in") {
+        newZoom = Math.min(5, currentZoom * 1.25)
+      } else if (direction === "out") {
+        newZoom = Math.max(0.1, currentZoom * 0.8)
+      } else {
+        // fit — scroll to all content
+        const elements = api.getSceneElements()
+        if (elements.length > 0) {
+          api.scrollToContent(elements[0], { fitToContent: true, animate: true })
+        }
+        return
+      }
+
+      api.updateScene({
+        appState: {
+          zoom: { value: newZoom } as any,
+        },
+      })
+    }
+
     window.addEventListener("canvas:search", onCanvasSearch)
     window.addEventListener("canvas:add", onCanvasAdd)
+    window.addEventListener("canvas:set-background", onSetBackground)
+    window.addEventListener("canvas:open-library", onOpenLibrary)
+    window.addEventListener("canvas:zoom", onZoom)
 
     return () => {
       window.removeEventListener("canvas:search", onCanvasSearch)
       window.removeEventListener("canvas:add", onCanvasAdd)
+      window.removeEventListener("canvas:set-background", onSetBackground)
+      window.removeEventListener("canvas:open-library", onOpenLibrary)
+      window.removeEventListener("canvas:zoom", onZoom)
     }
   }, [addElements, addSystemMessage, excalidrawRef, scrollToElement, searchElements])
 
   const handleChange = useCallback(
-    (elements: readonly OrderedExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
+    (
+      elements: readonly OrderedExcalidrawElement[],
+      appState: AppState,
+      files: BinaryFiles
+    ) => {
+      if (!userHasInteracted.current) return
       saveScene(elements, appState, files)
     },
     [saveScene]
   )
 
-  const handleExcalidrawAPI = useCallback((api: ExcalidrawImperativeAPI) => {
-    excalidrawRef.current = api
-  }, [])
+  const handleExcalidrawAPI = useCallback(
+    (api: ExcalidrawImperativeAPI) => {
+      excalidrawRef.current = api
+    },
+    [excalidrawRef]
+  )
 
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
+      <div
+        className="w-full h-full flex items-center justify-center"
+        style={{ background: "#0e0e1a" }}
+      >
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
-          <span className="text-[13px] text-[var(--glass-text-dim)]">Loading canvas...</span>
+          <span className="text-[13px] text-[var(--glass-text-dim)]">
+            Loading canvas...
+          </span>
         </div>
       </div>
     )
@@ -1880,7 +2990,10 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
 
   if (error && !initialScene) {
     return (
-      <div className="w-full h-full flex items-center justify-center" style={{ background: "#0e0e1a" }}>
+      <div
+        className="w-full h-full flex items-center justify-center"
+        style={{ background: "#0e0e1a" }}
+      >
         <div className="text-center">
           <p className="text-[var(--red)] mb-2">{error}</p>
           <button onClick={reload} className="text-[var(--accent)] underline text-sm">
@@ -1892,41 +3005,53 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   }
 
   return (
-    <div className="w-full h-full excalidraw-wrapper">
+    <div className="w-full h-full excalidraw-wrapper" data-excalidraw-host="true">
       <style>{`
         .excalidraw-wrapper {
           height: 100%;
           width: 100%;
           overflow: hidden;
+          position: relative;
         }
-        
         .excalidraw-wrapper .excalidraw {
           --color-primary: #6366f1;
           --color-primary-light: #818cf8;
           --color-brand: #6366f1;
           --color-brand-light: #818cf8;
         }
-        
-        .excalidraw-wrapper .excalidraw canvas {
-          background: #0e0e1a !important;
+        /* Move toasts above command bar */
+        .excalidraw .Toast {
+          bottom: 80px !important;
+        }
+        /* Excalidraw menus above our panels */
+        .excalidraw .popover,
+        .excalidraw .context-menu,
+        .excalidraw .dropdown-menu-container {
+          z-index: 100 !important;
+        }
+        /* Library and dialogs above everything */
+        .excalidraw .library-menu,
+        .excalidraw .Dialog,
+        .excalidraw .Dialog__overlay,
+        .excalidraw .layer-ui__library {
+          z-index: 50 !important;
+        }
+        /* Text editing above panels */
+        .excalidraw .excalidraw-textEditorContainer {
+          z-index: 45 !important;
         }
       `}</style>
 
       <Excalidraw
         excalidrawAPI={handleExcalidrawAPI}
-        initialData={
-          initialScene
-            ? {
-                elements: initialScene.elements,
-                appState: {
-                  ...initialScene.appState,
-                  viewBackgroundColor: "#0e0e1a",
-                  theme: "dark",
-                },
-                files: initialScene.files,
-              }
-            : undefined
-        }
+        initialData={{
+          elements: [],
+          appState: {
+            viewBackgroundColor: "#0e0e1a",
+            theme: "dark" as const,
+          },
+          files: undefined,
+        }}
         onChange={handleChange}
         theme="dark"
         langCode="en"
@@ -1946,18 +3071,26 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   )
 }
 
-interface CanvasAddDetail {
-  type: "sticky" | "note"
-  content: string
-  x?: number
-  y?: number
+function getZoomValue(appState: AppState): number {
+  if (
+    appState.zoom &&
+    typeof appState.zoom === "object" &&
+    "value" in appState.zoom
+  ) {
+    return (appState.zoom as any).value
+  }
+  return (appState.zoom as number) || 1
 }
 
 
 === FILE: frontend\src\canvas\useExcalidraw.ts ===
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { ExcalidrawImperativeAPI, AppState, BinaryFiles } from "@excalidraw/excalidraw/types"
+import type {
+  ExcalidrawImperativeAPI,
+  AppState,
+  BinaryFiles,
+} from "@excalidraw/excalidraw/types"
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types"
 import { api } from "../api/client"
 import { createNoteCard, createSticky } from "./canvasAI"
@@ -1983,20 +3116,25 @@ export function useExcalidraw(pageId: string | undefined) {
   const [initialScene, setInitialScene] = useState<CanvasScene | null>(null)
   const [error, setError] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isSaving = useRef(false)
+  const currentPageId = useRef<string | undefined>(undefined)
 
   const loadScene = useCallback(async () => {
     if (!pageId) {
-      console.warn("[useExcalidraw] No pageId provided")
+      setLoading(false)
       return
     }
 
     setLoading(true)
     setError(null)
+    currentPageId.current = pageId
 
     try {
-      console.log("[useExcalidraw] Loading canvas for page:", pageId)
       const pageData = await api.getPageCanvas(pageId)
-      console.log("[useExcalidraw] Received pageData:", pageData)
+
+      // Abort if pageId changed during fetch
+      if (currentPageId.current !== pageId) return
+
       const storedScene = pageData.page?.canvas_data || pageData.canvas_data
       const scene = normalizeScene(storedScene)
 
@@ -2029,7 +3167,12 @@ export function useExcalidraw(pageId: string | undefined) {
 
       const legacyElements = Array.isArray(pageData.elements) ? pageData.elements : []
       legacyElements.forEach((element: LegacyElement, index: number) => {
-        if (scene.elements.some((el) => readCustomData(el).legacyElementId === element.id)) return
+        if (
+          scene.elements.some(
+            (el) => readCustomData(el).legacyElementId === element.id
+          )
+        )
+          return
         if (element.element_type === "sticky" && element.content) {
           const sticky = createSticky(
             element.content,
@@ -2037,7 +3180,10 @@ export function useExcalidraw(pageId: string | undefined) {
             element.position_y ?? 120 + index * 40
           ).map((el) => ({
             ...el,
-            customData: { ...readCustomData(el), legacyElementId: element.id },
+            customData: {
+              ...readCustomData(el),
+              legacyElementId: element.id,
+            },
           }))
           newElements.push(...sticky)
         }
@@ -2047,60 +3193,74 @@ export function useExcalidraw(pageId: string | undefined) {
         scene.elements = [...scene.elements, ...newElements]
       }
 
-      console.log("[useExcalidraw] Final scene:", { elementCount: scene.elements.length, scene })
       setInitialScene(scene)
-      excalidrawRef.current?.updateScene({
-        elements: scene.elements,
-      })
     } catch (err) {
       console.error("Canvas load error:", err)
-      setError("Failed to load canvas")
-      setInitialScene(EMPTY_SCENE)
+      if (currentPageId.current === pageId) {
+        setError("Failed to load canvas")
+        setInitialScene({ ...EMPTY_SCENE })
+      }
     } finally {
-      console.log("[useExcalidraw] Load complete")
-      setLoading(false)
+      if (currentPageId.current === pageId) {
+        setLoading(false)
+      }
     }
   }, [pageId])
 
+  // Load on mount and pageId change
   useEffect(() => {
+    setInitialScene(null)
+    excalidrawRef.current = null
     loadScene()
 
     const onRefresh = () => loadScene()
     window.addEventListener("canvas:refresh", onRefresh)
-    return () => window.removeEventListener("canvas:refresh", onRefresh)
-  }, [loadScene])
-
-  useEffect(() => {
     return () => {
+      window.removeEventListener("canvas:refresh", onRefresh)
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
-  }, [])
+  }, [loadScene])
 
   const saveScene = useCallback(
-    (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
-      if (!pageId) return
+    (
+      elements: readonly ExcalidrawElement[],
+      appState: AppState,
+      files: BinaryFiles
+    ) => {
+      if (!pageId || isSaving.current) return
 
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
+        if (isSaving.current) return
+        isSaving.current = true
         try {
+          const serializedElements = elements.map((el) => {
+            const plain: Record<string, unknown> = {}
+            for (const key of Object.keys(el)) {
+              plain[key] = (el as any)[key]
+            }
+            return plain
+          })
+
           await api.updatePage(pageId, {
             canvas_data: {
-              elements: elements.map((element) => ({ ...element })),
+              elements: serializedElements,
               appState: {
                 viewBackgroundColor: appState.viewBackgroundColor,
                 theme: appState.theme,
                 zoom: appState.zoom,
                 scrollX: appState.scrollX,
                 scrollY: appState.scrollY,
-                gridSize: appState.gridSize,
               },
               files: files || {},
             },
           })
         } catch (err) {
           console.error("Canvas save failed:", err)
+        } finally {
+          isSaving.current = false
         }
-      }, 1500)
+      }, 2500)
     },
     [pageId]
   )
@@ -2130,12 +3290,16 @@ export function useExcalidraw(pageId: string | undefined) {
     if (!drawingApi) return []
 
     const lower = query.toLowerCase()
-
     return drawingApi.getSceneElements().filter((element) => {
       const customData = readCustomData(element)
-      if (element.type === "text" && element.text?.toLowerCase().includes(lower)) return true
+      if (
+        element.type === "text" &&
+        (element as any).text?.toLowerCase().includes(lower)
+      )
+        return true
       if (customData.title?.toLowerCase().includes(lower)) return true
-      if (customData.tags?.some((tag) => tag.toLowerCase().includes(lower))) return true
+      if (customData.tags?.some((tag: string) => tag.toLowerCase().includes(lower)))
+        return true
       return false
     })
   }, [])
@@ -2154,7 +3318,9 @@ export function useExcalidraw(pageId: string | undefined) {
 }
 
 function normalizeScene(value: unknown): CanvasScene {
-  if (!value || typeof value !== "object") return { ...EMPTY_SCENE }
+  if (!value || typeof value !== "object") {
+    return { elements: [], appState: { ...EMPTY_SCENE.appState }, files: {} }
+  }
 
   const scene = value as Partial<CanvasScene>
   return {
@@ -2162,18 +3328,19 @@ function normalizeScene(value: unknown): CanvasScene {
     appState: sanitizeAppState({
       ...EMPTY_SCENE.appState,
       ...(scene.appState || {}),
-      viewBackgroundColor: "#0e0e1a",
-      theme: "dark",
     }),
-    files: scene.files || {},
+    files: scene.files && typeof scene.files === "object" ? scene.files : {},
   }
 }
 
 function sanitizeAppState(appState: CanvasScene["appState"]): CanvasScene["appState"] {
   const next = { ...appState }
-  if (next.gridSize === null) {
+  if (next.gridSize === null || next.gridSize === undefined) {
     delete next.gridSize
   }
+  // Always force dark
+  next.viewBackgroundColor = next.viewBackgroundColor || "#0e0e1a"
+  next.theme = "dark"
   return next
 }
 
@@ -2181,17 +3348,13 @@ function getGridPosition(index: number, note: NoteLike): { x: number; y: number 
   if (typeof note.canvas_x === "number" && typeof note.canvas_y === "number") {
     return { x: note.canvas_x, y: note.canvas_y }
   }
-
   const col = index % 3
   const row = Math.floor(index / 3)
-  return {
-    x: 100 + col * 420,
-    y: 100 + row * 350,
-  }
+  return { x: 100 + col * 420, y: 100 + row * 350 }
 }
 
 function readCustomData(element: ExcalidrawElement): CustomData {
-  return ((element as ExcalidrawElement & { customData?: CustomData }).customData || {}) as CustomData
+  return ((element as any).customData || {}) as CustomData
 }
 
 interface CustomData {
@@ -2233,19 +3396,25 @@ import { motion, AnimatePresence } from "framer-motion"
 export default function CommandBar() {
   const inputRef = useRef<HTMLInputElement>(null)
   useKeyboard(inputRef)
-  const { inputValue, handleInput, suggestions, selectedIndex, setSelectedIndex, handleSubmit } = useCommands()
+  const {
+    inputValue,
+    handleInput,
+    suggestions,
+    selectedIndex,
+    setSelectedIndex,
+    handleSubmit,
+  } = useCommands()
   const { current } = useAppContext()
 
   const placeholder =
     current.type === "page"
       ? `Ask about ${current.pageName || "this page"}, /command…`
       : current.type === "settings"
-      ? "Adjust a setting…"
-      : "Ask anything or type / for commands…"
+        ? "Adjust a setting…"
+        : "Ask anything or type / for commands…"
 
   return (
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 w-[560px] max-w-[calc(100vw-40px)]">
-
       {/* ── Scrollable autocomplete ── */}
       <AnimatePresence>
         {suggestions.length > 0 && (
@@ -2256,12 +3425,14 @@ export default function CommandBar() {
             transition={{ duration: 0.12 }}
             className="glass-solid rounded-2xl mb-2 overflow-hidden relative"
           >
-            {/* MAX HEIGHT + SCROLL */}
             <div className="max-h-[280px] overflow-y-auto overscroll-contain py-1">
               {suggestions.map((cmd, i) => (
                 <div
                   key={cmd.name}
-                  onClick={() => { handleInput(cmd.name + " "); inputRef.current?.focus() }}
+                  onClick={() => {
+                    handleInput(cmd.name + " ")
+                    inputRef.current?.focus()
+                  }}
                   onMouseEnter={() => setSelectedIndex(i)}
                   className={`px-4 py-2 mx-1 rounded-lg flex items-center justify-between cursor-pointer transition-colors relative z-10 ${
                     i === selectedIndex
@@ -2290,18 +3461,38 @@ export default function CommandBar() {
       </AnimatePresence>
 
       {/* ── Input Pill ── */}
-      <form onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          handleSubmit()
+        }}
+      >
         <div className="glass cmd-glow rounded-2xl flex items-center px-4 py-3 gap-3 relative transition-all focus-within:border-[rgba(99,102,241,0.25)]">
-          <Search size={15} className="text-[var(--glass-text-muted)] shrink-0 relative z-10" />
+          <Search
+            size={15}
+            className="text-[var(--glass-text-muted)] shrink-0 relative z-10"
+          />
           <input
             ref={inputRef}
             value={inputValue}
             onChange={(e) => handleInput(e.target.value)}
+            onFocus={() => {
+              // When command bar is focused, we're intentionally leaving canvas
+            }}
             onKeyDown={(e) => {
               if (suggestions.length > 0) {
-                if (e.key === "ArrowUp") { e.preventDefault(); setSelectedIndex((s: number) => Math.max(0, s - 1)) }
-                else if (e.key === "ArrowDown") { e.preventDefault(); setSelectedIndex((s: number) => Math.min(suggestions.length - 1, s + 1)) }
-                else if (e.key === "Tab") { e.preventDefault(); handleInput(suggestions[selectedIndex].name + " ") }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault()
+                  setSelectedIndex((s: number) => Math.max(0, s - 1))
+                } else if (e.key === "ArrowDown") {
+                  e.preventDefault()
+                  setSelectedIndex((s: number) =>
+                    Math.min(suggestions.length - 1, s + 1)
+                  )
+                } else if (e.key === "Tab") {
+                  e.preventDefault()
+                  handleInput(suggestions[selectedIndex].name + " ")
+                }
               }
             }}
             placeholder={placeholder}
@@ -2347,12 +3538,19 @@ export function ContextProvider({ children }: { children: ReactNode }) {
 
 === FILE: frontend\src\core\Stream.tsx ===
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useStream } from "../hooks/useStream"
 import { useAppContext } from "../hooks/useAppContext"
 import StreamMessage from "./StreamMessage"
 import StreamBlock from "./StreamBlock"
-import { Loader2, GripHorizontal, Minimize2, Maximize2, MessageCircle } from "lucide-react"
+import {
+  Loader2,
+  Minimize2,
+  Maximize2,
+  MessageCircle,
+  BookOpen,
+  X,
+} from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 
 export default function Stream() {
@@ -2364,50 +3562,19 @@ export default function Stream() {
   const [collapsed, setCollapsed] = useState(false)
   const [maximized, setMaximized] = useState(false)
 
-  // ─── Truly draggable position ───
-  const [pos, setPos] = useState({ x: 0, y: 0 })
-  const dragging = useRef(false)
-  const dragOffset = useRef({ x: 0, y: 0 })
-
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [items.length, isLoading])
 
-  // Reset on page switch
+  // Reset on context change
   useEffect(() => {
-    if (isCanvas) {
-      setCollapsed(false)
-      setMaximized(false)
-      setPos({ x: 0, y: 0 })
-    }
-  }, [isCanvas, current.pageId])
+    setCollapsed(false)
+    setMaximized(false)
+  }, [current.type, current.pageId])
 
-  // Global drag listeners
-  useEffect(() => {
-    function onMove(e: MouseEvent) {
-      if (!dragging.current) return
-      setPos({
-        x: e.clientX - dragOffset.current.x,
-        y: e.clientY - dragOffset.current.y,
-      })
-    }
-    function onUp() { dragging.current = false }
-    window.addEventListener("mousemove", onMove)
-    window.addEventListener("mouseup", onUp)
-    return () => {
-      window.removeEventListener("mousemove", onMove)
-      window.removeEventListener("mouseup", onUp)
-    }
-  }, [])
-
-  const startDrag = useCallback((e: React.MouseEvent) => {
-    dragging.current = true
-    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
-  }, [pos])
-
-  // ═══════════════════════════
-  //  HOME CONTEXT — full stream
-  // ═══════════════════════════
+  // ═══════════════════════════════════
+  //  HOME / SETTINGS / HISTORY — full page stream
+  // ═══════════════════════════════════
   if (!isCanvas) {
     return (
       <div className="absolute inset-0 z-20 overflow-y-auto px-4 pt-10 pb-24">
@@ -2439,91 +3606,111 @@ export default function Stream() {
     )
   }
 
-  // ═══════════════════════════
-  //  PAGE CONTEXT — collapsed bubble
-  // ═══════════════════════════
+  // ═══════════════════════════════════
+  //  PAGE CONTEXT — collapsed: show reopen FAB
+  // ═══════════════════════════════════
   if (collapsed) {
     return (
-      <motion.button
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.8, opacity: 0 }}
+      <button
         onClick={() => setCollapsed(false)}
-        className="fixed bottom-20 right-6 z-20 glass rounded-full w-12 h-12 flex items-center justify-center glass-hover"
-        style={{ left: pos.x || "auto", top: pos.y || "auto", right: pos.x ? "auto" : 24, bottom: pos.y ? "auto" : 80 }}
+        className="fixed z-[60] flex items-center justify-center w-14 h-14 rounded-full shadow-2xl glass-solid"
+        style={{
+          bottom: 80,
+          right: 20,
+          boxShadow: "0 4px 24px rgba(99,102,241,0.4), 0 0 0 2px rgba(99,102,241,0.2)",
+        }}
       >
-        <MessageCircle size={18} className="text-[var(--accent-light)]" />
-        {items.length > 1 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-[var(--accent)] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-            {items.filter(i => i.type === "assistant").length}
+        <MessageCircle size={20} className="text-[var(--accent-light)]" />
+        {items.filter((i) => i.type === "assistant").length > 0 && (
+          <span
+            className="absolute -top-1 -right-1 w-5 h-5 bg-[var(--accent)] text-white text-[10px] font-bold rounded-full flex items-center justify-center"
+          >
+            {items.filter((i) => i.type === "assistant").length}
           </span>
         )}
-      </motion.button>
+      </button>
     )
   }
 
-  // ═══════════════════════════
-  //  PAGE CONTEXT — floating panel
-  // ═══════════════════════════
-  const panelStyle = maximized
-    ? { top: 16, left: 16, right: 16, bottom: 80, width: "auto" as const }
-    : { top: pos.y || 16, left: pos.x || "auto", right: pos.x ? "auto" : 16, width: 370, maxHeight: "calc(100vh - 120px)" }
+  // ═══════════════════════════════════
+  //  PAGE CONTEXT — floating chat panel
+  //  Wrapper is pointer-events:none so canvas stays interactive
+  // ═══════════════════════════════════
+  const panelPositionStyle = maximized
+    ? { top: 12, left: 12, right: 12, bottom: 76 }
+    : { top: 12, right: 12, width: 380, maxHeight: "calc(100vh - 100px)" }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.92, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.92 }}
-      transition={{ type: "spring", damping: 24, stiffness: 280 }}
-      className="fixed z-20 glass-solid rounded-2xl flex flex-col overflow-hidden"
-      style={panelStyle}
-    >
-      {/* ─── Header / Drag Handle ─── */}
-      <div
-        className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--glass-border)] draggable shrink-0 relative z-10"
-        onMouseDown={maximized ? undefined : startDrag}
+    <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 35 }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: "spring", damping: 24, stiffness: 280 }}
+        className="pointer-events-auto glass-solid rounded-2xl flex flex-col overflow-hidden absolute"
+        style={panelPositionStyle}
       >
-        <div className="flex items-center gap-2">
-          <GripHorizontal size={13} className="text-[var(--glass-text-muted)]" />
+        {/* ─── Header ─── */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--glass-border)] shrink-0">
           <span className="text-[11px] font-semibold tracking-wider uppercase text-[var(--glass-text-dim)]">
-            {current.pageName || "Chat"}
+            💬 {current.pageName || "Chat"}
           </span>
+          <div className="flex items-center gap-1">
+            {/* Library button */}
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("canvas:open-library"))
+              }}
+              className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.08)] text-[var(--glass-text-muted)] hover:text-[var(--accent-light)] transition-colors"
+              title="Open Excalidraw Library"
+            >
+              <BookOpen size={13} />
+            </button>
+            {/* Maximize / Restore */}
+            <button
+              onClick={() => setMaximized(!maximized)}
+              className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.08)] text-[var(--glass-text-muted)] hover:text-white transition-colors"
+              title={maximized ? "Restore" : "Maximize"}
+            >
+              {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            </button>
+            {/* Collapse */}
+            <button
+              onClick={() => setCollapsed(true)}
+              className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.08)] text-[var(--glass-text-muted)] hover:text-white transition-colors"
+              title="Minimize to bubble"
+            >
+              <X size={13} />
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => setMaximized(!maximized)}
-            className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.06)] text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] transition-colors"
-          >
-            {maximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-          </button>
-          <button
-            onClick={() => setCollapsed(true)}
-            className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.06)] text-[var(--glass-text-muted)] hover:text-[var(--glass-text)] transition-colors"
-          >
-            <Minimize2 size={12} />
-          </button>
-        </div>
-      </div>
 
-      {/* ─── Messages ─── */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 min-h-0">
-        <div className="flex flex-col gap-3">
-          {items.map((item) => (
-            <div key={item.id}>
-              {item.type === "system" ? (
-                <div className="text-[10px] text-[var(--glass-text-muted)] text-center py-1 font-mono">
-                  {item.content}
-                </div>
-              ) : item.type === "block" ? null : (
-                <StreamMessage item={item} />
-              )}
-            </div>
-          ))}
-          {isLoading && <LoadingDots />}
-          <div ref={endRef} />
+        {/* ─── Messages ─── */}
+        <div className="flex-1 overflow-y-auto px-3 py-3 min-h-0">
+          <div className="flex flex-col gap-3">
+            {items.length === 0 && (
+              <div className="text-center text-[11px] text-[var(--glass-text-muted)] py-6">
+                Ask anything about this page, or type <span className="font-mono text-[var(--accent)]">/help</span>
+              </div>
+            )}
+            {items.map((item) => (
+              <div key={item.id}>
+                {item.type === "system" ? (
+                  <div className="text-[10px] text-[var(--glass-text-muted)] text-center py-1 font-mono">
+                    {item.content}
+                  </div>
+                ) : item.type === "block" ? (
+                  <StreamBlock item={item} />
+                ) : (
+                  <StreamMessage item={item} />
+                )}
+              </div>
+            ))}
+            {isLoading && <LoadingDots />}
+            <div ref={endRef} />
+          </div>
         </div>
-      </div>
-    </motion.div>
+      </motion.div>
+    </div>
   )
 }
 
@@ -2597,9 +3784,13 @@ import { api } from "../api/client"
 
 function renderBold(text: string) {
   return text.split(/(\*\*.*?\*\*)/g).map((part, i) =>
-    part.startsWith("**") && part.endsWith("**")
-      ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
-      : <span key={i}>{part}</span>
+    part.startsWith("**") && part.endsWith("**") ? (
+      <strong key={i} className="font-semibold text-white">
+        {part.slice(2, -2)}
+      </strong>
+    ) : (
+      <span key={i}>{part}</span>
+    )
   )
 }
 
@@ -2612,56 +3803,77 @@ export default function StreamMessage({ item }: { item: StreamItem }) {
     addUserMessage(q)
     setLoading(true)
     try {
-      const h = items.filter(i => i.type === "user" || i.type === "assistant").slice(-10).map(i => ({ role: i.type as string, content: i.content || "" }))
+      const h = items
+        .filter((i) => i.type === "user" || i.type === "assistant")
+        .slice(-10)
+        .map((i) => ({ role: i.type as string, content: i.content || "" }))
       const r = await api.chat(q, h, current.type, current.pageId)
       addAssistantMessage(r.answer || "No response.", r.sources, r.follow_ups)
-    } catch { addAssistantMessage("Connection error.") }
-    finally { setLoading(false) }
+    } catch {
+      addAssistantMessage("Connection error.")
+    } finally {
+      setLoading(false)
+    }
   }
 
-  // ── User message ──
   if (isUser) {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] bg-[var(--accent)] text-white px-4 py-2.5 rounded-[18px] rounded-br-[4px] text-[13.5px] leading-relaxed shadow-lg" style={{ boxShadow: "0 4px 20px rgba(99,102,241,0.3)" }}>
+        <div
+          className="max-w-[80%] bg-[var(--accent)] text-white px-4 py-2.5 rounded-[18px] rounded-br-[4px] text-[13.5px] leading-relaxed shadow-lg"
+          style={{ boxShadow: "0 4px 20px rgba(99,102,241,0.3)" }}
+        >
           {item.content}
         </div>
       </div>
     )
   }
 
-  // ── Assistant message ──
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5">
-        <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[var(--accent)] to-[var(--purple)] flex items-center justify-center shadow-md" style={{ boxShadow: "0 2px 10px rgba(99,102,241,0.3)" }}>
+        <div
+          className="w-5 h-5 rounded-full bg-gradient-to-br from-[var(--accent)] to-[var(--purple)] flex items-center justify-center shadow-md"
+          style={{ boxShadow: "0 2px 10px rgba(99,102,241,0.3)" }}
+        >
           <Sparkles size={9} className="text-white" />
         </div>
-        <span className="text-[9px] uppercase font-bold tracking-[0.15em] text-[var(--glass-text-muted)]">Mnemos</span>
+        <span className="text-[9px] uppercase font-bold tracking-[0.15em] text-[var(--glass-text-muted)]">
+          Mnemos
+        </span>
       </div>
 
-      <div className="text-[13.5px] text-[var(--glass-text)] leading-[1.75] whitespace-pre-wrap pl-6.5">
+      <div className="text-[13.5px] text-[var(--glass-text)] leading-[1.75] whitespace-pre-wrap pl-[26px]">
         {renderBold(item.content || "")}
       </div>
 
-      {/* Sources */}
       {item.sources && item.sources.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pl-6.5 mt-1">
-          {item.sources.map(s => (
-            <div key={s.id} className="glass rounded-full px-2 py-0.5 flex items-center gap-1 text-[10px] glass-hover cursor-pointer relative">
+        <div className="flex flex-wrap gap-1.5 pl-[26px] mt-1">
+          {item.sources.map((s) => (
+            <div
+              key={s.id}
+              className="glass rounded-full px-2 py-0.5 flex items-center gap-1 text-[10px] glass-hover cursor-pointer relative"
+            >
               <FileText size={9} className="text-[var(--glass-text-dim)]" />
-              <span className="text-[var(--glass-text)] max-w-[100px] truncate">{s.title}</span>
-              <span className="text-[var(--green)] font-bold">{Math.round(s.similarity * 100)}%</span>
+              <span className="text-[var(--glass-text)] max-w-[100px] truncate">
+                {s.title}
+              </span>
+              <span className="text-[var(--green)] font-bold">
+                {Math.round(s.similarity * 100)}%
+              </span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Follow-ups */}
       {item.followUps && item.followUps.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pl-6.5 mt-1.5">
+        <div className="flex flex-wrap gap-1.5 pl-[26px] mt-1.5">
           {item.followUps.map((q, i) => (
-            <button key={i} onClick={() => followUp(q)} className="text-[11px] text-[var(--accent-light)] border border-[rgba(99,102,241,0.15)] rounded-full px-3 py-1 hover:bg-[rgba(99,102,241,0.06)] transition-colors">
+            <button
+              key={i}
+              onClick={() => followUp(q)}
+              className="text-[11px] text-[var(--accent-light)] border border-[rgba(99,102,241,0.15)] rounded-full px-3 py-1 hover:bg-[rgba(99,102,241,0.06)] transition-colors"
+            >
               {q}
             </button>
           ))}
@@ -3018,6 +4230,8 @@ const COMMANDS: Command[] = [
   { name: "/reading", aliases: ["/path"], description: "Suggested reading order", context: ["home", "page"], args: "[topic]", handler: "reading" },
   { name: "/export", aliases: [], description: "Export page as markdown", context: ["page"], handler: "export" },
   { name: "/rename", aliases: [], description: "Rename current page", context: ["page"], args: "<new name>", handler: "rename" },
+  { name: "/bg", aliases: ["/background"], description: "Change canvas background color", context: ["page"], args: "<color>", handler: "bg" },
+  { name: "/library", aliases: ["/lib"], description: "Open Excalidraw library", context: ["page"], handler: "library" },
   { name: "/close", aliases: [], description: "Close page, return to home", context: ["page", "settings", "history"], handler: "close" },
   { name: "/settings", aliases: [], description: "Open settings", context: ["home", "page", "settings", "history"], handler: "settings" },
   { name: "/history", aliases: ["/h"], description: "View past conversations", context: ["home", "page", "settings", "history"], handler: "history" },
@@ -3026,6 +4240,36 @@ const COMMANDS: Command[] = [
   { name: "/clear", aliases: ["/c"], description: "Clear conversation stream", context: ["home", "page", "settings", "history"], handler: "clear" },
   { name: "/help", aliases: ["/?"], description: "Show all commands", context: ["home", "page", "settings", "history"], handler: "help" },
 ]
+
+// ── Color name → hex map ──
+const COLOR_MAP: Record<string, string> = {
+  black: "#000000",
+  dark: "#0e0e1a",
+  void: "#08080f",
+  white: "#ffffff",
+  red: "#ef4444",
+  blue: "#3b82f6",
+  green: "#22c55e",
+  purple: "#a855f7",
+  indigo: "#6366f1",
+  gray: "#374151",
+  grey: "#374151",
+  navy: "#1e293b",
+  slate: "#1e293b",
+  charcoal: "#1a1a2e",
+  midnight: "#0f0f23",
+  default: "#0e0e1a",
+}
+
+function resolveColor(input: string): string | null {
+  const lower = input.toLowerCase().trim()
+  if (COLOR_MAP[lower]) return COLOR_MAP[lower]
+  // Check if it's a hex color
+  if (/^#[0-9a-fA-F]{3,8}$/.test(lower)) return lower
+  // Check rgb(...)
+  if (/^rgb/.test(lower)) return lower
+  return null
+}
 
 export function useCommands() {
   const [inputValue, setInputValue] = useState("")
@@ -3088,7 +4332,7 @@ export function useCommands() {
           const match = pages.find((page: { name: string }) => page.name.toLowerCase() === args.toLowerCase())
           if (match) {
             switchTo("page", match.id, match.name)
-            addSystemMessage(`Opened page: ${match.icon || "Page"} ${match.name}`)
+            addSystemMessage(`Opened page: ${match.icon || "📄"} ${match.name}`)
           } else {
             addAssistantMessage(`Page "${args}" not found. Available pages:\n${pages.map((page: { icon: string; name: string }) => `- ${page.icon} ${page.name}`).join("\n")}`)
           }
@@ -3187,7 +4431,7 @@ export function useCommands() {
             capture_type: "manual",
             page_hint: pageHint,
           })
-          addSystemMessage(`Note captured${resp.page_name ? ` -> ${resp.page_name}` : ""}. Processing in background.`)
+          addSystemMessage(`Note captured${resp.page_name ? ` → ${resp.page_name}` : ""}. Processing in background.`)
         } catch {
           addAssistantMessage("Failed to capture note.")
         } finally {
@@ -3221,15 +4465,39 @@ export function useCommands() {
           addAssistantMessage("Usage: `/add <text>` or `/add sticky: <text>`")
           return
         }
-
         const lower = args.toLowerCase()
         const isPrefixed = lower.startsWith("sticky:") || lower.startsWith("note:")
         const type = lower.startsWith("sticky:") ? "sticky" : "note"
         const content = isPrefixed ? args.split(":").slice(1).join(":").trim() : args
+        window.dispatchEvent(new CustomEvent("canvas:add", { detail: { type, content } }))
+        break
+      }
 
-        window.dispatchEvent(new CustomEvent("canvas:add", {
-          detail: { type, content },
-        }))
+      // ── NEW: Background color ──
+      case "bg": {
+        if (!args) {
+          addAssistantMessage(
+            "Usage: `/bg <color>`\nExamples: `/bg black`, `/bg #1a1a2e`, `/bg white`\n\n" +
+            "Available colors: " + Object.keys(COLOR_MAP).join(", ")
+          )
+          return
+        }
+        const color = resolveColor(args)
+        if (!color) {
+          addAssistantMessage(
+            `Unknown color "${args}". Try: ${Object.keys(COLOR_MAP).join(", ")} or a hex code like #1a1a2e`
+          )
+          return
+        }
+        window.dispatchEvent(new CustomEvent("canvas:set-background", { detail: color }))
+        addSystemMessage(`Canvas background changed to ${args} (${color})`)
+        break
+      }
+
+      // ── NEW: Library ──
+      case "library": {
+        window.dispatchEvent(new CustomEvent("canvas:open-library"))
+        addSystemMessage("Opening Excalidraw library...")
         break
       }
 
@@ -3302,21 +4570,136 @@ export function useCommands() {
     }
   }
 
+  // ── Enhanced natural language detection ──
   function detectNaturalLanguageCommand(text: string): boolean {
     const lower = text.toLowerCase().trim()
-    const openMatch = lower.match(/^open\s+(.+)$/)
 
+    // "open <page>"
+    const openMatch = lower.match(/^open\s+(.+)$/)
     if (openMatch) {
       executeCommand(`/open ${openMatch[1]}`)
       return true
     }
 
-    if (lower === "close" || lower === "go home") {
+    // Navigation
+    if (lower === "close" || lower === "go home" || lower === "go to home") {
       executeCommand("/home")
       return true
     }
-    if (lower === "go back") {
+    if (lower === "go back" || lower === "back") {
       executeCommand("/back")
+      return true
+    }
+
+    // ── Canvas commands (only when on a page) ──
+    if (current.type === "page") {
+      // Background color changes
+      const bgMatch = lower.match(
+        /(?:change|set|make)\s+(?:the\s+)?(?:canvas\s+)?background\s+(?:color\s+)?(?:to\s+)?(.+)/
+      )
+      if (bgMatch) {
+        executeCommand(`/bg ${bgMatch[1].trim()}`)
+        return true
+      }
+      // "black background" / "dark background" / "white background"
+      const bgShort = lower.match(/^(black|dark|white|default|midnight|navy|charcoal)\s+background$/)
+      if (bgShort) {
+        executeCommand(`/bg ${bgShort[1]}`)
+        return true
+      }
+
+      // Library
+      if (
+        lower === "open library" ||
+        lower === "show library" ||
+        lower === "library"
+      ) {
+        executeCommand("/library")
+        return true
+      }
+
+      // Add sticky
+      const stickyMatch = lower.match(/^add\s+(?:a\s+)?sticky\s+(?:note\s+)?(?:saying\s+|with\s+)?(.+)/i)
+      if (stickyMatch) {
+        executeCommand(`/add sticky: ${stickyMatch[1]}`)
+        return true
+      }
+
+      // Find on canvas
+      const findMatch = lower.match(/^find\s+(.+?)(?:\s+on\s+canvas)?$/)
+      if (findMatch) {
+        executeCommand(`/find ${findMatch[1]}`)
+        return true
+      }
+
+      // Layout / reorganize
+      if (
+        lower === "reorganize" ||
+        lower === "reorganize canvas" ||
+        lower === "auto layout" ||
+        lower === "layout"
+      ) {
+        executeCommand("/layout")
+        return true
+      }
+
+      // Summarize
+      if (
+        lower === "summarize" ||
+        lower === "summarize this page" ||
+        lower === "summarize page" ||
+        lower.startsWith("what's on this page") ||
+        lower.startsWith("whats on this page")
+      ) {
+        executeCommand("/summarize")
+        return true
+      }
+
+      // Zoom (dispatch to Excalidraw)
+      if (lower === "zoom in") {
+        window.dispatchEvent(new CustomEvent("canvas:zoom", { detail: "in" }))
+        addSystemMessage("Zoomed in.")
+        return true
+      }
+      if (lower === "zoom out") {
+        window.dispatchEvent(new CustomEvent("canvas:zoom", { detail: "out" }))
+        addSystemMessage("Zoomed out.")
+        return true
+      }
+      if (lower === "zoom to fit" || lower === "fit to screen") {
+        window.dispatchEvent(new CustomEvent("canvas:zoom", { detail: "fit" }))
+        addSystemMessage("Zoomed to fit.")
+        return true
+      }
+    }
+
+    // Home context NLP
+    if (lower === "show notes" || lower === "list notes" || lower === "my notes") {
+      executeCommand("/notes")
+      return true
+    }
+    if (lower === "show tags" || lower === "list tags" || lower === "my tags") {
+      executeCommand("/tags")
+      return true
+    }
+    if (lower === "show tasks" || lower === "list tasks" || lower === "my tasks") {
+      executeCommand("/tasks")
+      return true
+    }
+    if (lower === "show stats" || lower === "statistics" || lower === "stats") {
+      executeCommand("/stats")
+      return true
+    }
+    if (lower === "show pages" || lower === "list pages" || lower === "my pages") {
+      executeCommand("/pages")
+      return true
+    }
+    if (lower === "help" || lower === "commands" || lower === "what can you do") {
+      executeCommand("/help")
+      return true
+    }
+    if (lower === "settings" || lower === "preferences") {
+      executeCommand("/settings")
       return true
     }
 
@@ -3386,26 +4769,38 @@ export function useKeyboard(inputRef: React.RefObject<HTMLInputElement | null>) 
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // ── Never intercept keys when inside Excalidraw ──
+      const target = e.target as HTMLElement
+      if (target) {
+        // Check if we're inside excalidraw
+        const inExcalidraw =
+          target.closest(".excalidraw") ||
+          target.closest("[data-excalidraw-host]")
+        // Allow all keys inside excalidraw EXCEPT our global shortcuts
+        if (inExcalidraw) {
+          // Only handle Cmd+K inside excalidraw
+          if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+            e.preventDefault()
+            inputRef.current?.focus()
+          }
+          // Escape from excalidraw → don't go back, let excalidraw handle it
+          return
+        }
+      }
+
       // ⌘K / Ctrl+K to focus command bar
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
         e.preventDefault()
         inputRef.current?.focus()
-      }
-
-      // Ctrl+F in page context → focus canvas search instead of browser search
-      if ((e.ctrlKey || e.metaKey) && e.key === "f" && current.type === "page") {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent("canvas:focus-search"))
+        return
       }
 
       // Escape — layered behavior
       if (e.key === "Escape") {
-        // If input is focused, blur it first
         if (document.activeElement === inputRef.current) {
           inputRef.current?.blur()
           return
         }
-        // If in a non-home context, go back
         if (current.type !== "home") {
           goBack()
         }
@@ -3509,601 +4904,6 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
 export function useStream() {
   return useStreamStore()
-}
-
-
-=== FILE: frontend\src\App.tsx ===
-
-import { ContextProvider } from "./core/ContextProvider"
-import Stream from "./core/Stream"
-import CommandBar from "./core/CommandBar"
-import CanvasOverlay from "./canvas/CanvasOverlay"
-
-export default function App() {
-  return (
-    <ContextProvider>
-      <div className="w-full h-full relative overflow-hidden bg-[var(--color-void)]">
-        {/* z-0: Canvas (full screen when page open) */}
-        <CanvasOverlay />
-
-        {/* z-20: Stream (centered home / floating overlay on canvas) */}
-        <Stream />
-
-        {/* z-40: Command bar (always bottom center) */}
-        <CommandBar />
-      </div>
-    </ContextProvider>
-  )
-}
-
-
-=== FILE: frontend\src\index.css ===
-
-@import "tailwindcss";
-
-@theme {
-  /* ─── Void ─── */
-  --color-void: #08080f;
-  --color-void-light: #0e0e1a;
-
-  /* ─── Content (readable) ─── */
-  --color-card: #ffffff;
-  --color-card-hover: #fafafa;
-  --color-card-text: #111827;
-  --color-card-muted: #6b7280;
-  --color-card-faint: #d1d5db;
-
-  /* ─── Glass ─── */
-  --glass-bg: rgba(14, 14, 26, 0.55);
-  --glass-bg-thick: rgba(10, 10, 20, 0.75);
-  --glass-border: rgba(255, 255, 255, 0.07);
-  --glass-border-hover: rgba(255, 255, 255, 0.14);
-  --glass-shine: rgba(255, 255, 255, 0.04);
-  --glass-text: rgba(255, 255, 255, 0.88);
-  --glass-text-dim: rgba(255, 255, 255, 0.50);
-  --glass-text-muted: rgba(255, 255, 255, 0.22);
-
-  /* ─── Accent ─── */
-  --accent: #6366f1;
-  --accent-light: #818cf8;
-  --accent-glow: rgba(99, 102, 241, 0.12);
-  --accent-glow-strong: rgba(99, 102, 241, 0.25);
-  --purple: #a855f7;
-  --cyan: #06b6d4;
-  --green: #22c55e;
-  --amber: #f59e0b;
-  --red: #ef4444;
-
-  /* ─── Fonts ─── */
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-hand: "Caveat", cursive;
-}
-
-@layer base {
-  html, body, #root {
-    height: 100%;
-    margin: 0;
-    overflow: hidden;
-  }
-
-  body {
-    background: var(--color-void);
-    color: var(--glass-text);
-    font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
-  }
-
-  /* ─── Noise Texture ─── */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    opacity: 0.02;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-
-  ::selection {
-    background: rgba(99, 102, 241, 0.35);
-    color: white;
-  }
-
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.07);
-    border-radius: 4px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255,255,255,0.14);
-  }
-}
-
-@layer utilities {
-
-  /* ═══════════════════════════════════════
-     HYPER LIQUID GLASS
-     Multiple layered effects for depth
-     ═══════════════════════════════════════ */
-
-  .glass {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  .glass::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(
-      135deg,
-      rgba(255,255,255,0.06) 0%,
-      transparent 40%,
-      transparent 60%,
-      rgba(255,255,255,0.02) 100%
-    );
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  .glass-solid {
-    background: var(--glass-bg-thick);
-    backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
-    -webkit-backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
-    border: 1px solid rgba(255,255,255,0.09);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.05) inset,
-      0 1px 0 rgba(255,255,255,0.04) inset,
-      0 16px 64px rgba(0, 0, 0, 0.6),
-      0 4px 12px rgba(0, 0, 0, 0.4);
-  }
-
-  .glass-solid::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(
-      135deg,
-      rgba(255,255,255,0.08) 0%,
-      transparent 50%,
-      rgba(255,255,255,0.02) 100%
-    );
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  /* Glass hover with glow */
-  .glass-hover {
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-  }
-  .glass-hover:hover {
-    border-color: var(--glass-border-hover);
-    transform: translateY(-1px);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.06) inset,
-      0 1px 0 rgba(255,255,255,0.04) inset,
-      0 12px 48px rgba(0,0,0,0.5),
-      0 0 20px var(--accent-glow);
-  }
-
-  /* Glass surface layers */
-  .glass-surface-1 {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  .glass-surface-2 {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  .glass-surface-3 {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-  }
-
-  .glass-interactive {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5),
-      0 2px 8px rgba(0, 0, 0, 0.3);
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .glass-interactive:hover {
-    border-color: var(--glass-border-hover);
-    transform: translateY(-1px);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.06) inset,
-      0 1px 0 rgba(255,255,255,0.04) inset,
-      0 12px 48px rgba(0,0,0,0.5),
-      0 0 20px var(--accent-glow);
-  }
-
-  /* ═══════════════════════════════════════
-     PAPER CARDS (white, readable content)
-     ═══════════════════════════════════════ */
-
-  .paper {
-    background: #ffffff;
-    color: var(--color-card-text);
-    border-radius: 10px;
-    box-shadow:
-      0 1px 2px rgba(0,0,0,0.08),
-      0 4px 16px rgba(0,0,0,0.25),
-      0 0 0 1px rgba(0,0,0,0.04);
-    transition: all 0.2s ease;
-  }
-  .paper:hover {
-    box-shadow:
-      0 2px 4px rgba(0,0,0,0.1),
-      0 8px 32px rgba(0,0,0,0.35),
-      0 0 0 1px rgba(0,0,0,0.06);
-    transform: translateY(-1px);
-  }
-
-  /* ═══════════════════════════════════════
-     CANVAS
-     ═══════════════════════════════════════ */
-
-  .canvas-bg {
-    background-color: var(--color-void-light);
-    background-image:
-      radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
-    background-size: 28px 28px;
-  }
-
-  /* ═══════════════════════════════════════
-     ANIMATIONS
-     ═══════════════════════════════════════ */
-
-  @keyframes breathe {
-    0%, 100% {
-      box-shadow:
-        0 0 0 0.5px rgba(255,255,255,0.04) inset,
-        0 8px 40px rgba(0,0,0,0.5),
-        0 0 24px var(--accent-glow);
-    }
-    50% {
-      box-shadow:
-        0 0 0 0.5px rgba(255,255,255,0.06) inset,
-        0 8px 40px rgba(0,0,0,0.5),
-        0 0 40px var(--accent-glow-strong);
-    }
-  }
-  .cmd-glow {
-    animation: breathe 5s ease-in-out infinite;
-  }
-
-  @keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-  }
-  .shimmer {
-    background: linear-gradient(
-      90deg,
-      rgba(255,255,255,0) 0%,
-      rgba(255,255,255,0.03) 50%,
-      rgba(255,255,255,0) 100%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 8s ease-in-out infinite;
-  }
-
-  /* Drag */
-  .draggable { cursor: grab; user-select: none; }
-  .draggable:active { cursor: grabbing; }
-}
-
-
-=== FILE: frontend\src\main.tsx ===
-
-import { StrictMode } from "react"
-import { createRoot } from "react-dom/client"
-import "./index.css"
-import App from "./App"
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-)
-
-
-=== FILE: frontend\src\types.ts ===
-
-// ─── Stream ──────────────────────────────────────────
-
-export interface StreamItem {
-  id: string
-  type: "user" | "assistant" | "block" | "system"
-  content?: string
-  blockType?: BlockType
-  blockData?: unknown
-  sources?: ChatSource[]
-  followUps?: string[]
-  metadata?: {
-    noteIds?: string[]
-    query?: string
-    tag?: string
-    pageId?: string
-    command?: string
-    topic?: string
-  }
-  timestamp: number
-  loading?: boolean
-}
-
-export type BlockType =
-  | "welcome"
-  | "help"
-  | "note-grid"
-  | "note-detail"
-  | "search-results"
-  | "stats"
-  | "tag-cloud"
-  | "task-list"
-  | "page-list"
-  | "reading-path"
-  | "gap-analysis"
-  | "curator-report"
-  | "settings"
-  | "history"
-
-// ─── Context ─────────────────────────────────────────
-
-export type ContextType = "home" | "page" | "settings" | "history"
-
-export interface AppContext {
-  type: ContextType
-  pageId?: string
-  pageName?: string
-  previousContext?: AppContext
-}
-
-// ─── Notes ───────────────────────────────────────────
-
-export interface Note {
-  id: string
-  title: string | null
-  raw_text: string
-  summary: string | null
-  tags: string[]
-  tasks: string[]
-  entities: string[]
-  source_url: string | null
-  page_title: string | null
-  capture_type: string
-  processing_status: string
-  related_note_ids: string[]
-  page_id: string | null
-  canvas_x: number | null
-  canvas_y: number | null
-  canvas_width: number
-  canvas_height: number | null
-  cluster_id: string | null
-  centrality: number
-  is_bridge: boolean
-  created_at: string
-  updated_at: string
-  similarity?: number
-}
-
-// ─── Pages ───────────────────────────────────────────
-
-export interface Page {
-  id: string
-  name: string
-  description: string | null
-  icon: string
-  color: string
-  is_archived: boolean
-  canvas_data: Record<string, unknown>
-  viewport: { x: number; y: number; zoom: number }
-  note_count: number
-  last_activity: string
-  created_at: string
-  updated_at: string
-}
-
-// ─── Edges ───────────────────────────────────────────
-
-export type EdgeType =
-  | "related"
-  | "depends_on"
-  | "extends"
-  | "contradicts"
-  | "summarizes"
-  | "example_of"
-
-export interface NoteEdge {
-  id: string
-  source_id: string
-  target_id: string
-  edge_type: EdgeType
-  strength: number
-  label: string | null
-  created_by: string
-  created_at: string
-}
-
-// ─── Clusters ────────────────────────────────────────
-
-export interface Cluster {
-  id: string
-  page_id: string
-  label: string
-  description: string | null
-  color: string
-  center_x: number | null
-  center_y: number | null
-  created_at: string
-  updated_at: string
-}
-
-// ─── Canvas Elements ─────────────────────────────────
-
-export type ElementType = "sticky" | "drawing" | "annotation" | "image"
-
-export interface CanvasElement {
-  id: string
-  page_id: string
-  element_type: ElementType
-  content: string | null
-  canvas_data: Record<string, unknown> | null
-  position_x: number
-  position_y: number
-  width: number | null
-  height: number | null
-  style: Record<string, unknown>
-  created_by: string
-  created_at: string
-  updated_at: string
-}
-
-// ─── Canvas State ────────────────────────────────────
-
-export interface CanvasState {
-  page: Page
-  notes: Note[]
-  edges: NoteEdge[]
-  elements: CanvasElement[]
-  clusters: Cluster[]
-  viewport: { x: number; y: number; zoom: number }
-}
-
-// ─── Chat ────────────────────────────────────────────
-
-export interface ChatMessage {
-  role: "user" | "assistant"
-  content: string
-  sources?: ChatSource[]
-  followUps?: string[]
-}
-
-export interface ChatSource {
-  id: string
-  title: string
-  similarity: number
-}
-
-// ─── Stats ───────────────────────────────────────────
-
-export interface WorkspaceStats {
-  total_notes: number
-  total_pages: number
-  total_tags: number
-  total_tasks: number
-  status_counts: Record<string, number>
-  last_capture: string | null
-}
-
-// ─── Tags ────────────────────────────────────────────
-
-export interface TagWithCount {
-  name: string
-  count: number
-}
-
-// ─── Curator ─────────────────────────────────────────
-
-export interface CuratorReport {
-  potential_duplicates: Array<{
-    note_a: string; note_b: string; similarity: number
-    suggestion: string; reason: string
-  }>
-  orphan_notes: Array<{
-    note_id: string; title: string; suggestion: string; reason: string
-  }>
-  stale_notes: Array<{
-    note_id: string; title: string; days_old: number
-  }>
-  cluster_issues: Array<{
-    cluster_id: string; issue: string; size?: number; suggestion: string
-  }>
-  missing_connections: Array<{
-    note_a: string; note_b: string; similarity: number
-    suggested_type: string; reason: string
-  }>
-  auto_applied: number
-  needs_confirmation: Array<{
-    action_type: string; params: Record<string, unknown>; reason: string
-  }>
-}
-
-// ─── Commands ────────────────────────────────────────
-
-export interface Command {
-  name: string
-  aliases: string[]
-  description: string
-  context: ContextType[]
-  args?: string
-  handler: string
-}
-
-// ─── History ─────────────────────────────────────────
-
-export interface ChatConversation {
-  id: string
-  context_type: string
-  context_id: string | null
-  messages: ChatMessage[]
-  title: string | null
-  created_at: string
-  updated_at: string
-}
-
-
-=== FILE: frontend\src\utils.ts ===
-
-export function nanoid(size = 21): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-  let id = ""
-
-  for (let i = 0; i < size; i += 1) {
-    id += chars[Math.floor(Math.random() * chars.length)]
-  }
-
-  return id
 }
 
 

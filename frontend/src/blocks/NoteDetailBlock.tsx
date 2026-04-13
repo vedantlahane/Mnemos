@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useAsyncData } from "../hooks/useAsyncData"
 import { api } from "../api/client"
-import type { Note, StreamItem } from "../types"
+import { AsyncBlock } from "../components/AsyncBlock"
+import type { Note, BlockItem, NoteDetailData } from "../types"
 import {
   FileText,
   ExternalLink,
@@ -8,50 +9,37 @@ import {
   CheckSquare,
   Link,
   Clock,
-  Loader2,
 } from "lucide-react"
 import { GlassBadge } from "../glass/GlassBadge"
 
-export default function NoteDetailBlock({ item }: { item: StreamItem }) {
-  const [note, setNote] = useState<Note | null>(
-    (item.blockData as any)?.note || null
+export default function NoteDetailBlock({ item }: { item: BlockItem }) {
+  const blockData = (item.blockData || {}) as NoteDetailData
+  const noteId = item.metadata?.noteIds?.[0]
+  const prefetched = blockData.note
+
+  const { data, loading, error } = useAsyncData(
+    async () => {
+      if (prefetched) return prefetched
+      if (!noteId) throw new Error("No note ID")
+      return api.getNote(noteId)
+    },
+    [noteId, prefetched?.id]
   )
-  const [loading, setLoading] = useState(!note)
 
-  useEffect(() => {
-    if (note) return
-    const noteId = item.metadata?.noteIds?.[0]
-    if (!noteId) {
-      setLoading(false)
-      return
-    }
+  return (
+    <AsyncBlock
+      data={data}
+      loading={loading}
+      error={error}
+      emptyMessage="Note not found."
+      loadingMessage="Loading note…"
+    >
+      {(note) => <NoteDetailContent note={note} />}
+    </AsyncBlock>
+  )
+}
 
-    api
-      .getNote(noteId)
-      .then(setNote)
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [note, item.metadata?.noteIds])
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <Loader2
-          className="animate-spin text-[var(--glass-text-muted)]"
-          size={20}
-        />
-      </div>
-    )
-  }
-
-  if (!note) {
-    return (
-      <div className="glass-surface-1 p-6 rounded-2xl text-[var(--glass-text-dim)] text-[13px]">
-        Note not found.
-      </div>
-    )
-  }
-
+function NoteDetailContent({ note }: { note: Note }) {
   const statusColors: Record<string, "success" | "warning" | "info" | "error"> =
     {
       done: "success",
@@ -93,12 +81,12 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       </div>
 
       {/* Tags */}
-      {note.tags && note.tags.length > 0 && (
+      {note.tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4">
           {note.tags.map((t) => (
             <span
               key={t}
-              className="flex items-center gap-1 text-[10px] bg-[rgba(99,102,241,0.08)] text-[var(--accent)] px-2 py-1 rounded-full font-semibold"
+              className="flex items-center gap-1 text-[10px] bg-[var(--accent-subtle)] text-[var(--accent)] px-2 py-1 rounded-full font-semibold"
             >
               <Tag size={9} /> {t}
             </span>
@@ -107,7 +95,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       )}
 
       {/* Tasks */}
-      {note.tasks && note.tasks.length > 0 && (
+      {note.tasks.length > 0 && (
         <div className="mb-4">
           <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Tasks
@@ -127,7 +115,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
       )}
 
       {/* Entities */}
-      {note.entities && note.entities.length > 0 && (
+      {note.entities.length > 0 && (
         <div className="mb-4">
           <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
             Entities
@@ -136,7 +124,7 @@ export default function NoteDetailBlock({ item }: { item: StreamItem }) {
             {note.entities.map((e) => (
               <span
                 key={e}
-                className="text-[10px] glass-surface-2 px-2 py-0.5 rounded text-[var(--glass-text-dim)]"
+                className="text-[10px] glass-surface-3 px-2 py-0.5 rounded text-[var(--glass-text-dim)]"
               >
                 {e}
               </span>

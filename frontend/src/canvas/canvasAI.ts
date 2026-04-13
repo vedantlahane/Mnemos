@@ -19,6 +19,7 @@ export function createNoteCard(
   const x = position?.x ?? note.x ?? 100
   const y = position?.y ?? note.y ?? 100
   const groupId = nanoid()
+
   const skeleton: ExcalidrawElementSkeleton[] = [
     {
       id: `note-frame-${note.noteId}`,
@@ -94,27 +95,9 @@ export function createNoteCard(
     } as ExcalidrawElementSkeleton)
   }
 
-  return convertToExcalidrawElements(skeleton, { regenerateIds: false }) as ExcalidrawElement[]
-}
-
-export function createHeading(text: string, x: number, y: number): ExcalidrawElement {
-  return convertToExcalidrawElements(
-    [
-      {
-        id: nanoid(),
-        type: "text",
-        x,
-        y,
-        text,
-        fontSize: 28,
-        fontFamily: 1,
-        strokeColor: "#ffffff",
-        textAlign: "left",
-        customData: { type: "heading" },
-      } as ExcalidrawElementSkeleton,
-    ],
-    { regenerateIds: false }
-  )[0] as ExcalidrawElement
+  return convertToExcalidrawElements(skeleton, {
+    regenerateIds: false,
+  }) as ExcalidrawElement[]
 }
 
 export function createSticky(
@@ -124,6 +107,7 @@ export function createSticky(
   color = "#fef08a"
 ): ExcalidrawElement[] {
   const groupId = nanoid()
+
   const skeleton: ExcalidrawElementSkeleton[] = [
     {
       id: nanoid(),
@@ -154,7 +138,9 @@ export function createSticky(
     } as ExcalidrawElementSkeleton,
   ]
 
-  return convertToExcalidrawElements(skeleton, { regenerateIds: false }) as ExcalidrawElement[]
+  return convertToExcalidrawElements(skeleton, {
+    regenerateIds: false,
+  }) as ExcalidrawElement[]
 }
 
 export function createArrow(
@@ -185,26 +171,6 @@ export function createArrow(
   )[0] as ExcalidrawElement
 }
 
-export function createAnnotation(text: string, x: number, y: number): ExcalidrawElement {
-  return convertToExcalidrawElements(
-    [
-      {
-        id: nanoid(),
-        type: "text",
-        x,
-        y,
-        text,
-        fontSize: 12,
-        fontFamily: 3,
-        strokeColor: "#a855f7",
-        opacity: 60,
-        customData: { type: "ai-annotation" },
-      } as ExcalidrawElementSkeleton,
-    ],
-    { regenerateIds: false }
-  )[0] as ExcalidrawElement
-}
-
 export function createClusterFrame(
   label: string,
   x: number,
@@ -214,6 +180,7 @@ export function createClusterFrame(
   color = "#6366f1"
 ): ExcalidrawElement[] {
   const groupId = nanoid()
+
   const skeleton: ExcalidrawElementSkeleton[] = [
     {
       id: nanoid(),
@@ -247,17 +214,22 @@ export function createClusterFrame(
     } as ExcalidrawElementSkeleton,
   ]
 
-  return convertToExcalidrawElements(skeleton, { regenerateIds: false }) as ExcalidrawElement[]
+  return convertToExcalidrawElements(skeleton, {
+    regenerateIds: false,
+  }) as ExcalidrawElement[]
 }
 
-export function truncateAndWrap(text: string, charsPerLine: number, maxLines: number): string {
+export function truncateAndWrap(
+  text: string,
+  charsPerLine: number,
+  maxLines: number
+): string {
   const words = text.split(/\s+/).filter(Boolean)
   const lines: string[] = []
   let line = ""
 
   for (const word of words) {
     if (lines.length >= maxLines) break
-
     if ((line + " " + word).trim().length > charsPerLine) {
       if (line.trim()) lines.push(line.trim())
       line = word
@@ -267,8 +239,11 @@ export function truncateAndWrap(text: string, charsPerLine: number, maxLines: nu
   }
 
   if (line.trim() && lines.length < maxLines) lines.push(line.trim())
-  if (lines.length === maxLines && words.length > lines.join(" ").split(/\s+/).length) {
-    lines[maxLines - 1] = `${lines[maxLines - 1]}...`
+  if (
+    lines.length === maxLines &&
+    words.length > lines.join(" ").split(/\s+/).length
+  ) {
+    lines[maxLines - 1] = `${lines[maxLines - 1]}…`
   }
 
   return lines.join("\n")

@@ -1,13 +1,12 @@
-import type { ReactNode } from "react"
+import { type ReactNode, useEffect } from "react"
+import { useSettingsStore } from "../hooks/useSettings"
 
-/**
- * ContextProvider wraps the app.
- * State is managed by zustand (useAppContextStore), not React context.
- * This component exists as a structural placeholder for:
- * - Future React context providers (theme, locale, etc.)
- * - Error boundaries
- * - Initialization side effects
- */
 export function ContextProvider({ children }: { children: ReactNode }) {
+  const load = useSettingsStore((s) => s.load)
+
+  useEffect(() => {
+    load()
+  }, [load])
+
   return <>{children}</>
 }
