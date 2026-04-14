@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Excalidraw, MainMenu } from "@excalidraw/excalidraw"
 import type {
   ExcalidrawImperativeAPI,
@@ -12,8 +12,8 @@ import { useStream } from "../hooks/useStream"
 import { useCanvasEvents, type CanvasCommand } from "../hooks/useCanvasEvents"
 import { useAppContext } from "../hooks/useAppContext"
 import { useExcalidrawAPI } from "../hooks/useExcalidrawAPI"
-import { createNoteCard, createSticky, createTextBare } from "./canvasAI"
-import { readCanvasContext, findOpenPosition } from "./canvasContext"
+import { createNoteCard, createSticky, createTextBare, layoutText } from "./canvasAI"
+import { readCanvasContext, findOpenPosition, findStackPosition } from "./canvasContext"
 import { renderTopology } from "./diagramRenderer"
 import { api } from "../api/client"
 import { nanoid } from "../utils"
@@ -27,6 +27,258 @@ function getZoomValue(appState: Record<string, unknown>): number {
     return (appState.zoom as { value: number }).value
   }
   return (appState.zoom as number) || 1
+}
+
+function getCanvasTheme(appState?: Record<string, unknown>): "light" | "dark" {
+  return appState?.theme === "light" ? "light" : "dark"
+}
+
+function getCanvasBackground(appState?: Record<string, unknown>): string {
+  return typeof appState?.viewBackgroundColor === "string" && appState.viewBackgroundColor.length > 0
+    ? appState.viewBackgroundColor
+    : "#0e0e1a"
+}
+
+function buildRestoredAppState(appState?: Record<string, unknown>): Record<string, unknown> {
+  if (!appState) return {}
+  const keys = [
+    "scrollX",
+    "scrollY",
+    "zoom",
+    "viewBackgroundColor",
+    "theme",
+    "currentItemStrokeColor",
+    "currentItemBackgroundColor",
+    "currentItemFillStyle",
+    "currentItemStrokeWidth",
+    "currentItemStrokeStyle",
+    "currentItemRoughness",
+    "currentItemRoundness",
+    "currentItemOpacity",
+    "currentItemFontFamily",
+    "currentItemFontSize",
+    "currentItemTextAlign",
+    "currentItemStartArrowhead",
+    "currentItemEndArrowhead",
+    "gridSize",
+    "openSidebar",
+  ]
+
+  const restored: Record<string, unknown> = {}
+  for (const key of keys) {
+    const value = appState[key]
+    if (value !== undefined) restored[key] = value
+  }
+  return restored
+}
+
+function buildAllowedStylePatch(settings: Record<string, unknown>): Record<string, unknown> {
+  const allowed = [
+    "theme",
+    "viewBackgroundColor",
+    "currentItemStrokeColor",
+    "currentItemBackgroundColor",
+    "currentItemFillStyle",
+    "currentItemStrokeWidth",
+    "currentItemStrokeStyle",
+    "currentItemRoughness",
+    "currentItemOpacity",
+    "currentItemFontFamily",
+    "currentItemFontSize",
+    "currentItemTextAlign",
+    "currentItemStartArrowhead",
+    "currentItemEndArrowhead",
+    "currentItemRoundness",
+  ]
+
+  const patch: Record<string, unknown> = {}
+  for (const key of allowed) {
+    if (settings[key] !== undefined) patch[key] = settings[key]
+  }
+  return patch
+}
+
+function normalizeForCanvas(text: string): string {
+  return text
+    .replace(/^\s*---+\s*$/gm, "")
+    .replace(/^\s*#{1,6}\s*/gm, "")
+    .replace(/^\s*\*\s+/gm, "• ")
+    .replace(/^\s*-\s+/gm, "• ")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\s+$/gm, "")
+    .trim()
+}
+
+function buildCanvasTextBlocks(
+  text: string,
+  fontSize = 16,
+  fontFamily = 1,
+  maxWidth = 540,
+  maxLinesPerBlock = 14
+): Array<{ text: string; width: number; height: number }> {
+  const normalized = normalizeForCanvas(text)
+  const wrapped = layoutText(normalized, fontSize, fontFamily, maxWidth, 2000)
+  const lines = wrapped.text.split("\n")
+
+  const blocks: Array<{ text: string; width: number; height: number }> = []
+  for (let i = 0; i < lines.length; i += maxLinesPerBlock) {
+    const chunk = lines.slice(i, i + maxLinesPerBlock).join("\n").trim()
+    if (!chunk) continue
+    const measured = layoutText(chunk, fontSize, fontFamily, maxWidth, maxLinesPerBlock + 2)
+    blocks.push({ text: chunk, width: Math.max(420, measured.width + 12), height: Math.max(80, measured.height + 16) })
+  }
+  return blocks.slice(0, 32)
+}
+
+function elementBounds(elements: Array<Record<string, unknown>>): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+
+  for (const el of elements) {
+    const x = Number(el.x || 0)
+    const y = Number(el.y || 0)
+    const w = Math.max(1, Number(el.width || 0))
+    const h = Math.max(1, Number(el.height || 0))
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x + w)
+    maxY = Math.max(maxY, y + h)
+  }
+
+  if (!Number.isFinite(minX)) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0 }
+  }
+  return { minX, minY, maxX, maxY }
+}
+
+function translateElements(elements: Array<Record<string, unknown>>, dx: number, dy: number): Array<Record<string, unknown>> {
+  return elements.map((el) => ({
+    ...el,
+    x: Number(el.x || 0) + dx,
+    y: Number(el.y || 0) + dy,
+  }))
+}
+
+function collidesRect(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  occupied: Array<{ x: number; y: number; w: number; h: number }>,
+  padding = 28
+): boolean {
+  for (const r of occupied) {
+    if (
+      x < r.x + r.w + padding &&
+      x + width + padding > r.x &&
+      y < r.y + r.h + padding &&
+      y + height + padding > r.y
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function candidateDiagramAnchors(
+  ctx: ReturnType<typeof readCanvasContext>,
+  width: number,
+  height: number
+): Array<{ x: number; y: number; score: number }> {
+  const c = ctx.viewportCenter
+  const b = ctx.viewportBounds
+
+  const raw = [
+    { x: c.x - width / 2, y: c.y - height / 2 },
+    { x: c.x - width / 2, y: b.minY + 40 },
+    { x: b.maxX - width - 40, y: b.minY + 40 },
+    { x: b.minX + 40, y: b.minY + 40 },
+    { x: b.maxX - width - 40, y: c.y - height / 2 },
+    { x: b.minX + 40, y: c.y - height / 2 },
+    { x: c.x - width / 2, y: b.maxY - height - 40 },
+  ]
+
+  return raw.map((p) => {
+    const clampedX = Math.max(b.minX + 20, Math.min(p.x, b.maxX - width - 20))
+    const clampedY = Math.max(b.minY + 20, Math.min(p.y, b.maxY - height - 20))
+    const cx = clampedX + width / 2
+    const cy = clampedY + height / 2
+    const score = Math.abs(cx - c.x) + Math.abs(cy - c.y)
+    return { x: clampedX, y: clampedY, score }
+  })
+}
+
+function placeDiagramWithoutOverlap(
+  ctx: ReturnType<typeof readCanvasContext>,
+  rawElements: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  if (rawElements.length === 0) return rawElements
+
+  const bounds = elementBounds(rawElements)
+  const currentW = Math.max(1, bounds.maxX - bounds.minX) + 24
+  const currentH = Math.max(1, bounds.maxY - bounds.minY) + 24
+
+  const candidates = candidateDiagramAnchors(ctx, currentW, currentH).sort((a, b) => a.score - b.score)
+  const chosen = candidates.find((c) => !collidesRect(c.x, c.y, currentW, currentH, ctx.occupiedRects, 24))
+
+  if (chosen) {
+    const dx = chosen.x + 12 - bounds.minX
+    const dy = chosen.y + 12 - bounds.minY
+    return translateElements(rawElements, dx, dy)
+  }
+
+  const fallback = findOpenPosition(ctx, currentW, currentH, 36)
+  const dx = fallback.x + 12 - bounds.minX
+  const dy = fallback.y + 12 - bounds.minY
+  return translateElements(rawElements, dx, dy)
+}
+
+async function streamTextIntoElement(
+  exc: ExcalidrawImperativeAPI,
+  elementId: string,
+  fullText: string,
+  opts: { fontSize: number; fontFamily: number; maxWidth: number; maxLines: number }
+) {
+  const finalLayout = layoutText(fullText, opts.fontSize, opts.fontFamily, opts.maxWidth, opts.maxLines)
+  const lines = finalLayout.text.split("\n")
+  const committedLines: string[] = []
+
+  for (const line of lines) {
+    const words = line.split(/\s+/).filter(Boolean)
+
+    if (words.length === 0) {
+      committedLines.push("")
+      continue
+    }
+
+    let liveLine = ""
+    for (const word of words) {
+      liveLine = liveLine ? `${liveLine} ${word}` : word
+      const partial = [...committedLines, liveLine].join("\n")
+
+      const sceneEls = exc.getSceneElements() as readonly Record<string, unknown>[]
+      const updated = sceneEls.map((el) => {
+        if (el.id !== elementId) return el
+        return {
+          ...el,
+          text: partial,
+          originalText: partial,
+          width: finalLayout.width,
+          height: finalLayout.height,
+          version: Number(el.version || 1) + 1,
+          versionNonce: Math.floor(Math.random() * 2_000_000_000),
+          updated: Date.now(),
+        }
+      })
+
+      exc.updateScene({ elements: updated as any })
+      await new Promise((r) => setTimeout(r, 0))
+    }
+
+    committedLines.push(line)
+  }
 }
 
 /**
@@ -65,6 +317,13 @@ function createPlaceholderElement(): Record<string, unknown> {
   }
 }
 
+function hasRealCanvasContent(elements: readonly Record<string, unknown>[]): boolean {
+  return elements.some((el) => {
+    const custom = (el.customData as Record<string, unknown> | undefined) || {}
+    return !String(custom.type || "").startsWith("__placeholder") && !el.isDeleted
+  })
+}
+
 export default function ExcalidrawCanvas({ pageId }: Props) {
   const {
     excalidrawRef,
@@ -86,6 +345,19 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
 
   const userHasInteracted = useRef(false)
   const sceneApplied = useRef(false)
+  const suppressAutosaveRef = useRef(false)
+  const [emptyOverlayDismissed, setEmptyOverlayDismissed] = useState(false)
+  const [hasLiveContent, setHasLiveContent] = useState(false)
+
+  const flushSceneSave = useCallback(() => {
+    const exc = excalidrawRef.current
+    if (!exc) return
+    saveScene(
+      exc.getSceneElements() as unknown as readonly Record<string, unknown>[],
+      exc.getAppState() as unknown as Record<string, unknown>,
+      exc.getFiles() as unknown as Record<string, unknown>
+    )
+  }, [excalidrawRef, saveScene])
 
   // ─── Apply initial scene ──────────────────────
   useEffect(() => {
@@ -100,19 +372,16 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         ? initialScene.elements
         : [createPlaceholderElement()]
 
+      setHasLiveContent(hasRealCanvasContent(elements as readonly Record<string, unknown>[]))
+      if (hasRealCanvasContent(elements as readonly Record<string, unknown>[])) {
+        setEmptyOverlayDismissed(true)
+      }
+
       exc.updateScene({ elements })
 
-      if (initialScene.appState) {
-        const restore: Record<string, unknown> = {}
-        const s = initialScene.appState
-        if (s.scrollX !== undefined) restore.scrollX = s.scrollX
-        if (s.scrollY !== undefined) restore.scrollY = s.scrollY
-        if (s.zoom !== undefined) restore.zoom = s.zoom
-        if (s.viewBackgroundColor) restore.viewBackgroundColor = s.viewBackgroundColor
-
-        if (Object.keys(restore).length > 0) {
-          exc.updateScene({ appState: restore })
-        }
+      const restoredAppState = buildRestoredAppState(initialScene.appState)
+      if (Object.keys(restoredAppState).length > 0) {
+        exc.updateScene({ appState: restoredAppState as any })
       }
 
       sceneApplied.current = true
@@ -128,6 +397,8 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   useEffect(() => {
     sceneApplied.current = false
     userHasInteracted.current = false
+    setEmptyOverlayDismissed(false)
+    setHasLiveContent(false)
   }, [pageId])
 
   // ─── Process canvas commands ──────────────────
@@ -249,11 +520,121 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         break
       }
 
+      case "ai-compose": {
+        if (!exc) return
+
+        const requestText = cmd.request.trim()
+        if (!requestText) {
+          addSystemMessage("Nothing to compose.")
+          return
+        }
+
+        addSystemMessage("🧠 Drafting structured explanation…")
+
+        try {
+          suppressAutosaveRef.current = true
+          if (cmd.includeDiagram) {
+            try {
+              const diagramResp = await api.generateDiagram(requestText, cmd.pageId || current.pageId)
+              if (diagramResp.topology) {
+                if ((diagramResp.topology as any).app_state && typeof (diagramResp.topology as any).app_state === "object") {
+                  const appStatePatch = buildAllowedStylePatch((diagramResp.topology as any).app_state)
+                  if (Object.keys(appStatePatch).length > 0) {
+                    exc.updateScene({ appState: appStatePatch as unknown as Pick<AppState, keyof AppState> })
+                  }
+                }
+                const diagramCtx = readCanvasContext(exc)
+                const diagramElements = renderTopology(diagramResp.topology as any, diagramCtx)
+                const placedDiagram = placeDiagramWithoutOverlap(
+                  diagramCtx,
+                  diagramElements as Array<Record<string, unknown>>
+                )
+                addElements(placedDiagram as any)
+                addSystemMessage("Diagram added. Now composing explanatory text…")
+              }
+            } catch {
+              addSystemMessage("Diagram generation skipped due to an error; continuing with text.")
+            }
+          }
+
+          const prompt = [
+            `Explain the topic for a canvas board: ${requestText}`,
+            "Format with clear headings and bullet points.",
+            "Keep it concise and structured for visual reading on a whiteboard.",
+          ].join("\n")
+
+          const chatResp = await api.chat(prompt, [], "page", cmd.pageId || current.pageId)
+          const answer = (chatResp.answer || "").trim()
+
+          if (!answer) {
+            addSystemMessage("No explanation returned.")
+            return
+          }
+
+          const ctx = readCanvasContext(exc)
+          const blocks = buildCanvasTextBlocks(answer, 16, 1, 540, 14)
+          const sizeHints = blocks.map((b) => ({ width: b.width, height: b.height }))
+          const positions = findStackPosition(ctx, sizeHints, 28)
+
+          for (let idx = 0; idx < blocks.length; idx++) {
+            const block = blocks[idx]
+            const [textEl] = createTextBare(
+              "",
+              positions[idx].x,
+              positions[idx].y,
+              ctx.backgroundColor,
+              {
+                fontSize: 16,
+                fontFamily: 1,
+                maxWidth: 540,
+                maxLines: 240,
+                customDataType: "ai-compose-text",
+              }
+            )
+            addElements([textEl as any])
+            await streamTextIntoElement(exc as any, String(textEl.id), block.text, {
+              fontSize: 16,
+              fontFamily: 1,
+              maxWidth: 540,
+              maxLines: 240,
+            })
+          }
+
+          addSystemMessage(`Composed ${blocks.length} structured text block${blocks.length > 1 ? "s" : ""} on canvas.`)
+        } catch {
+          addSystemMessage("AI composition failed. Try again or use /compose with a shorter topic.")
+        } finally {
+          suppressAutosaveRef.current = false
+          flushSceneSave()
+        }
+        break
+      }
+
       case "set-background": {
         if (!exc) return
         exc.updateScene({
           appState: { viewBackgroundColor: cmd.color } as unknown as Pick<AppState, keyof AppState>,
         })
+        break
+      }
+
+      case "set-theme": {
+        if (!exc) return
+        exc.updateScene({
+          appState: { theme: cmd.theme } as unknown as Pick<AppState, keyof AppState>,
+        })
+        break
+      }
+
+      case "set-style": {
+        if (!exc) return
+        const patch = buildAllowedStylePatch(cmd.settings as unknown as Record<string, unknown>)
+        if (Object.keys(patch).length === 0) {
+          addSystemMessage("No valid style settings provided.")
+          return
+        }
+        exc.updateScene({ appState: patch as unknown as Pick<AppState, keyof AppState> })
+        addSystemMessage("Canvas style updated.")
         break
       }
 
@@ -332,17 +713,31 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         if (!exc) return
         addSystemMessage("🎨 Generating diagram…")
         try {
+          suppressAutosaveRef.current = true
           const resp = await api.generateDiagram(cmd.request, cmd.pageId)
           if (resp.topology) {
+            if ((resp.topology as any).app_state && typeof (resp.topology as any).app_state === "object") {
+              const appStatePatch = buildAllowedStylePatch((resp.topology as any).app_state)
+              if (Object.keys(appStatePatch).length > 0) {
+                exc.updateScene({ appState: appStatePatch as unknown as Pick<AppState, keyof AppState> })
+              }
+            }
             const ctx = readCanvasContext(exc)
             const diagramElements = renderTopology(resp.topology as any, ctx)
-            addElements(diagramElements as any)
+            const placedDiagram = placeDiagramWithoutOverlap(
+              ctx,
+              diagramElements as Array<Record<string, unknown>>
+            )
+            addElements(placedDiagram as any)
             addSystemMessage(`Diagram created: "${resp.topology.title || "Untitled"}" with ${resp.topology.elements?.length || 0} elements.`)
           } else {
             addSystemMessage("Diagram generation returned empty result.")
           }
         } catch (e) {
           addSystemMessage("Failed to generate diagram. Check backend logs.")
+        } finally {
+          suppressAutosaveRef.current = false
+          flushSceneSave()
         }
         break
       }
@@ -355,6 +750,11 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       appState: AppState,
       files: BinaryFiles
     ) => {
+      const hasReal = hasRealCanvasContent(elements as unknown as readonly Record<string, unknown>[])
+      setHasLiveContent(hasReal)
+      if (hasReal) setEmptyOverlayDismissed(true)
+
+      if (suppressAutosaveRef.current) return
       if (!userHasInteracted.current) return
       saveScene(
         elements as unknown as readonly Record<string, unknown>[],
@@ -417,25 +817,31 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   }
 
   // Check if canvas has real content (not just placeholder)
-  const hasRealContent = initialScene && initialScene.elements.some(
-    (el) => !(el.customData as Record<string, unknown>)?.type?.toString().startsWith("__placeholder")
-  )
+  const hasRealContent = hasLiveContent || !!(initialScene && hasRealCanvasContent(initialScene.elements as readonly Record<string, unknown>[]))
+
+  const canvasTheme = getCanvasTheme(initialScene?.appState)
+  const canvasBg = getCanvasBackground(initialScene?.appState)
 
   return (
-    <div className="w-full h-full excalidraw-wrapper relative" data-excalidraw-host="true">
+    <div
+      className="w-full h-full excalidraw-wrapper relative"
+      data-excalidraw-host="true"
+      onPointerDownCapture={() => setEmptyOverlayDismissed(true)}
+      onWheelCapture={() => setEmptyOverlayDismissed(true)}
+    >
       {/* Excalidraw with placeholder element to prevent welcome screen */}
       <Excalidraw
         excalidrawAPI={handleExcalidrawAPI}
         initialData={{
           elements: [createPlaceholderElement() as any],
           appState: {
-            viewBackgroundColor: "#0e0e1a",
-            theme: "dark" as const,
+            viewBackgroundColor: canvasBg,
+            theme: canvasTheme,
           },
           files: undefined,
         }}
         onChange={handleChange}
-        theme="dark"
+        theme={canvasTheme}
         langCode="en"
         gridModeEnabled={false}
         viewModeEnabled={false}
@@ -451,7 +857,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       </Excalidraw>
 
       {/* Custom empty state overlay */}
-      {!hasRealContent && (
+      {!hasRealContent && !emptyOverlayDismissed && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 5 }}>
           <div className="pointer-events-auto">
             <div className="glass rounded-2xl p-8 relative overflow-hidden max-w-[320px]">

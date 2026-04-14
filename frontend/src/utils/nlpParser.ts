@@ -18,6 +18,9 @@ export interface NLPIntent {
 // Only trigger on explicit write prefixes - the user must clearly ask to
 // put text on the canvas.
 const WRITE_KEYWORDS = [
+  "write down on canvas",
+  "write down on the canvas",
+  "write down",
   "write on canvas",
   "write that on canvas",
   "write this on canvas",

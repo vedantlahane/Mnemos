@@ -328,6 +328,26 @@ export const api = {
       }),
     }),
 
+  decideIntent: (
+    question: string,
+    contextType = "home",
+    pageId?: string
+  ) =>
+    request<{
+      mode: "command" | "chat"
+      command: string
+      args: string
+      confidence: number
+      reason?: string
+    }>("/chat/intent", {
+      method: "POST",
+      body: JSON.stringify({
+        question,
+        context_type: contextType,
+        page_id: pageId,
+      }),
+    }),
+
   // ─── Context (browser extension) ────────────────
   context: (url: string, text: string) =>
     request<{ related_notes: Note[] }>("/context", {
@@ -352,6 +372,7 @@ export const api = {
     request<{ topology: {
       title: string
       layout_type: string
+      app_state?: Record<string, unknown>
       elements: Array<{
         id: string
         type: "box" | "text" | "arrow"

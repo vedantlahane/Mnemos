@@ -181,3 +181,71 @@ async def ai_position_note(
     except Exception as e:
         print(f"AI position failed: {e}")
         return await google_json_call(prompt)
+
+
+async def decide_command_intent(
+    question: str,
+    context_type: str,
+    page_name: str | None,
+    available_commands: list[str],
+) -> dict:
+    prompt = prompts.INTENT_ROUTER_PROMPT.format(
+        question=(question or "")[:1000],
+        context_type=context_type or "home",
+        page_name=page_name or "none",
+        available_commands="\n".join(f"- {c}" for c in available_commands),
+    )
+
+    def _normalize(result: dict) -> dict:
+        mode = str(result.get("mode") or "chat").lower()
+        if mode not in {"command", "chat"}:
+            mode = "chat"
+
+        command = str(result.get("command") or "").strip()
+        args = str(result.get("args") or "").strip()
+        reason = str(result.get("reason") or "").strip()
+        confidence_raw = result.get("confidence", 0.0)
+        try:
+            confidence = float(confidence_raw)
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        if mode == "command" and command not in set(available_commands):
+            mode = "chat"
+            command = ""
+            args = ""
+            confidence = min(confidence, 0.49)
+
+        return {
+            "mode": mode,
+            "command": command,
+            "args": args,
+            "confidence": confidence,
+            "reason": reason,
+        }
+
+    try:
+        if _has_groq():
+            result = await groq_json_call(prompt)
+        else:
+            result = await google_json_call(prompt)
+        if isinstance(result, dict):
+            return _normalize(result)
+    except Exception as e:
+        print(f"Intent routing primary failed: {e}")
+
+    try:
+        result = await google_json_call(prompt)
+        if isinstance(result, dict):
+            return _normalize(result)
+    except Exception as e:
+        print(f"Intent routing fallback failed: {e}")
+
+    return {
+        "mode": "chat",
+        "command": "",
+        "args": "",
+        "confidence": 0.0,
+        "reason": "intent-router-fallback",
+    }

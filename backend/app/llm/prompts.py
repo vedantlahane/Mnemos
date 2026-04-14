@@ -118,3 +118,34 @@ New note:
 Title: {title}
 Tags: {tags}
 Summary: {summary}"""
+
+
+INTENT_ROUTER_PROMPT = """You are an intent router for a productivity app. Decide whether the user message should trigger a command/tool or remain normal chat.
+
+Return JSON only:
+{{
+  "mode": "command|chat",
+  "command": "exact command name starting with /, or empty",
+  "args": "arguments without the command prefix",
+  "confidence": 0.0,
+  "reason": "short reason"
+}}
+
+Context type: {context_type}
+Current page: {page_name}
+
+Available commands in this context:
+{available_commands}
+
+Routing rules:
+- If the user asks to write/explain/organize content on canvas, prefer /compose.
+- If the user asks to draw/visualize a diagram, prefer /diagram or /compose with diagram-oriented args.
+- If the user asks to search notes, use /search.
+- If the user asks to find on canvas, use /find.
+- If the user asks to capture/store a note, use /capture.
+- If the message is conversational, ambiguous, or requires nuanced QA, return mode=chat.
+- Never output commands that are not in the available list.
+
+User message:
+{question}
+"""

@@ -22,7 +22,19 @@ async def reduce_dimensions_node(state: CanvasArchitectState) -> dict:
     if len(notes) < 3:
         return {"status": "grid_fallback"}
 
-    embeddings_matrix = np.array([n["embedding"] for n in notes])
+    valid_notes = []
+    for n in notes:
+        emb = n.get("embedding")
+        if isinstance(emb, list) and len(emb) > 0 and all(isinstance(x, (float, int)) for x in emb):
+            valid_notes.append(n)
+
+    if len(valid_notes) < 3 or len(valid_notes) != len(notes):
+        return {
+            "status": "grid_fallback",
+            "errors": state.get("errors", []) + ["layout:insufficient-or-missing-embeddings"],
+        }
+
+    embeddings_matrix = np.array([n["embedding"] for n in valid_notes])
 
     try:
         import umap
@@ -61,6 +73,9 @@ async def reduce_dimensions_node(state: CanvasArchitectState) -> dict:
 
 async def cluster_node(state: CanvasArchitectState) -> dict:
     notes = state["notes"]
+    if not state.get("embeddings_matrix"):
+        return {"cluster_labels": [-1 for _ in notes], "status": "centrality"}
+
     embeddings_matrix = np.array(state["embeddings_matrix"])
     cluster_labels = np.full(len(notes), -1)
 
@@ -141,6 +156,30 @@ async def save_layout_node(state: CanvasArchitectState) -> dict:
     centrality_scores = state.get("centrality_scores", {})
     bridge_notes = state.get("bridge_notes", [])
     page_id = state["page_id"]
+
+    if len(coords) != len(notes):
+        positions_out = []
+        for i, note in enumerate(notes):
+            col = i % 3
+            row = i // 3
+            x = 100 + col * 420
+            y = 100 + row * 350
+            await db.update_note(note["id"], canvas_x=x, canvas_y=y)
+            positions_out.append({"note_id": note["id"], "x": x, "y": y, "cluster": None})
+
+        try:
+            from app.services.excalidraw_scene import sync_page_notes_to_canvas
+            await sync_page_notes_to_canvas(page_id)
+        except Exception as e:
+            print(f"Excalidraw sync failed after fallback save: {e}")
+
+        return {
+            "positions": positions_out,
+            "clusters": [],
+            "cluster_map": {},
+            "errors": state.get("errors", []) + ["layout:coords-note-count-mismatch"],
+            "status": "done",
+        }
 
     # Clean up old clusters
     await db.delete_clusters_for_page(page_id)

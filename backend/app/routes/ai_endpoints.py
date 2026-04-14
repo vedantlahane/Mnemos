@@ -10,6 +10,40 @@ from app.auth.dependencies import get_optional_user_id
 router = APIRouter()
 
 
+def _build_canvas_style_context(page: dict | None) -> str:
+    if not isinstance(page, dict):
+        return ""
+
+    canvas_data = page.get("canvas_data")
+    if not isinstance(canvas_data, dict):
+        return ""
+
+    app_state = canvas_data.get("appState")
+    if not isinstance(app_state, dict):
+        return ""
+
+    bg = app_state.get("viewBackgroundColor") or "#0e0e1a"
+    theme = app_state.get("theme") or "dark"
+    stroke = app_state.get("currentItemStrokeColor") or "default"
+    fill = app_state.get("currentItemBackgroundColor") or "transparent"
+    stroke_width = app_state.get("currentItemStrokeWidth")
+    stroke_style = app_state.get("currentItemStrokeStyle")
+    font_family = app_state.get("currentItemFontFamily")
+    font_size = app_state.get("currentItemFontSize")
+
+    return (
+        "Canvas style context:\n"
+        f"- theme: {theme}\n"
+        f"- background: {bg}\n"
+        f"- default stroke color: {stroke}\n"
+        f"- default fill color: {fill}\n"
+        f"- stroke width/style: {stroke_width}/{stroke_style}\n"
+        f"- default font family/size: {font_family}/{font_size}\n"
+        "- keep text contrast high against the current background\n"
+        "- for flow diagrams, vary node styles (accent/default/muted) to improve readability"
+    )
+
+
 class GapAnalysisRequest(BaseModel):
     page_id: Optional[str] = None
 
@@ -153,17 +187,21 @@ class DiagramRequest(BaseModel):
 @router.post("/ai/generate-diagram")
 async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_optional_user_id)):
     """Generate a structured diagram topology from a natural language request."""
-    from app.services.canvas_gen import generate_diagram as gen_diagram
+    from app.services.canvas_gen import generate_diagram as gen_diagram, fallback_diagram
 
     # Optionally include page notes as context
     context = ""
     if payload.page_id:
         try:
+            page = await db.get_page(payload.page_id)
             notes = await db.get_notes_for_page(payload.page_id)
             context_parts = [
                 f"Note: {n.get('title', 'Untitled')} — {n.get('summary', '')[:200]}"
                 for n in notes[:8]
             ]
+            style_context = _build_canvas_style_context(page)
+            if style_context:
+                context_parts.append(style_context)
             context = "\n".join(context_parts)
         except Exception:
             pass
@@ -172,4 +210,10 @@ async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_o
         topology = await gen_diagram(payload.request, context)
         return {"topology": topology}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Diagram generation failed: {str(e)}")
+        topology = fallback_diagram(payload.request)
+        return {
+            "topology": topology,
+            "degraded": True,
+            "reason": "diagram_generation_fallback",
+            "detail": str(e),
+        }

@@ -2,10 +2,9 @@ import { useState, useCallback } from "react"
 import { useStream } from "./useStream"
 import { useAppContext } from "./useAppContext"
 import { useCanvasEvents } from "./useCanvasEvents"
+import type { CanvasStyleSettings } from "./useCanvasEvents"
 import { api } from "../api/client"
-import { parseNLPIntent, shouldParseNLP } from "../utils/nlpParser"
 import type { Command, ContextType } from "../types"
-import type { NLPIntent } from "../utils/nlpParser"
 
 const COMMANDS: Command[] = [
   { name: "/pages", aliases: ["/p"], description: "List all pages", context: ["home"], handler: "pages" },
@@ -21,6 +20,7 @@ const COMMANDS: Command[] = [
   { name: "/curator", aliases: ["/clean"], description: "Run maintenance", context: ["home"], handler: "curator" },
   { name: "/find", aliases: [], description: "Find on canvas", context: ["page"], args: "<text>", handler: "find" },
   { name: "/add", aliases: [], description: "Add sticky/note to canvas", context: ["page"], args: "<text>", handler: "add" },
+  { name: "/compose", aliases: ["/write-ai"], description: "AI compose structured canvas content", context: ["page"], args: "<topic>", handler: "compose" },
   { name: "/layout", aliases: ["/reorganize"], description: "AI auto-layout canvas", context: ["page"], handler: "layout" },
   { name: "/summarize", aliases: [], description: "Summarize page content", context: ["page"], handler: "summarize" },
   { name: "/gaps", aliases: [], description: "Knowledge gap analysis", context: ["home", "page"], handler: "gaps" },
@@ -28,6 +28,10 @@ const COMMANDS: Command[] = [
   { name: "/export", aliases: [], description: "Export workspace", context: ["home", "page"], handler: "export" },
   { name: "/rename", aliases: [], description: "Rename page", context: ["page"], args: "<new name>", handler: "rename" },
   { name: "/bg", aliases: ["/background"], description: "Canvas background color", context: ["page"], args: "<color>", handler: "bg" },
+  { name: "/theme", aliases: [], description: "Canvas theme (light/dark)", context: ["page"], args: "light|dark", handler: "theme" },
+  { name: "/style", aliases: ["/canvas-style"], description: "Set Excalidraw tool settings", context: ["page"], args: "k=v ...", handler: "style" },
+  { name: "/style-lock", aliases: [], description: "Require style confirmation before canvas writes", context: ["page"], args: "on|off|status", handler: "style-lock" },
+  { name: "/style-confirm", aliases: [], description: "Confirm style before AI writes/edits", context: ["page"], handler: "style-confirm" },
   { name: "/library", aliases: ["/lib"], description: "Open shape library", context: ["page"], handler: "library" },
   { name: "/diagram", aliases: ["/flow", "/mindmap"], description: "AI diagram generator", context: ["page"], args: "<topic>", handler: "diagram" },
   { name: "/close", aliases: [], description: "Close page", context: ["page", "settings", "history"], handler: "close" },
@@ -56,10 +60,156 @@ function resolveColor(input: string): string | null {
   return null
 }
 
+const FONT_FAMILY_MAP: Record<string, number> = {
+  virgil: 1,
+  helvetica: 2,
+  cascadia: 3,
+  assistant: 4,
+}
+
+const TEXT_ALIGN_VALUES = new Set(["left", "center", "right"])
+const FILL_STYLE_VALUES = new Set(["solid", "hachure", "cross-hatch"])
+const STROKE_STYLE_VALUES = new Set(["solid", "dashed", "dotted"])
+const ARROWHEAD_VALUES = new Set(["arrow", "bar", "dot", "triangle", "diamond", "crowfoot_one", "crowfoot_many", "crowfoot_one_or_many", "none"])
+
+function parseStyleArgs(raw: string): { settings: CanvasStyleSettings; errors: string[] } {
+  const settings: CanvasStyleSettings = {}
+  const errors: string[] = []
+
+  const tokens = raw
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+
+  for (const token of tokens) {
+    const eqIdx = token.indexOf("=")
+    if (eqIdx <= 0) {
+      errors.push(`Expected key=value, got "${token}"`)
+      continue
+    }
+
+    const key = token.slice(0, eqIdx).toLowerCase()
+    const value = token.slice(eqIdx + 1)
+    const lower = value.toLowerCase()
+
+    if (["bg", "background", "viewbackgroundcolor"].includes(key)) {
+      const color = resolveColor(value)
+      if (!color) errors.push(`Invalid background color: ${value}`)
+      else settings.viewBackgroundColor = color
+      continue
+    }
+
+    if (key === "theme") {
+      if (lower === "light" || lower === "dark") settings.theme = lower
+      else errors.push(`theme must be light|dark, got ${value}`)
+      continue
+    }
+
+    if (["stroke", "strokecolor", "currentitemstrokecolor"].includes(key)) {
+      const color = resolveColor(value)
+      if (!color) errors.push(`Invalid stroke color: ${value}`)
+      else settings.currentItemStrokeColor = color
+      continue
+    }
+
+    if (["fill", "background", "fillcolor", "currentitembackgroundcolor"].includes(key)) {
+      const color = resolveColor(value)
+      if (!color) errors.push(`Invalid fill color: ${value}`)
+      else settings.currentItemBackgroundColor = color
+      continue
+    }
+
+    if (["text", "textcolor"].includes(key)) {
+      const color = resolveColor(value)
+      if (!color) errors.push(`Invalid text color: ${value}`)
+      else settings.currentItemStrokeColor = color
+      continue
+    }
+
+    if (["fillstyle", "currentitemfillstyle"].includes(key)) {
+      if (FILL_STYLE_VALUES.has(lower)) settings.currentItemFillStyle = lower as CanvasStyleSettings["currentItemFillStyle"]
+      else errors.push(`fillStyle must be solid|hachure|cross-hatch, got ${value}`)
+      continue
+    }
+
+    if (["strokestyle", "currentitemstrokestyle"].includes(key)) {
+      if (STROKE_STYLE_VALUES.has(lower)) settings.currentItemStrokeStyle = lower as CanvasStyleSettings["currentItemStrokeStyle"]
+      else errors.push(`strokeStyle must be solid|dashed|dotted, got ${value}`)
+      continue
+    }
+
+    if (["strokewidth", "width", "currentitemstrokewidth"].includes(key)) {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n < 0 || n > 20) errors.push(`strokeWidth must be 0..20, got ${value}`)
+      else settings.currentItemStrokeWidth = n
+      continue
+    }
+
+    if (["roughness", "currentitemroughness"].includes(key)) {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n < 0 || n > 5) errors.push(`roughness must be 0..5, got ${value}`)
+      else settings.currentItemRoughness = n
+      continue
+    }
+
+    if (["opacity", "currentitemopacity"].includes(key)) {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n < 0 || n > 100) errors.push(`opacity must be 0..100, got ${value}`)
+      else settings.currentItemOpacity = n
+      continue
+    }
+
+    if (["font", "fontfamily", "currentitemfontfamily"].includes(key)) {
+      if (FONT_FAMILY_MAP[lower]) settings.currentItemFontFamily = FONT_FAMILY_MAP[lower]
+      else if (Number.isFinite(Number(value))) settings.currentItemFontFamily = Number(value)
+      else errors.push(`fontFamily must be virgil|helvetica|cascadia|assistant or numeric, got ${value}`)
+      continue
+    }
+
+    if (["fontsize", "currentitemfontsize"].includes(key)) {
+      const n = Number(value)
+      if (!Number.isFinite(n) || n < 8 || n > 128) errors.push(`fontSize must be 8..128, got ${value}`)
+      else settings.currentItemFontSize = n
+      continue
+    }
+
+    if (["textalign", "align", "currentitemtextalign"].includes(key)) {
+      if (TEXT_ALIGN_VALUES.has(lower)) settings.currentItemTextAlign = lower as CanvasStyleSettings["currentItemTextAlign"]
+      else errors.push(`textAlign must be left|center|right, got ${value}`)
+      continue
+    }
+
+    if (["startarrow", "startarrowhead", "currentitemstartarrowhead"].includes(key)) {
+      if (ARROWHEAD_VALUES.has(lower)) settings.currentItemStartArrowhead = lower === "none" ? null : lower
+      else errors.push(`startArrowhead value not recognized: ${value}`)
+      continue
+    }
+
+    if (["endarrow", "endarrowhead", "currentitemendarrowhead"].includes(key)) {
+      if (ARROWHEAD_VALUES.has(lower)) settings.currentItemEndArrowhead = lower === "none" ? null : lower
+      else errors.push(`endArrowhead value not recognized: ${value}`)
+      continue
+    }
+
+    if (["round", "roundness", "currentitemroundness"].includes(key)) {
+      if (lower === "none") settings.currentItemRoundness = null
+      else settings.currentItemRoundness = lower
+      continue
+    }
+
+    errors.push(`Unknown style key: ${key}`)
+  }
+
+  return { settings, errors }
+}
+
 export function useCommands() {
   const [inputValue, setInputValue] = useState("")
   const [suggestions, setSuggestions] = useState<Command[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [styleLockEnabled, setStyleLockEnabled] = useState(false)
+  const [styleConfirmed, setStyleConfirmed] = useState(false)
+  const [styleConfirmedPageId, setStyleConfirmedPageId] = useState<string | undefined>(undefined)
 
   const {
     items, addUserMessage, addAssistantMessage, addBlock,
@@ -67,6 +217,30 @@ export function useCommands() {
   } = useStream()
   const { current, switchTo, goBack, goHome } = useAppContext()
   const canvasDispatch = useCanvasEvents((s) => s.dispatch)
+
+  const isStyleConfirmedForPage =
+    styleLockEnabled &&
+    styleConfirmed &&
+    current.type === "page" &&
+    current.pageId === styleConfirmedPageId
+
+  const requireStyleConfirmation = useCallback(
+    (actionLabel: string): boolean => {
+      if (!styleLockEnabled) return false
+      if (isStyleConfirmedForPage) return false
+      addAssistantMessage(
+        `Style lock is enabled. Run \`/style ...\` and then \`/style-confirm\` before ${actionLabel}.`
+      )
+      return true
+    },
+    [styleLockEnabled, isStyleConfirmedForPage, addAssistantMessage]
+  )
+
+  const invalidateStyleConfirmation = useCallback(() => {
+    if (!styleLockEnabled) return
+    setStyleConfirmed(false)
+    setStyleConfirmedPageId(current.pageId)
+  }, [styleLockEnabled, current.pageId])
 
   const getAutoComplete = useCallback(
     (partial: string, ctx: ContextType) => {
@@ -330,6 +504,7 @@ export function useCommands() {
         break
 
       case "add": {
+        if (requireStyleConfirmation("adding elements to canvas")) return
         if (!args) {
           addAssistantMessage("Usage: `/add <text>` or `/add sticky: <text>`")
           return
@@ -339,6 +514,27 @@ export function useCommands() {
         const addType = lower.startsWith("sticky:") ? "sticky" : "note"
         const content = isPrefixed ? args.split(":").slice(1).join(":").trim() : args
         canvasDispatch({ type: "add", addType, content })
+        break
+      }
+
+      case "compose": {
+        if (requireStyleConfirmation("AI composition on canvas")) return
+        if (!current.pageId) {
+          addAssistantMessage("Open a page first.")
+          return
+        }
+        if (!args) {
+          addAssistantMessage("Usage: `/compose <topic>`")
+          return
+        }
+        const includeDiagram = /diagram|flowchart|mindmap|mind map|visual/i.test(args)
+        canvasDispatch({
+          type: "ai-compose",
+          request: args,
+          pageId: current.pageId,
+          includeDiagram,
+        })
+        addSystemMessage("AI is composing structured canvas content…")
         break
       }
 
@@ -355,7 +551,81 @@ export function useCommands() {
           return
         }
         canvasDispatch({ type: "set-background", color })
+        invalidateStyleConfirmation()
         addSystemMessage(`Background → ${args} (${color})`)
+        break
+      }
+
+      case "theme": {
+        const value = args.trim().toLowerCase()
+        if (value !== "light" && value !== "dark") {
+          addAssistantMessage("Usage: `/theme light` or `/theme dark`")
+          return
+        }
+        canvasDispatch({ type: "set-theme", theme: value })
+        invalidateStyleConfirmation()
+        addSystemMessage(`Theme → ${value}`)
+        break
+      }
+
+      case "style": {
+        if (!args) {
+          addAssistantMessage(
+            "Usage: `/style key=value ...`\n" +
+            "Example: `/style theme=light bg=#ffffff stroke=#1f2937 fill=#e2e8f0 strokeWidth=2 strokeStyle=solid fillStyle=solid font=helvetica fontSize=18 textAlign=left endArrow=arrow`"
+          )
+          return
+        }
+        const { settings, errors } = parseStyleArgs(args)
+        if (errors.length > 0) {
+          addAssistantMessage(`Style parse errors:\n${errors.map((e) => `• ${e}`).join("\n")}`)
+          return
+        }
+        if (Object.keys(settings).length === 0) {
+          addAssistantMessage("No valid style keys found.")
+          return
+        }
+        canvasDispatch({ type: "set-style", settings })
+        invalidateStyleConfirmation()
+        addSystemMessage("Applied canvas style settings.")
+        break
+      }
+
+      case "style-lock": {
+        const mode = args.trim().toLowerCase() || "status"
+        if (mode === "status") {
+          addSystemMessage(
+            `Style lock: ${styleLockEnabled ? "ON" : "OFF"}. ` +
+            `Confirmed for current page: ${isStyleConfirmedForPage ? "YES" : "NO"}.`
+          )
+          return
+        }
+        if (mode === "on") {
+          setStyleLockEnabled(true)
+          setStyleConfirmed(false)
+          setStyleConfirmedPageId(current.pageId)
+          addSystemMessage("Style lock enabled. Set style and run /style-confirm before canvas write/edit actions.")
+          return
+        }
+        if (mode === "off") {
+          setStyleLockEnabled(false)
+          setStyleConfirmed(false)
+          setStyleConfirmedPageId(undefined)
+          addSystemMessage("Style lock disabled.")
+          return
+        }
+        addAssistantMessage("Usage: `/style-lock on`, `/style-lock off`, or `/style-lock status`")
+        break
+      }
+
+      case "style-confirm": {
+        if (!styleLockEnabled) {
+          addAssistantMessage("Style lock is currently off. Enable it with `/style-lock on`.")
+          return
+        }
+        setStyleConfirmed(true)
+        setStyleConfirmedPageId(current.pageId)
+        addSystemMessage("Canvas style confirmed for this page.")
         break
       }
 
@@ -364,6 +634,7 @@ export function useCommands() {
         break
 
       case "diagram":
+        if (requireStyleConfirmation("diagram generation")) return
         if (!current.pageId) {
           addAssistantMessage("Open a page first.")
           return
@@ -380,6 +651,7 @@ export function useCommands() {
         break
 
       case "layout":
+        if (requireStyleConfirmation("auto-layout")) return
         if (!current.pageId) {
           addAssistantMessage("Open a page first.")
           return
@@ -482,221 +754,6 @@ export function useCommands() {
     }
   }
 
-  function detectNaturalLanguageCommand(text: string): boolean {
-    const lower = text.toLowerCase().trim()
-
-    // Open page
-    const openMatch = lower.match(/^open\s+(.+)$/)
-    if (openMatch) {
-      executeCommand(`/open ${openMatch[1]}`)
-      return true
-    }
-
-    // Navigation
-    if (lower === "close" || lower === "go home" || lower === "go to home") {
-      executeCommand("/home")
-      return true
-    }
-    if (lower === "go back" || lower === "back") {
-      executeCommand("/back")
-      return true
-    }
-
-    // Canvas commands
-    if (current.type === "page") {
-      const bgMatch = lower.match(
-        /(?:change|set|make)\s+(?:the\s+)?(?:canvas\s+)?background\s+(?:color\s+)?(?:to\s+)?(.+)/
-      )
-      if (bgMatch) {
-        executeCommand(`/bg ${bgMatch[1].trim()}`)
-        return true
-      }
-      const bgShort = lower.match(
-        /^(black|dark|white|default|midnight|navy|charcoal)\s+background$/
-      )
-      if (bgShort) {
-        executeCommand(`/bg ${bgShort[1]}`)
-        return true
-      }
-      if (["open library", "show library", "library"].includes(lower)) {
-        executeCommand("/library")
-        return true
-      }
-
-      // "add to canvas about X" / "put that on canvas" / "move to canvas"
-      // → Find the last AI response (optionally matching topic) and add it
-      const canvasAboutMatch = lower.match(
-        /^(?:add|put|move|write|send)\s+(?:that|this|it)?\s*(?:to|on|onto)\s+(?:the\s+)?canvas\s*(?:about\s+(.+))?$/i
-      ) || lower.match(
-        /^(?:add|put|write)\s+(?:to|on)\s+(?:the\s+)?canvas\s+(?:about\s+)?(.+)/i
-      )
-      if (canvasAboutMatch) {
-        const topic = canvasAboutMatch[1]?.trim()
-        // Find the last assistant message, optionally matching topic
-        const assistantMessages = items
-          .filter((i): i is import("../types").AssistantItem => i.type === "assistant")
-          .reverse()
-
-        let lastMsg = assistantMessages[0]
-        if (topic && assistantMessages.length > 0) {
-          const topicLower = topic.toLowerCase()
-          const matched = assistantMessages.find(
-            (m) => m.content?.toLowerCase().includes(topicLower)
-          )
-          if (matched) lastMsg = matched
-        }
-
-        if (lastMsg?.content) {
-          canvasDispatch({ type: "add", addType: "text", content: lastMsg.content })
-          addSystemMessage("Sent to canvas.")
-          return true
-        } else {
-          addSystemMessage("No recent AI response to add to canvas.")
-          return true
-        }
-      }
-      const stickyMatch = lower.match(
-        /^add\s+(?:a\s+)?sticky\s+(?:note\s+)?(?:saying\s+|with\s+)?(.+)/i
-      )
-      if (stickyMatch) {
-        executeCommand(`/add sticky: ${stickyMatch[1]}`)
-        return true
-      }
-      // Only match explicit canvas-oriented find patterns
-      const findMatch = lower.match(/^find\s+(.+?)\s+on\s+(?:the\s+)?canvas$/i)
-        || lower.match(/^find\s+on\s+canvas\s+(.+)$/i)
-      if (findMatch) {
-        executeCommand(`/find ${findMatch[1]}`)
-        return true
-      }
-      if (["reorganize", "reorganize canvas", "auto layout", "layout"].includes(lower)) {
-        executeCommand("/layout")
-        return true
-      }
-      if (["summarize", "summarize this page", "summarize page", "what's on this page", "whats on this page"].includes(lower)) {
-        executeCommand("/summarize")
-        return true
-      }
-      if (lower === "zoom in") {
-        canvasDispatch({ type: "zoom", direction: "in" })
-        addSystemMessage("Zoomed in.")
-        return true
-      }
-      if (lower === "zoom out") {
-        canvasDispatch({ type: "zoom", direction: "out" })
-        addSystemMessage("Zoomed out.")
-        return true
-      }
-      if (lower === "zoom to fit" || lower === "fit to screen") {
-        canvasDispatch({ type: "zoom", direction: "fit" })
-        addSystemMessage("Zoomed to fit.")
-        return true
-      }
-      if (["page stats", "show stats", "statistics"].includes(lower)) {
-        executeCommand("/page-stats")
-        return true
-      }
-    }
-
-    // Global natural language
-    const simpleMap: Record<string, string> = {
-      "show notes": "/notes", "list notes": "/notes", "my notes": "/notes",
-      "show tags": "/tags", "list tags": "/tags", "my tags": "/tags",
-      "show tasks": "/tasks", "list tasks": "/tasks", "my tasks": "/tasks",
-      "show stats": "/stats", statistics: "/stats", stats: "/stats",
-      "show pages": "/pages", "list pages": "/pages", "my pages": "/pages",
-      help: "/help", commands: "/help", "what can you do": "/help",
-      settings: "/settings", preferences: "/settings",
-      export: "/export", "export all": "/export", "export workspace": "/export",
-      "run curator": "/curator", curator: "/curator", "clean up": "/curator",
-    }
-    if (simpleMap[lower]) {
-      executeCommand(simpleMap[lower])
-      return true
-    }
-
-    // Capture detection
-    const captureMatch = lower.match(/^(?:capture|save|remember)\s+(.+)$/i)
-    if (captureMatch && captureMatch[1].length >= 3) {
-      executeCommand(`/capture ${captureMatch[1]}`)
-      return true
-    }
-
-    return false
-  }
-
-  /**
-   * Handle NLP-detected intents (write, add, capture, search, find, ask).
-   * Only called when confidence is high enough (≥ 0.85), meaning the user
-   * used very explicit keywords.
-   */
-  async function handleNLPIntent(intent: NLPIntent) {
-    switch (intent.type) {
-      case "write":
-        // User explicitly said "write on canvas …" — create raw text, not a sticky
-        if (current.type === "page" && intent.content) {
-          canvasDispatch({ type: "add", addType: "text", content: intent.content })
-          addSystemMessage(`✍️ Added to canvas: "${intent.content.slice(0, 40)}${intent.content.length > 40 ? "..." : ""}"`)
-        } else {
-          // Not on a canvas, treat as capture
-          executeCommand(`/capture ${intent.content}`)
-        }
-        break
-
-      case "add":
-        if (current.type === "page" && intent.content) {
-          const addType = intent.subType || "note"
-          canvasDispatch({ type: "add", addType, content: intent.content })
-          addSystemMessage(`Added ${addType}: "${intent.content.slice(0, 40)}${intent.content.length > 40 ? "..." : ""}"`)
-        } else {
-          addAssistantMessage("You need to open a page first to add items to the canvas.")
-        }
-        break
-
-      case "diagram":
-        if (current.type === "page" && intent.content) {
-          canvasDispatch({
-            type: "generate-diagram",
-            request: intent.content,
-            pageId: current.pageId,
-          })
-          addSystemMessage(`🎨 Generating diagram: "${intent.content.slice(0, 60)}${intent.content.length > 60 ? "..." : ""}"`)
-        } else {
-          addAssistantMessage("You need to open a page first to generate diagrams on the canvas.")
-        }
-        break
-
-      case "capture":
-        if (intent.content && intent.content.length >= 3) {
-          executeCommand(`/capture ${intent.content}`)
-        }
-        break
-
-      case "find":
-        if (current.type === "page" && intent.content) {
-          canvasDispatch({ type: "search", query: intent.content })
-          addSystemMessage(`🔍 Searching canvas for: "${intent.content}"`)
-        } else if (intent.content) {
-          executeCommand(`/search ${intent.content}`)
-        }
-        break
-
-      case "search":
-        if (intent.content) {
-          executeCommand(`/search ${intent.content}`)
-        }
-        break
-
-      case "ask":
-        // Fall through to AI chat
-        break
-
-      case "none":
-      default:
-        break
-    }
-  }
-
   const handleSubmit = async () => {
     if (!inputValue.trim()) return
     const q = inputValue.trim()
@@ -721,16 +778,25 @@ export function useCommands() {
     }
 
     addUserMessage(q)
-    if (detectNaturalLanguageCommand(q)) return
 
-    // Try NLP intent detection for natural language commands
-    if (shouldParseNLP(q)) {
-      const intent = parseNLPIntent(q)
-      if (intent.type !== "ask" && intent.confidence >= 0.85) {
-        await handleNLPIntent(intent)
-        return
+    let intentRouted = false
+    try {
+      const decision = await api.decideIntent(q, current.type, current.pageId)
+      if (
+        decision.mode === "command" &&
+        typeof decision.command === "string" &&
+        decision.command.startsWith("/") &&
+        decision.confidence >= 0.7
+      ) {
+        const routed = `${decision.command} ${decision.args || ""}`.trim()
+        await executeCommand(routed)
+        intentRouted = true
       }
+    } catch {
+      intentRouted = false
     }
+
+    if (intentRouted) return
 
     // Chat with AI
     setLoading(true)

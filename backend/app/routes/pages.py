@@ -125,7 +125,8 @@ async def save_page_canvas(page_id: str, payload: dict):
                     x = el.get("x")
                     y = el.get("y")
                     if x is not None and y is not None:
-                        await db.update_note(cd["noteId"], canvas_x=x, canvas_y=y)
+                        # note-frame is drawn with a 12px outer offset; persist logical card origin
+                        await db.update_note(cd["noteId"], canvas_x=float(x) + 12.0, canvas_y=float(y) + 12.0)
 
         asyncio.create_task(sync_positions())
     except Exception as e:

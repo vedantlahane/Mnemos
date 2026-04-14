@@ -43,6 +43,22 @@ const EMPTY_SCENE: CanvasScene = {
   files: {},
 }
 
+function getSceneBackground(scene: CanvasScene): string {
+  const bg = scene.appState?.viewBackgroundColor
+  return typeof bg === "string" && bg.length > 0 ? bg : DARK_BG
+}
+
+function normalizeTheme(theme: unknown, bg: string): "dark" | "light" {
+  if (theme === "dark" || theme === "light") return theme
+  const h = bg.replace("#", "")
+  if (h.length < 6) return "dark"
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  const luma = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+  return luma < 0.5 ? "dark" : "light"
+}
+
 function getCustomData(el: ExcalidrawEl): Record<string, unknown> {
   return (el.customData as Record<string, unknown>) || {}
 }
@@ -126,6 +142,7 @@ export function useExcalidraw(pageId: string | undefined) {
       // Parse stored scene
       const storedCanvas = canvasResp.canvas_data || canvasResp.page?.canvas_data || {}
       const scene = normalizeScene(storedCanvas)
+      const canvasBg = getSceneBackground(scene)
 
       // Extract response data
       const notes: Note[] = canvasResp.notes || []
@@ -202,7 +219,8 @@ export function useExcalidraw(pageId: string | undefined) {
                 x: note.canvas_x ?? undefined,
                 y: note.canvas_y ?? undefined,
               },
-              position
+              position,
+              canvasBg
             )
           )
         })
@@ -280,7 +298,9 @@ export function useExcalidraw(pageId: string | undefined) {
           const stickyEls = createSticky(
             element.content,
             element.position_x ?? 120 + index * 40,
-            element.position_y ?? 120 + index * 40
+            element.position_y ?? 120 + index * 40,
+            undefined,
+            canvasBg
           ).map((el) => ({
             ...el,
             customData: {
@@ -372,10 +392,17 @@ export function useExcalidraw(pageId: string | undefined) {
                 ? (appState.zoom as { value: number }).value
                 : (appState.zoom as number) || 1
 
+            const viewBackgroundColor =
+              typeof appState.viewBackgroundColor === "string" && appState.viewBackgroundColor.length > 0
+                ? appState.viewBackgroundColor
+                : DARK_BG
+
+            const theme = normalizeTheme(appState.theme, viewBackgroundColor)
+
             // Expand appState to include editor defaults for persistence
             const persistentAppState = {
-              viewBackgroundColor: appState.viewBackgroundColor || DARK_BG,
-              theme: "dark" as const,
+              viewBackgroundColor,
+              theme,
               zoom: appState.zoom,
               scrollX: appState.scrollX,
               scrollY: appState.scrollY,
@@ -392,6 +419,7 @@ export function useExcalidraw(pageId: string | undefined) {
               currentItemTextAlign: appState.currentItemTextAlign,
               currentItemStartArrowhead: appState.currentItemStartArrowhead,
               currentItemEndArrowhead: appState.currentItemEndArrowhead,
+              currentItemRoundness: appState.currentItemRoundness,
               gridSize: appState.gridSize,
             }
 

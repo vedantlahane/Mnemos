@@ -4,8 +4,53 @@ from app.services import embeddings
 from app.db.supabase import db
 from app.llm import router as llm
 from app.auth.dependencies import get_optional_user_id
+from pydantic import BaseModel
+from typing import Optional
 
 router = APIRouter()
+
+
+class IntentRequest(BaseModel):
+    question: str
+    context_type: str = "home"
+    page_id: Optional[str] = None
+
+
+CONTEXT_COMMANDS: dict[str, list[str]] = {
+    "home": [
+        "/pages", "/page", "/open", "/search", "/notes", "/tags", "/tasks", "/stats",
+        "/capture", "/curator", "/gaps", "/reading", "/export", "/settings", "/history", "/help",
+    ],
+    "page": [
+        "/find", "/add", "/compose", "/diagram", "/layout", "/summarize", "/page-stats",
+        "/bg", "/theme", "/style", "/style-lock", "/style-confirm", "/rename", "/search",
+        "/capture", "/gaps", "/reading", "/help", "/close", "/home",
+    ],
+    "settings": ["/home", "/help", "/history"],
+    "history": ["/home", "/help", "/open"],
+}
+
+
+@router.post("/chat/intent")
+async def chat_intent(payload: IntentRequest, user_id: str = Depends(get_optional_user_id)):
+    context_type = payload.context_type if payload.context_type in CONTEXT_COMMANDS else "home"
+    page_name = None
+    if context_type == "page" and payload.page_id:
+        try:
+            page = await db.get_page(payload.page_id)
+            if page:
+                page_name = page.get("name")
+        except Exception:
+            page_name = None
+
+    available_commands = CONTEXT_COMMANDS.get(context_type, CONTEXT_COMMANDS["home"])
+    decision = await llm.decide_command_intent(
+        question=payload.question,
+        context_type=context_type,
+        page_name=page_name,
+        available_commands=available_commands,
+    )
+    return decision
 
 
 @router.post("/chat")

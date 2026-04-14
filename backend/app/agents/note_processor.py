@@ -9,26 +9,76 @@ from app.db.supabase import db
 from app.services import embeddings
 from app.llm import router as llm
 from app.services.page_router import route_note
-import random as _random
+import hashlib
+
+
+def _clean_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split()).strip()
+
+
+def _clean_str_list(values: object, max_items: int = 12) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    for v in values:
+        if isinstance(v, str):
+            s = _clean_text(v)
+            if s:
+                out.append(s)
+    seen = set()
+    deduped = []
+    for item in out:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped[:max_items]
+
+
+def _fallback_title(raw_text: str) -> str:
+    base = _clean_text(raw_text)
+    if not base:
+        return "Untitled"
+    return base[:60] + ("..." if len(base) > 60 else "")
+
+
+def _fallback_summary(raw_text: str) -> str:
+    base = _clean_text(raw_text)
+    if not base:
+        return "No summary available."
+    return base[:280] + ("..." if len(base) > 280 else "")
+
+
+def _deterministic_canvas_position(note_id: str, note_count: int) -> tuple[float, float]:
+    digest = hashlib.md5(note_id.encode("utf-8")).hexdigest()
+    salt = int(digest[:8], 16)
+    slot = (note_count + salt) % 48
+    col = slot % 8
+    row = slot // 8
+    return float(100 + col * 380), float(100 + row * 300)
 
 
 async def extract_node(state: NoteProcessorState) -> dict:
     """LLM extraction: title, summary, tags, tasks, entities."""
     try:
         processed = await llm.process_capture(state["raw_text"])
+        title = _clean_text(processed.title) or _fallback_title(state["raw_text"])
+        summary = _clean_text(processed.summary) or _fallback_summary(state["raw_text"])
         return {
-            "title": processed.title,
-            "summary": processed.summary,
-            "tags": processed.tags,
-            "tasks": processed.tasks,
-            "entities": processed.entities,
+            "title": title,
+            "summary": summary,
+            "tags": _clean_str_list(processed.tags),
+            "tasks": _clean_str_list(processed.tasks),
+            "entities": _clean_str_list(processed.entities),
             "status": "embedding",
         }
     except Exception as e:
-        raw = state["raw_text"]
         return {
-            "title": raw[:50] + ("..." if len(raw) > 50 else ""),
-            "summary": "Processing failed — raw text preserved",
+            "title": _fallback_title(state["raw_text"]),
+            "summary": _fallback_summary(state["raw_text"]),
             "tags": [],
             "tasks": [],
             "entities": [],
@@ -115,6 +165,7 @@ async def route_node(state: NoteProcessorState) -> dict:
             page_id = None
         return {
             "page_id": page_id,
+            "page_name": "Uncategorized" if page_id else None,
             "errors": state.get("errors", []) + [f"route: {e}"],
             "status": "connecting",
         }
@@ -126,6 +177,7 @@ async def connect_edges_node(state: NoteProcessorState) -> dict:
     if not related:
         return {"status": "placing"}
 
+    edge_errors: list[str] = []
     for rel in related[:3]:
         try:
             already = await db.edge_exists(state["note_id"], rel["id"])
@@ -155,7 +207,9 @@ async def connect_edges_node(state: NoteProcessorState) -> dict:
                     created_by="processor",
                 )
         except Exception:
-            pass
+            edge_errors.append(f"edge:{state['note_id']}->{rel.get('id')}")
+    if edge_errors:
+        return {"errors": state.get("errors", []) + edge_errors, "status": "placing"}
     return {"status": "placing"}
 
 
@@ -182,8 +236,8 @@ async def place_on_canvas_node(state: NoteProcessorState) -> dict:
                 "status": "syncing_canvas",
             }
     except Exception as e:
-        x = _random.uniform(100, 1800)
-        y = _random.uniform(100, 1300)
+        notes_for_page = await db.get_notes_for_page(page_id)
+        x, y = _deterministic_canvas_position(state["note_id"], len(notes_for_page))
         await db.update_note(state["note_id"], canvas_x=x, canvas_y=y)
         return {
             "canvas_x": x,
@@ -191,7 +245,15 @@ async def place_on_canvas_node(state: NoteProcessorState) -> dict:
             "errors": state.get("errors", []) + [f"place: {e}"],
             "status": "syncing_canvas",
         }
-    return {"status": "syncing_canvas"}
+    notes_for_page = await db.get_notes_for_page(page_id)
+    x, y = _deterministic_canvas_position(state["note_id"], len(notes_for_page))
+    await db.update_note(state["note_id"], canvas_x=x, canvas_y=y)
+    return {
+        "canvas_x": x,
+        "canvas_y": y,
+        "errors": state.get("errors", []) + ["place:no-placement-from-cartographer"],
+        "status": "syncing_canvas",
+    }
 
 
 async def sync_excalidraw_node(state: NoteProcessorState) -> dict:

@@ -11,6 +11,8 @@ from app.services.text_layout import layout_single_text
 
 CARD_WIDTH = 360
 CARD_HEIGHT = 240
+DEFAULT_BG = "#0e0e1a"
+DEFAULT_THEME = "dark"
 
 
 def _luminance(hex_color: str) -> float:
@@ -24,7 +26,7 @@ def _luminance(hex_color: str) -> float:
 
 
 def _is_dark_bg(scene: dict) -> bool:
-    bg = (scene.get("appState") or {}).get("viewBackgroundColor", "#0e0e1a")
+    bg = (scene.get("appState") or {}).get("viewBackgroundColor", DEFAULT_BG)
     return _luminance(bg) < 0.4
 
 def get_font_string(font_size: int, font_family: int) -> str:
@@ -40,8 +42,8 @@ def empty_scene() -> dict:
     return {
         "elements": [],
         "appState": {
-            "viewBackgroundColor": "#0e0e1a",
-            "theme": "dark",
+            "viewBackgroundColor": DEFAULT_BG,
+            "theme": DEFAULT_THEME,
         },
         "files": {},
     }
@@ -56,13 +58,17 @@ def normalize_scene(scene: Any) -> dict:
     normalized["files"] = scene.get("files") if isinstance(scene.get("files"), dict) else {}
 
     app_state = scene.get("appState") if isinstance(scene.get("appState"), dict) else {}
+    view_bg = app_state.get("viewBackgroundColor") if isinstance(app_state.get("viewBackgroundColor"), str) else DEFAULT_BG
+    theme = app_state.get("theme")
+    if theme not in {"dark", "light"}:
+        theme = "dark" if _luminance(view_bg) < 0.4 else "light"
+
     normalized["appState"] = {
         **normalized["appState"],
         **app_state,
-        "viewBackgroundColor": "#0e0e1a",
-        "theme": "dark",
+        "viewBackgroundColor": view_bg,
+        "theme": theme,
     }
-    normalized["appState"].pop("gridSize", None)
     return normalized
 
 

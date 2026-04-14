@@ -1,6 +1,6 @@
 import { nanoid } from "../utils"
 import { prepareWithSegments, layoutWithLines } from "@chenglou/pretext"
-import { contrastTextColor, contrastMutedColor, contrastAccentColor, luminance } from "./canvasContext"
+import { contrastTextColor, luminance } from "./canvasContext"
 
 // ─── Types ────────────────────────────────────────
 export interface NoteBlock {
@@ -332,18 +332,31 @@ export function createTextBare(
   text: string,
   x: number,
   y: number,
-  canvasBg?: string
+  canvasBg?: string,
+  opts?: {
+    fontSize?: number
+    fontFamily?: number
+    maxWidth?: number
+    maxLines?: number
+    customDataType?: string
+  }
 ): BaseElement[] {
   // Auto-pick text color based on background
   const textColor = canvasBg ? contrastTextColor(canvasBg) : "#ffffff"
+  const fontSize = opts?.fontSize ?? 20
+  const fontFamily = opts?.fontFamily ?? 1
+  const maxWidth = opts?.maxWidth ?? 800
+  const maxLines = opts?.maxLines ?? 100
+  const customDataType = opts?.customDataType ?? "raw-text"
+
   return [
     textElement(nanoid(), x, y, text, {
-      fontSize: 20,
-      fontFamily: 1, // Virgil (handwritten)
+      fontSize,
+      fontFamily,
       color: textColor,
-      maxWidth: 800,
-      maxLines: 100,
-      customData: { type: "raw-text" }
+      maxWidth,
+      maxLines,
+      customData: { type: customDataType }
     })
   ]
 }

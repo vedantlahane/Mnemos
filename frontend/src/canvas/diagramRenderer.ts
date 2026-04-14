@@ -12,7 +12,7 @@
  */
 
 import { nanoid } from "../utils"
-import { contrastTextColor, contrastAccentColor, contrastMutedColor, luminance } from "./canvasContext"
+import { contrastMutedColor } from "./canvasContext"
 import type { CanvasContext } from "./canvasContext"
 import { layoutText } from "./canvasAI"
 
@@ -202,6 +202,13 @@ function seed(): number {
   return Math.floor(Math.random() * 2_000_000_000)
 }
 
+function resolveStyle(el: TopologyElement, index: number): NonNullable<TopologyElement["style"]> {
+  if (el.style) return el.style
+  // Avoid monotone diagrams when style is omitted by the LLM.
+  const cycle: Array<NonNullable<TopologyElement["style"]>> = ["accent", "default", "muted"]
+  return cycle[index % cycle.length]
+}
+
 // ── Main render function ──
 
 export function renderTopology(
@@ -209,7 +216,22 @@ export function renderTopology(
   ctx: CanvasContext
 ): Record<string, unknown>[] {
   const isDark = ctx.isDark
-  const bg = ctx.backgroundColor
+  const appState = ctx.appState
+  const baseStrokeWidth =
+    typeof appState.currentItemStrokeWidth === "number" && appState.currentItemStrokeWidth > 0
+      ? appState.currentItemStrokeWidth
+      : 1
+  const baseStrokeStyle =
+    appState.currentItemStrokeStyle === "dashed" || appState.currentItemStrokeStyle === "dotted"
+      ? appState.currentItemStrokeStyle
+      : "solid"
+  const baseRoughness = typeof appState.currentItemRoughness === "number" ? appState.currentItemRoughness : 0
+  const baseFontFamily =
+    typeof appState.currentItemFontFamily === "number" ? appState.currentItemFontFamily : 1
+  const baseFontSize =
+    typeof appState.currentItemFontSize === "number" && appState.currentItemFontSize >= 10
+      ? appState.currentItemFontSize
+      : 14
 
   // Compute positions based on layout type
   const boxElements = topology.elements.filter((e) => e.type !== "arrow")
@@ -281,11 +303,11 @@ export function renderTopology(
   }
 
   // ── Box elements ──
-  for (const el of boxElements) {
+  boxElements.forEach((el, index) => {
     const pos = positions.get(el.id)
-    if (!pos) continue
+    if (!pos) return
 
-    const style = el.style || "default"
+    const style = resolveStyle(el, index)
     const colors = getStyleColors(style, isDark)
 
     // Background rectangle
@@ -300,9 +322,9 @@ export function renderTopology(
       strokeColor: colors.border,
       backgroundColor: colors.bg,
       fillStyle: "solid",
-      strokeWidth: 1,
-      strokeStyle: "solid",
-      roughness: 0,
+      strokeWidth: baseStrokeWidth,
+      strokeStyle: baseStrokeStyle,
+      roughness: baseRoughness,
       opacity: 100,
       groupIds: [groupId],
       frameId: null,
@@ -319,7 +341,7 @@ export function renderTopology(
     })
 
     // Text label
-    const textLayout = layoutText(el.label, 14, 1, pos.w - 16, 4)
+    const textLayout = layoutText(el.label, baseFontSize, baseFontFamily, pos.w - 16, 4)
     excalidrawElements.push({
       id: `diag-text-${el.id}`,
       type: "text",
@@ -329,8 +351,8 @@ export function renderTopology(
       height: textLayout.height,
       text: textLayout.text,
       originalText: el.label,
-      fontSize: 14,
-      fontFamily: 1,
+      fontSize: baseFontSize,
+      fontFamily: baseFontFamily,
       textAlign: "left",
       verticalAlign: "top",
       containerId: null,
@@ -342,7 +364,7 @@ export function renderTopology(
       fillStyle: "solid",
       strokeWidth: 1,
       strokeStyle: "solid",
-      roughness: 0,
+      roughness: baseRoughness,
       opacity: 100,
       groupIds: [groupId],
       frameId: null,
@@ -357,7 +379,7 @@ export function renderTopology(
       locked: false,
       customData: { type: "diagram-label", elementId: el.id },
     })
-  }
+  })
 
   // ── Connections (arrows) ──
   for (const conn of topology.connections) {
@@ -394,8 +416,8 @@ export function renderTopology(
 
     const dx = endX - startX
     const dy = endY - startY
-    const arrowColor = isDark ? "#6b7280" : "#9ca3af"
-    const strokeStyle = conn.style || "solid"
+    const arrowColor = contrastMutedColor(ctx.backgroundColor)
+    const strokeStyle = conn.style || baseStrokeStyle
 
     excalidrawElements.push({
       id: `diag-arrow-${nanoid()}`,
@@ -408,9 +430,9 @@ export function renderTopology(
       strokeColor: arrowColor,
       backgroundColor: "transparent",
       fillStyle: "solid",
-      strokeWidth: 1.5,
+      strokeWidth: Math.max(1.25, baseStrokeWidth),
       strokeStyle,
-      roughness: 0,
+      roughness: baseRoughness,
       opacity: 70,
       groupIds: [groupId],
       frameId: null,
