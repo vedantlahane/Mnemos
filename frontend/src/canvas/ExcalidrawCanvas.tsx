@@ -11,7 +11,10 @@ import { useExcalidraw } from "./useExcalidraw"
 import { useStream } from "../hooks/useStream"
 import { useCanvasEvents, type CanvasCommand } from "../hooks/useCanvasEvents"
 import { useAppContext } from "../hooks/useAppContext"
-import { createNoteCard, createSticky } from "./canvasAI"
+import { useExcalidrawAPI } from "../hooks/useExcalidrawAPI"
+import { createNoteCard, createSticky, createTextBare } from "./canvasAI"
+import { readCanvasContext, findOpenPosition } from "./canvasContext"
+import { renderTopology } from "./diagramRenderer"
 import { api } from "../api/client"
 import { nanoid } from "../utils"
 
@@ -164,20 +167,40 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
 
       case "add": {
         if (!exc) return
-        const appState = exc.getAppState()
-        const zoom = getZoomValue(appState)
-        const centerX = cmd.x ?? (-(appState.scrollX as number || 0) + window.innerWidth / 2) / zoom
-        const centerY = cmd.y ?? (-(appState.scrollY as number || 0) + window.innerHeight / 2) / zoom
+        const ctx = readCanvasContext(exc)
+        const bgColor = ctx.backgroundColor
 
-        if (cmd.addType === "sticky") {
-          addElements(createSticky(cmd.content, centerX, centerY))
+        if (cmd.addType === "text") {
+          const pos = cmd.x !== undefined
+            ? { x: cmd.x, y: cmd.y ?? ctx.viewportCenter.y }
+            : findOpenPosition(ctx, 500, 50)
+          addElements(createTextBare(cmd.content, pos.x, pos.y, bgColor))
+          if (current.pageId) {
+            try {
+              await api.createElement(current.pageId, {
+                element_type: "text",
+                content: cmd.content,
+                position_x: pos.x,
+                position_y: pos.y,
+                width: 500,
+                height: 50,
+                created_by: "user",
+              })
+            } catch { /* non-critical */ }
+          }
+          addSystemMessage("Text added.")
+        } else if (cmd.addType === "sticky") {
+          const pos = cmd.x !== undefined
+            ? { x: cmd.x, y: cmd.y ?? ctx.viewportCenter.y }
+            : findOpenPosition(ctx, 180, 160)
+          addElements(createSticky(cmd.content, pos.x, pos.y, undefined, bgColor))
           if (current.pageId) {
             try {
               await api.createElement(current.pageId, {
                 element_type: "sticky",
                 content: cmd.content,
-                position_x: centerX,
-                position_y: centerY,
+                position_x: pos.x,
+                position_y: pos.y,
                 width: 180,
                 height: 160,
                 created_by: "user",
@@ -187,6 +210,9 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
           addSystemMessage("Sticky note added.")
         } else {
           if (current.pageId) {
+            const pos = cmd.x !== undefined
+              ? { x: cmd.x, y: cmd.y ?? ctx.viewportCenter.y }
+              : findOpenPosition(ctx, 360, 240)
             try {
               const resp = await api.capture({
                 text: cmd.content,
@@ -203,7 +229,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
                       title: note.title || "Untitled",
                       summary: note.summary || note.raw_text,
                       tags: note.tags || [],
-                    }, { x: centerX, y: centerY })
+                    }, { x: pos.x, y: pos.y }, bgColor)
                   )
                 } catch { /* processing may not be done */ }
               }, 3000)
@@ -214,7 +240,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
                   title: cmd.content.slice(0, 50),
                   summary: cmd.content,
                   tags: [],
-                }, { x: centerX, y: centerY })
+                }, { x: pos.x, y: pos.y }, bgColor)
               )
               addSystemMessage("Note card added (local only).")
             }
@@ -233,18 +259,51 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
 
       case "open-library": {
         if (!exc) return
-        for (const sel of [
-          '[data-testid="toolbar-library"]', ".library-button",
-          '[aria-label="Library"]', ".ToolIcon__library",
-        ]) {
-          const btn = document.querySelector<HTMLButtonElement>(sel)
-          if (btn) { btn.click(); return }
-        }
         try {
-          (exc as unknown as { toggleSidebar?: (o: { name: string; force: boolean }) => void })
-            .toggleSidebar?.({ name: "library", force: true })
+          // Excalidraw's built-in library lives in DEFAULT_SIDEBAR
+          // which has name: "default" and defaultTab: "library"
+          const toggled = (exc as any).toggleSidebar?.({
+            name: "default",
+            tab: "library",
+            force: true,
+          })
+          if (toggled === undefined || toggled === false) {
+            // Fallback: set openSidebar via updateScene appState
+            try {
+              exc.updateScene({
+                appState: {
+                  openSidebar: { name: "default", tab: "library" },
+                } as any,
+              })
+            } catch {
+              // Last resort: try clicking the native library button
+              const libBtn = document.querySelector(
+                '.excalidraw button[data-testid="library-button"], .excalidraw .sidebar-trigger'
+              ) as HTMLButtonElement | null
+              if (libBtn) libBtn.click()
+              else addSystemMessage("Library button not found. Use the Excalidraw toolbar.")
+            }
+          }
         } catch {
-          addSystemMessage("Click 📚 in toolbar to open library.")
+          addSystemMessage("Could not open Excalidraw Library.")
+        }
+        break
+      }
+
+      case "close-library": {
+        if (!exc) return
+        try {
+          (exc as any).toggleSidebar?.({
+            name: "default",
+            tab: "library",
+            force: false,
+          })
+        } catch {
+          try {
+            exc.updateScene({
+              appState: { openSidebar: null } as any,
+            })
+          } catch {}
         }
         break
       }
@@ -268,6 +327,25 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       case "refresh":
         reload()
         break
+
+      case "generate-diagram": {
+        if (!exc) return
+        addSystemMessage("🎨 Generating diagram…")
+        try {
+          const resp = await api.generateDiagram(cmd.request, cmd.pageId)
+          if (resp.topology) {
+            const ctx = readCanvasContext(exc)
+            const diagramElements = renderTopology(resp.topology as any, ctx)
+            addElements(diagramElements as any)
+            addSystemMessage(`Diagram created: "${resp.topology.title || "Untitled"}" with ${resp.topology.elements?.length || 0} elements.`)
+          } else {
+            addSystemMessage("Diagram generation returned empty result.")
+          }
+        } catch (e) {
+          addSystemMessage("Failed to generate diagram. Check backend logs.")
+        }
+        break
+      }
     }
   }
 
@@ -291,6 +369,9 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
     (apiRef: ExcalidrawImperativeAPI) => {
       excalidrawRef.current = apiRef as unknown as typeof excalidrawRef.current
 
+      // Share the API globally so Library panel can access it
+      useExcalidrawAPI.getState().setAPI(apiRef)
+
       // Immediately inject placeholder to suppress welcome screen
       setTimeout(() => {
         try {
@@ -305,6 +386,13 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
     },
     [excalidrawRef]
   )
+
+  // Clean up global API ref on unmount
+  useEffect(() => {
+    return () => {
+      useExcalidrawAPI.getState().clearAPI()
+    }
+  }, [])
 
   if (loading) {
     return (

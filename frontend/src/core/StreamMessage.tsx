@@ -21,7 +21,7 @@ export default function StreamMessage({
 }: {
   item: UserItem | AssistantItem
 }) {
-  const { addUserMessage, addAssistantMessage, setLoading, items } = useStream()
+  const { addUserMessage, addAssistantMessage, setLoading, items, addSystemMessage } = useStream()
   const { current } = useAppContext()
 
   async function followUp(q: string) {
@@ -109,6 +109,23 @@ export default function StreamMessage({
               {q}
             </button>
           ))}
+        </div>
+      )}
+      
+      {current.type === "page" && item.content && (
+        <div className="flex pl-[26px] mt-1">
+           <button
+             onClick={() => {
+               import("../hooks/useCanvasEvents").then(({ useCanvasEvents }) => {
+                 useCanvasEvents.getState().dispatch({ type: "add", addType: "text", content: item.content })
+                 addSystemMessage("Sent to canvas.")
+               })
+             }}
+             title="Add this response to the canvas as text"
+             className="text-[10px] uppercase font-bold tracking-wider text-[var(--accent)] hover:text-white bg-[var(--accent-subtle)] hover:bg-[var(--accent)] transition-colors px-2 py-1 rounded"
+           >
+             Move to Canvas
+           </button>
         </div>
       )}
     </div>

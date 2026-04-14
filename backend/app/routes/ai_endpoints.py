@@ -141,3 +141,35 @@ async def reading_path(payload: ReadingPathRequest, user_id: str = Depends(get_o
     })
 
     return result.get("result", {"steps": []})
+
+
+# ── Diagram Generation ────────────────────────────────
+
+class DiagramRequest(BaseModel):
+    request: str
+    page_id: Optional[str] = None
+
+
+@router.post("/ai/generate-diagram")
+async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_optional_user_id)):
+    """Generate a structured diagram topology from a natural language request."""
+    from app.services.canvas_gen import generate_diagram as gen_diagram
+
+    # Optionally include page notes as context
+    context = ""
+    if payload.page_id:
+        try:
+            notes = await db.get_notes_for_page(payload.page_id)
+            context_parts = [
+                f"Note: {n.get('title', 'Untitled')} — {n.get('summary', '')[:200]}"
+                for n in notes[:8]
+            ]
+            context = "\n".join(context_parts)
+        except Exception:
+            pass
+
+    try:
+        topology = await gen_diagram(payload.request, context)
+        return {"topology": topology}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Diagram generation failed: {str(e)}")

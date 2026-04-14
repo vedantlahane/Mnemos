@@ -7,10 +7,33 @@ from copy import deepcopy
 from typing import Any
 
 from app.db.supabase import db
-
+from app.services.text_layout import layout_single_text
 
 CARD_WIDTH = 360
 CARD_HEIGHT = 240
+
+
+def _luminance(hex_color: str) -> float:
+    """Compute relative luminance of a hex color (0=black, 1=white)"""
+    h = hex_color.lstrip("#")
+    if len(h) < 6:
+        h = "".join(c * 2 for c in h[:3])
+    r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
+    to_linear = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * to_linear(r) + 0.7152 * to_linear(g) + 0.0722 * to_linear(b)
+
+
+def _is_dark_bg(scene: dict) -> bool:
+    bg = (scene.get("appState") or {}).get("viewBackgroundColor", "#0e0e1a")
+    return _luminance(bg) < 0.4
+
+def get_font_string(font_size: int, font_family: int) -> str:
+    family = "Virgil"
+    if font_family == 2: family = "Helvetica"
+    elif font_family == 3: family = "Cascadia"
+    elif font_family == 4: family = "Assistant"
+    return f'{font_size}px "{family}"'
+
 
 
 def empty_scene() -> dict:
@@ -111,7 +134,11 @@ def upsert_note_card(scene: dict, note: dict, x: float | None = None, y: float |
                 element["y"] = float(element.get("y", 0)) + dy
 
         _update_text(elements, f"note-title-{note_id}", note.get("title") or "Untitled")
-        _update_text(elements, f"note-summary-{note_id}", _wrap(note.get("summary") or note.get("raw_text") or "", 55, 6))
+        
+        sum_text = note.get("summary") or note.get("raw_text") or ""
+        sum_layout = layout_single_text(sum_text, get_font_string(13, 1), 336, 6, 13 * 1.25)
+        _update_text(elements, f"note-summary-{note_id}", sum_layout.get("wrapped_text", sum_text), sum_layout.get("width"), sum_layout.get("height"))
+        
         _update_text(elements, f"note-tags-{note_id}", "  ".join(f"#{tag}" for tag in (note.get("tags") or [])))
         return
 
@@ -122,14 +149,21 @@ def upsert_note_card(scene: dict, note: dict, x: float | None = None, y: float |
         x = 100 + col * 420
         y = 100 + row * 350
 
-    elements.extend(create_note_card_elements(note, float(x), float(y)))
+    elements.extend(create_note_card_elements(note, float(x), float(y), dark=_is_dark_bg(scene)))
 
 
-def create_note_card_elements(note: dict, x: float, y: float) -> list[dict]:
+def create_note_card_elements(note: dict, x: float, y: float, dark: bool = True) -> list[dict]:
     note_id = note["id"]
     group_id = f"note-group-{note_id}"
     tags = note.get("tags") or []
     now = int(time.time() * 1000)
+
+    # Context-aware colors
+    accent_color = "#818cf8" if dark else "#6366f1"
+    card_bg = "#1e1e2e" if dark else "#ffffff"
+    card_border = "#374151" if dark else "#e5e7eb"
+    title_color = "#f3f4f6" if dark else "#111827"
+    summary_color = "#9ca3af" if dark else "#6b7280"
 
     elements = [
         _base_element(
@@ -139,8 +173,8 @@ def create_note_card_elements(note: dict, x: float, y: float) -> list[dict]:
             y=y - 12,
             width=CARD_WIDTH,
             height=CARD_HEIGHT,
-            strokeColor="#e5e7eb",
-            backgroundColor="#ffffff",
+            strokeColor=card_border,
+            backgroundColor=card_bg,
             fillStyle="solid",
             strokeWidth=1,
             roundness={"type": 3, "value": 10},
@@ -155,7 +189,7 @@ def create_note_card_elements(note: dict, x: float, y: float) -> list[dict]:
             text=note.get("title") or "Untitled",
             fontSize=18,
             fontFamily=1,
-            strokeColor="#111827",
+            strokeColor=title_color,
             groupIds=[group_id],
             customData={"noteId": note_id, "type": "note-title", "title": note.get("title") or "Untitled"},
             updated=now,
@@ -164,10 +198,12 @@ def create_note_card_elements(note: dict, x: float, y: float) -> list[dict]:
             id=f"note-summary-{note_id}",
             x=x,
             y=y + 32,
-            text=_wrap(note.get("summary") or note.get("raw_text") or "", 55, 6),
+            text=note.get("summary") or note.get("raw_text") or "",
+            maxWidth=336,
+            maxLines=6,
             fontSize=13,
             fontFamily=1,
-            strokeColor="#6b7280",
+            strokeColor=summary_color,
             groupIds=[group_id],
             customData={"noteId": note_id, "type": "note-summary"},
             updated=now,
@@ -177,7 +213,7 @@ def create_note_card_elements(note: dict, x: float, y: float) -> list[dict]:
             x=x - 12,
             y=y - 12,
             points=[[0, 0], [0, CARD_HEIGHT]],
-            strokeColor="#6366f1",
+            strokeColor=accent_color,
             strokeWidth=3,
             groupIds=[group_id],
             customData={"noteId": note_id, "type": "note-accent"},
@@ -194,7 +230,7 @@ def create_note_card_elements(note: dict, x: float, y: float) -> list[dict]:
                 text="  ".join(f"#{tag}" for tag in tags),
                 fontSize=11,
                 fontFamily=3,
-                strokeColor="#6366f1",
+                strokeColor=accent_color,
                 groupIds=[group_id],
                 customData={"noteId": note_id, "type": "note-tags", "tags": tags},
                 updated=now,
@@ -236,7 +272,9 @@ def create_sticky_elements(
             id=f"{sticky_id}-text",
             x=x + 12,
             y=y + 12,
-            text=_wrap(content, 22, 6),
+            text=content,
+            maxWidth=156,
+            maxLines=6,
             fontSize=16,
             fontFamily=4,
             strokeColor="#78350f",
@@ -280,25 +318,35 @@ def _base_element(**overrides: Any) -> dict:
 
 
 def _text_element(**overrides: Any) -> dict:
-    text = str(overrides.get("text", ""))
+    original_text = str(overrides.get("text", ""))
+    font_size = overrides.get("fontSize", 16)
+    font_family = overrides.get("fontFamily", 1)
+    
+    max_width = overrides.pop("maxWidth", 1000)
+    max_lines = overrides.pop("maxLines", 100)
+    line_height_px = font_size * 1.25
+    
+    layout = layout_single_text(original_text, get_font_string(font_size, font_family), max_width, max_lines, line_height_px)
+    
     element = _base_element(
         type="text",
-        width=max(20, min(340, max((len(line) for line in text.splitlines()), default=1) * 8)),
-        height=max(24, len(text.splitlines()) * int(overrides.get("fontSize", 16) * 1.25)),
+        width=layout.get("width", 100),
+        height=layout.get("height", 100),
         backgroundColor="transparent",
         fillStyle="solid",
         strokeWidth=1,
         roundness=None,
         boundElements=None,
         containerId=None,
-        originalText=text,
+        originalText=original_text,
         autoResize=True,
         lineHeight=1.25,
         textAlign="left",
         verticalAlign="top",
     )
+    overrides["text"] = layout.get("wrapped_text", original_text)
     element.update(overrides)
-    element["originalText"] = element.get("text", text)
+    element["originalText"] = original_text
     return element
 
 
@@ -321,13 +369,15 @@ def _line_element(**overrides: Any) -> dict:
     return element
 
 
-def _update_text(elements: list[dict], element_id: str, text: str) -> None:
+def _update_text(elements: list[dict], element_id: str, text: str, width: float = None, height: float = None) -> None:
     element = next((item for item in elements if item.get("id") == element_id), None)
     if not element:
         return
 
     element["text"] = text
     element["originalText"] = text
+    if width is not None: element["width"] = width
+    if height is not None: element["height"] = height
     element["version"] = int(element.get("version") or 1) + 1
     element["versionNonce"] = random.randint(1, 2_147_483_647)
     element["updated"] = int(time.time() * 1000)
@@ -339,6 +389,7 @@ def _custom_data(element: dict) -> dict:
 
 
 def _wrap(text: str, chars_per_line: int, max_lines: int) -> str:
+    # Deprecated fallback wrapper
     text = " ".join(str(text or "").split())
     if not text:
         return ""

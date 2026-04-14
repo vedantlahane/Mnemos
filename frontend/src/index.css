@@ -276,6 +276,22 @@
     display: none !important;
   }
 
+  /* Hide scroll back to content button */
+  .excalidraw .scroll-back-to-content {
+    display: none !important;
+  }
+
+  /* Hide the sidebar trigger button visually but keep it in DOM
+     so programmatic toggleSidebar() still works */
+  .excalidraw .sidebar-trigger {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0,0,0,0) !important;
+    pointer-events: none !important;
+  }
+
   /* Standard z-index management */
   .excalidraw .Toast { bottom: 80px !important; z-index: 55 !important; }
   .excalidraw .popover,
@@ -286,6 +302,13 @@
   .excalidraw .Dialog__overlay,
   .excalidraw .layer-ui__library,
   .excalidraw-modal-container { z-index: 70 !important; }
+
+  /* Library sidebar needs to be above the Stream floating panel (z-35) */
+  .excalidraw .sidebar,
+  .excalidraw .layer-ui__sidebar,
+  .excalidraw [class*="sidebar"] {
+    z-index: 50 !important;
+  }
   .excalidraw .excalidraw-textEditorContainer { z-index: 55 !important; }
   .excalidraw .color-picker,
   .excalidraw .color-picker-content { z-index: 100 !important; }

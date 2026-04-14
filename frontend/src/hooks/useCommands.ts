@@ -3,7 +3,9 @@ import { useStream } from "./useStream"
 import { useAppContext } from "./useAppContext"
 import { useCanvasEvents } from "./useCanvasEvents"
 import { api } from "../api/client"
+import { parseNLPIntent, shouldParseNLP } from "../utils/nlpParser"
 import type { Command, ContextType } from "../types"
+import type { NLPIntent } from "../utils/nlpParser"
 
 const COMMANDS: Command[] = [
   { name: "/pages", aliases: ["/p"], description: "List all pages", context: ["home"], handler: "pages" },
@@ -27,6 +29,7 @@ const COMMANDS: Command[] = [
   { name: "/rename", aliases: [], description: "Rename page", context: ["page"], args: "<new name>", handler: "rename" },
   { name: "/bg", aliases: ["/background"], description: "Canvas background color", context: ["page"], args: "<color>", handler: "bg" },
   { name: "/library", aliases: ["/lib"], description: "Open shape library", context: ["page"], handler: "library" },
+  { name: "/diagram", aliases: ["/flow", "/mindmap"], description: "AI diagram generator", context: ["page"], args: "<topic>", handler: "diagram" },
   { name: "/close", aliases: [], description: "Close page", context: ["page", "settings", "history"], handler: "close" },
   { name: "/settings", aliases: [], description: "Open settings", context: ["home", "page", "settings", "history"], handler: "settings" },
   { name: "/history", aliases: ["/h"], description: "Chat history", context: ["home", "page", "settings", "history"], handler: "history" },
@@ -357,8 +360,23 @@ export function useCommands() {
       }
 
       case "library":
-        canvasDispatch({ type: "open-library" })
-        addSystemMessage("Opening library…")
+        addSystemMessage("📚 Click the book icon in the chat panel header to open the library.")
+        break
+
+      case "diagram":
+        if (!current.pageId) {
+          addAssistantMessage("Open a page first.")
+          return
+        }
+        if (!args) {
+          addAssistantMessage("Usage: `/diagram <topic>` (e.g., `/diagram how docker works`)")
+          return
+        }
+        canvasDispatch({
+          type: "generate-diagram",
+          request: args,
+          pageId: current.pageId,
+        })
         break
 
       case "layout":
@@ -504,6 +522,39 @@ export function useCommands() {
         executeCommand("/library")
         return true
       }
+
+      // "add to canvas about X" / "put that on canvas" / "move to canvas"
+      // → Find the last AI response (optionally matching topic) and add it
+      const canvasAboutMatch = lower.match(
+        /^(?:add|put|move|write|send)\s+(?:that|this|it)?\s*(?:to|on|onto)\s+(?:the\s+)?canvas\s*(?:about\s+(.+))?$/i
+      ) || lower.match(
+        /^(?:add|put|write)\s+(?:to|on)\s+(?:the\s+)?canvas\s+(?:about\s+)?(.+)/i
+      )
+      if (canvasAboutMatch) {
+        const topic = canvasAboutMatch[1]?.trim()
+        // Find the last assistant message, optionally matching topic
+        const assistantMessages = items
+          .filter((i): i is import("../types").AssistantItem => i.type === "assistant")
+          .reverse()
+
+        let lastMsg = assistantMessages[0]
+        if (topic && assistantMessages.length > 0) {
+          const topicLower = topic.toLowerCase()
+          const matched = assistantMessages.find(
+            (m) => m.content?.toLowerCase().includes(topicLower)
+          )
+          if (matched) lastMsg = matched
+        }
+
+        if (lastMsg?.content) {
+          canvasDispatch({ type: "add", addType: "text", content: lastMsg.content })
+          addSystemMessage("Sent to canvas.")
+          return true
+        } else {
+          addSystemMessage("No recent AI response to add to canvas.")
+          return true
+        }
+      }
       const stickyMatch = lower.match(
         /^add\s+(?:a\s+)?sticky\s+(?:note\s+)?(?:saying\s+|with\s+)?(.+)/i
       )
@@ -511,7 +562,9 @@ export function useCommands() {
         executeCommand(`/add sticky: ${stickyMatch[1]}`)
         return true
       }
-      const findMatch = lower.match(/^find\s+(.+?)(?:\s+on\s+canvas)?$/)
+      // Only match explicit canvas-oriented find patterns
+      const findMatch = lower.match(/^find\s+(.+?)\s+on\s+(?:the\s+)?canvas$/i)
+        || lower.match(/^find\s+on\s+canvas\s+(.+)$/i)
       if (findMatch) {
         executeCommand(`/find ${findMatch[1]}`)
         return true
@@ -572,6 +625,78 @@ export function useCommands() {
     return false
   }
 
+  /**
+   * Handle NLP-detected intents (write, add, capture, search, find, ask).
+   * Only called when confidence is high enough (≥ 0.85), meaning the user
+   * used very explicit keywords.
+   */
+  async function handleNLPIntent(intent: NLPIntent) {
+    switch (intent.type) {
+      case "write":
+        // User explicitly said "write on canvas …" — create raw text, not a sticky
+        if (current.type === "page" && intent.content) {
+          canvasDispatch({ type: "add", addType: "text", content: intent.content })
+          addSystemMessage(`✍️ Added to canvas: "${intent.content.slice(0, 40)}${intent.content.length > 40 ? "..." : ""}"`)
+        } else {
+          // Not on a canvas, treat as capture
+          executeCommand(`/capture ${intent.content}`)
+        }
+        break
+
+      case "add":
+        if (current.type === "page" && intent.content) {
+          const addType = intent.subType || "note"
+          canvasDispatch({ type: "add", addType, content: intent.content })
+          addSystemMessage(`Added ${addType}: "${intent.content.slice(0, 40)}${intent.content.length > 40 ? "..." : ""}"`)
+        } else {
+          addAssistantMessage("You need to open a page first to add items to the canvas.")
+        }
+        break
+
+      case "diagram":
+        if (current.type === "page" && intent.content) {
+          canvasDispatch({
+            type: "generate-diagram",
+            request: intent.content,
+            pageId: current.pageId,
+          })
+          addSystemMessage(`🎨 Generating diagram: "${intent.content.slice(0, 60)}${intent.content.length > 60 ? "..." : ""}"`)
+        } else {
+          addAssistantMessage("You need to open a page first to generate diagrams on the canvas.")
+        }
+        break
+
+      case "capture":
+        if (intent.content && intent.content.length >= 3) {
+          executeCommand(`/capture ${intent.content}`)
+        }
+        break
+
+      case "find":
+        if (current.type === "page" && intent.content) {
+          canvasDispatch({ type: "search", query: intent.content })
+          addSystemMessage(`🔍 Searching canvas for: "${intent.content}"`)
+        } else if (intent.content) {
+          executeCommand(`/search ${intent.content}`)
+        }
+        break
+
+      case "search":
+        if (intent.content) {
+          executeCommand(`/search ${intent.content}`)
+        }
+        break
+
+      case "ask":
+        // Fall through to AI chat
+        break
+
+      case "none":
+      default:
+        break
+    }
+  }
+
   const handleSubmit = async () => {
     if (!inputValue.trim()) return
     const q = inputValue.trim()
@@ -597,6 +722,15 @@ export function useCommands() {
 
     addUserMessage(q)
     if (detectNaturalLanguageCommand(q)) return
+
+    // Try NLP intent detection for natural language commands
+    if (shouldParseNLP(q)) {
+      const intent = parseNLPIntent(q)
+      if (intent.type !== "ask" && intent.confidence >= 0.85) {
+        await handleNLPIntent(intent)
+        return
+      }
+    }
 
     // Chat with AI
     setLoading(true)

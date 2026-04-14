@@ -6,11 +6,13 @@ import { create } from "zustand"
 
 export type CanvasCommand =
   | { type: "search"; query: string }
-  | { type: "add"; addType: "sticky" | "note"; content: string; x?: number; y?: number }
+  | { type: "add"; addType: "sticky" | "note" | "text"; content: string; x?: number; y?: number }
   | { type: "set-background"; color: string }
   | { type: "open-library" }
+  | { type: "close-library" }
   | { type: "zoom"; direction: "in" | "out" | "fit" }
   | { type: "refresh" }
+  | { type: "generate-diagram"; request: string; pageId?: string }
 
 interface CanvasEventState {
   /** Incremented on every dispatch so subscribers always re-render */

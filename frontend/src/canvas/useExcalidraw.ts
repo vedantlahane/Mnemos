@@ -331,59 +331,94 @@ export function useExcalidraw(pageId: string | undefined) {
   }, [loadScene])
 
   // ─── Save (debounced, uses dedicated canvas endpoint) ──
+  const pendingSave = useRef(false)
+
   const saveScene = useCallback(
     (
       elements: readonly Record<string, unknown>[],
       appState: Record<string, unknown>,
       files: Record<string, unknown>
     ) => {
-      if (!pageId || isSaving.current) return
+      if (!pageId) return
 
       if (saveTimer.current) clearTimeout(saveTimer.current)
+      
       saveTimer.current = setTimeout(async () => {
-        if (isSaving.current) return
-        isSaving.current = true
-        try {
-          const safeElements = elements.map((el) => {
-            try {
-              return structuredClone(el)
-            } catch {
-              const plain: Record<string, unknown> = {}
-              for (const key of Object.keys(el)) {
-                plain[key] = el[key]
-              }
-              return plain
-            }
-          })
-
-          const zoomValue =
-            appState.zoom && typeof appState.zoom === "object"
-              ? (appState.zoom as { value: number }).value
-              : (appState.zoom as number) || 1
-
-          await api.savePageCanvas(pageId, {
-            canvas_data: {
-              elements: safeElements,
-              appState: {
-                viewBackgroundColor: appState.viewBackgroundColor || DARK_BG,
-                theme: "dark",
-                zoom: appState.zoom,
-                scrollX: appState.scrollX,
-                scrollY: appState.scrollY,
-              },
-              files: files || {},
-            },
-            viewport: {
-              x: (appState.scrollX as number) || 0,
-              y: (appState.scrollY as number) || 0,
-              zoom: zoomValue,
-            },
-          })
-        } catch (err) {
-          console.error("Canvas save failed:", err)
-        } finally {
-          isSaving.current = false
+        // If already saving, just mark that we need another save after this one
+        if (isSaving.current) {
+          pendingSave.current = true
+          return
         }
+
+        const performSave = async () => {
+          isSaving.current = true
+          pendingSave.current = false
+
+          try {
+            const safeElements = elements.map((el) => {
+              try {
+                return structuredClone(el)
+              } catch {
+                const plain: Record<string, unknown> = {}
+                for (const key of Object.keys(el)) {
+                  plain[key] = el[key]
+                }
+                return plain
+              }
+            })
+
+            const zoomValue =
+              appState.zoom && typeof appState.zoom === "object"
+                ? (appState.zoom as { value: number }).value
+                : (appState.zoom as number) || 1
+
+            // Expand appState to include editor defaults for persistence
+            const persistentAppState = {
+              viewBackgroundColor: appState.viewBackgroundColor || DARK_BG,
+              theme: "dark" as const,
+              zoom: appState.zoom,
+              scrollX: appState.scrollX,
+              scrollY: appState.scrollY,
+              // Save "current" tool settings
+              currentItemStrokeColor: appState.currentItemStrokeColor,
+              currentItemBackgroundColor: appState.currentItemBackgroundColor,
+              currentItemFillStyle: appState.currentItemFillStyle,
+              currentItemStrokeWidth: appState.currentItemStrokeWidth,
+              currentItemStrokeStyle: appState.currentItemStrokeStyle,
+              currentItemRoughness: appState.currentItemRoughness,
+              currentItemOpacity: appState.currentItemOpacity,
+              currentItemFontFamily: appState.currentItemFontFamily,
+              currentItemFontSize: appState.currentItemFontSize,
+              currentItemTextAlign: appState.currentItemTextAlign,
+              currentItemStartArrowhead: appState.currentItemStartArrowhead,
+              currentItemEndArrowhead: appState.currentItemEndArrowhead,
+              gridSize: appState.gridSize,
+            }
+
+            await api.savePageCanvas(pageId, {
+              canvas_data: {
+                elements: safeElements,
+                appState: persistentAppState,
+                files: files || {},
+              },
+              viewport: {
+                x: (appState.scrollX as number) || 0,
+                y: (appState.scrollY as number) || 0,
+                zoom: zoomValue,
+              },
+            })
+          } catch (err) {
+            console.error("Canvas save failed:", err)
+          } finally {
+            isSaving.current = false
+            // If another change came in while we were saving, trigger again
+            if (pendingSave.current) {
+              saveScene(elements, appState, files)
+            }
+          }
+        }
+
+        await performSave()
       }, 2500)
     },
     [pageId]

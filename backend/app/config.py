@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     canvas_width: int = 2000
     canvas_height: int = 1500
 
+    # Redis (optional — leave empty to disable caching)
+    redis_url: str = ""
+
     # Routing
     page_route_confidence_threshold: float = 0.75
 

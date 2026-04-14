@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db.supabase import db
 from app.services.processor import processor
+from app.services import cache as cache_svc
 from app.routes import (
     capture,
     notes,
@@ -60,8 +61,17 @@ async def lifespan(app: FastAPI):
             embedding_dimensions=768,
         )
         print("Created default settings")
+    # Initialize Redis cache (optional)
+    redis_ok = await cache_svc.init_redis(settings.redis_url)
+    if redis_ok:
+        print("Redis cache: connected")
+    else:
+        print("Redis cache: disabled (no REDIS_URL)")
 
     yield
+
+    # Shutdown: close Redis
+    await cache_svc.close_redis()
 
 
 app = FastAPI(title="Mnemos", version="3.0", lifespan=lifespan)
@@ -102,10 +112,12 @@ app.include_router(workspace_router, prefix="/api")
 @app.get("/health")
 async def health():
     has_groq = bool(settings.groq_api_key)
+    cache_info = await cache_svc.cache_stats()
     return {
         "status": "ok",
         "version": "3.0",
         "auth_enabled": settings.auth_enabled,
+        "cache": cache_info,
         "providers": {
             "google": True,
             "groq": has_groq,

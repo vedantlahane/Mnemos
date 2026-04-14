@@ -348,6 +348,29 @@ export const api = {
       body: JSON.stringify({ topic, page_id: pageId }),
     }),
 
+  generateDiagram: (requestText: string, pageId?: string) =>
+    request<{ topology: {
+      title: string
+      layout_type: string
+      elements: Array<{
+        id: string
+        type: "box" | "text" | "arrow"
+        label: string
+        style?: string
+        width?: number
+        height?: number
+      }>
+      connections: Array<{
+        from: string
+        to: string
+        label?: string
+        style?: string
+      }>
+    } }>("/ai/generate-diagram", {
+      method: "POST",
+      body: JSON.stringify({ request: requestText, page_id: pageId }),
+    }),
+
   // ─── Tags ───────────────────────────────────────
   getTags: async () => {
     const res = await request<unknown>("/tags")

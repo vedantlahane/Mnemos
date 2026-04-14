@@ -97,10 +97,7 @@ Page: {page_name}
 Notes:
 {notes_info}"""
 
-CHAT_SYSTEM = """You are a personal knowledge assistant. Answer based ONLY on
-the user's notes provided in the context. If the notes don't contain enough
-information, say so honestly. Cite which notes you're drawing from by
-mentioning their titles. Use markdown bold (**text**) for emphasis."""
+CHAT_SYSTEM = """You are a personal knowledge assistant. First and foremost, ALWAYS use the user's notes provided in the context to answer the question, and cite which notes you're drawing from by mentioning their titles. If the notes do not contain enough information, you may use your general knowledge to answer, but you MUST explicitly state that you are doing so because the notes lacked context."""
 
 AI_POSITION_PROMPT = """Given existing notes on a canvas and a new note, suggest where to place it.
 Return JSON only:

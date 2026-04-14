@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from app.models.schemas import PageCreate, PageUpdate
 from app.db.supabase import db
+from app.services import cache as cache_svc
 
 router = APIRouter()
 
@@ -28,7 +29,9 @@ async def create_page(payload: PageCreate):
 
 @router.get("/pages/{page_id}")
 async def get_page(page_id: str):
-    page = await db.get_page(page_id)
+    page = await cache_svc.get_page_cached(
+        page_id, fetcher=lambda: db.get_page(page_id)
+    )
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
     return page
@@ -51,6 +54,7 @@ async def update_page(page_id: str, payload: PageUpdate):
             raise HTTPException(status_code=400, detail=f"Page '{updates['name']}' already exists")
 
     updated = await db.update_page(page_id, **updates)
+    await cache_svc.invalidate_page(page_id)
     return updated
 
 
@@ -63,6 +67,8 @@ async def delete_page(page_id: str):
         raise HTTPException(status_code=400, detail="Cannot delete the Uncategorized page")
 
     await db.delete_page(page_id)
+    await cache_svc.invalidate_page(page_id)
+    await cache_svc.invalidate_overview()
     return {"status": "deleted"}
 
 
@@ -72,7 +78,9 @@ async def get_page_canvas(page_id: str):
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    canvas = await db.get_page_canvas(page_id)
+    canvas = await cache_svc.get_canvas_cached(
+        page_id, fetcher=lambda: db.get_page_canvas(page_id)
+    )
     return canvas
 
 
@@ -98,6 +106,30 @@ async def save_page_canvas(page_id: str, payload: dict):
         raise HTTPException(status_code=400, detail="viewport or canvas_data required")
 
     await db.update_page(page_id, **updates)
+    # Invalidate cache after canvas save
+    await cache_svc.invalidate_canvas(page_id)
+
+    # Sync note positions from canvas to DB
+    try:
+        import asyncio
+        elements = []
+        if "canvas_data" in payload and "elements" in payload["canvas_data"]:
+            elements = payload["canvas_data"]["elements"]
+        elif "elements" in payload:
+            elements = payload["elements"]
+            
+        async def sync_positions():
+            for el in elements:
+                cd = el.get("customData") or {}
+                if cd.get("type") == "note-frame" and "noteId" in cd:
+                    x = el.get("x")
+                    y = el.get("y")
+                    if x is not None and y is not None:
+                        await db.update_note(cd["noteId"], canvas_x=x, canvas_y=y)
+
+        asyncio.create_task(sync_positions())
+    except Exception as e:
+        print(f"Error syncing canvas positions: {e}")
     return {"status": "saved"}
 
 
