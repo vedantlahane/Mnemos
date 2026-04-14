@@ -41,6 +41,23 @@ def _is_dark_bg(scene: dict) -> bool:
     return _luminance(bg) < 0.4
 
 
+def _contrast_ratio(l1: float, l2: float) -> float:
+    hi = max(l1, l2)
+    lo = min(l1, l2)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _contrasting_text_color(bg_hex: str) -> str:
+    """Pick a readable text color against the given background."""
+    bg_l = _luminance(bg_hex)
+    light = "#f9fafb"
+    dark = "#111827"
+
+    light_ratio = _contrast_ratio(_luminance(light), bg_l)
+    dark_ratio = _contrast_ratio(_luminance(dark), bg_l)
+    return light if light_ratio >= dark_ratio else dark
+
+
 def get_font_string(font_size: int, font_family: int) -> str:
     families = {1: "Virgil", 2: "Helvetica", 3: "Cascadia", 4: "Assistant"}
     family = families.get(font_family, "Virgil")
@@ -127,8 +144,8 @@ async def add_text_block_to_canvas(
     """Add a standalone text block to the canvas."""
     page = await db.get_page(page_id)
     scene = normalize_scene(page.get("canvas_data") if page else None)
-    dark = _is_dark_bg(scene)
-    text_color = color or ("#e5e7eb" if dark else "#1f2937")
+    bg = (scene.get("appState") or {}).get("viewBackgroundColor", DEFAULT_BG)
+    text_color = color or _contrasting_text_color(bg)
 
     el = _text_element(
         id=element_id or _element_id(),
@@ -366,3 +383,182 @@ def _element_id() -> str:
 
 def clone_scene(scene: dict) -> dict:
     return deepcopy(normalize_scene(scene))
+
+# === FILE: backend/app/services/excalidraw_scene.py (ADD these functions) ===
+
+async def add_measured_text_to_canvas(
+    page_id: str,
+    text: str,
+    x: float,
+    y: float,
+    font_size: int = 16,
+    font_family: int = 1,
+    max_width: float = 400,
+    color: str | None = None,
+    element_id: str | None = None,
+) -> tuple[dict, dict]:
+    """
+    Add text to canvas with MEASURED dimensions.
+    Returns (scene, measurement) where measurement has {width, height, wrapped_text}.
+    """
+    from app.services.element_layout import measure_text
+
+    measurement = measure_text(
+        text,
+        font_size=font_size,
+        font_family=font_family,
+        max_width=max_width,
+    )
+
+    page = await db.get_page(page_id)
+    scene = normalize_scene(page.get("canvas_data") if page else None)
+    bg = (scene.get("appState") or {}).get("viewBackgroundColor", DEFAULT_BG)
+    text_color = color or _contrasting_text_color(bg)
+
+    el = _text_element(
+        id=element_id or _element_id(),
+        x=x, y=y,
+        text=measurement["wrapped_text"],
+        fontSize=font_size,
+        fontFamily=font_family,
+        maxWidth=max_width,
+        maxLines=200,
+        strokeColor=text_color,
+        customData={"type": "composed-text"},
+    )
+
+    # Override with measured dimensions
+    el["width"] = measurement["width"]
+    el["height"] = measurement["height"]
+
+    scene["elements"].append(el)
+    await db.update_page(page_id, canvas_data=scene)
+
+    return scene, measurement
+
+
+async def add_diagram_to_canvas(
+    page_id: str,
+    topology: dict,
+    x: float,
+    y: float,
+) -> dict:
+    """
+    Add a diagram to canvas with properly measured and positioned elements.
+    """
+    from app.services.element_layout import layout_diagram_topology
+
+    page = await db.get_page(page_id)
+    scene = normalize_scene(page.get("canvas_data") if page else None)
+    dark = _is_dark_bg(scene)
+
+    # Layout with measured text
+    positioned, arrows = layout_diagram_topology(topology, x, y)
+
+    STYLE_COLORS = {
+        "dark": {
+            "default": {"bg": "#1e1e2e", "border": "#374151", "text": "#e5e7eb"},
+            "accent": {"bg": "#312e81", "border": "#6366f1", "text": "#c7d2fe"},
+            "muted": {"bg": "#1f2937", "border": "#4b5563", "text": "#9ca3af"},
+            "warning": {"bg": "#431407", "border": "#ea580c", "text": "#fed7aa"},
+            "success": {"bg": "#052e16", "border": "#16a34a", "text": "#bbf7d0"},
+        },
+        "light": {
+            "default": {"bg": "#ffffff", "border": "#e5e7eb", "text": "#1f2937"},
+            "accent": {"bg": "#eef2ff", "border": "#6366f1", "text": "#312e81"},
+            "muted": {"bg": "#f9fafb", "border": "#d1d5db", "text": "#6b7280"},
+            "warning": {"bg": "#fff7ed", "border": "#ea580c", "text": "#7c2d12"},
+            "success": {"bg": "#f0fdf4", "border": "#16a34a", "text": "#14532d"},
+        },
+    }
+
+    theme = "dark" if dark else "light"
+
+    for p in positioned:
+        style = p.metadata.get("style", "default")
+        colors = STYLE_COLORS.get(theme, STYLE_COLORS["dark"]).get(style, STYLE_COLORS["dark"]["default"])
+        group_id = f"diagram-{p.id}"
+
+        if p.element_type in ("box", "text"):
+            # Background rect with MEASURED dimensions
+            scene["elements"].append(_base_element(
+                id=f"{p.id}-rect",
+                type="rectangle",
+                x=p.x, y=p.y,
+                width=p.width, height=p.height,
+                strokeColor=colors["border"],
+                backgroundColor=colors["bg"],
+                fillStyle="solid",
+                strokeWidth=2,
+                roughness=0,
+                roundness={"type": 3, "value": 8},
+                groupIds=[group_id],
+                customData={"type": "diagram-node", "diagramId": p.id},
+            ))
+
+            # Text label centered in rect
+            label_w = p.metadata.get("label_width", p.width - 24)
+            label_h = p.metadata.get("label_height", 20)
+            text_x = p.x + (p.width - label_w) / 2
+            text_y = p.y + (p.height - label_h) / 2
+
+            scene["elements"].append(_base_element(
+                id=f"{p.id}-text",
+                type="text",
+                x=text_x, y=text_y,
+                width=label_w, height=label_h,
+                strokeColor=colors["text"],
+                backgroundColor="transparent",
+                fillStyle="solid",
+                strokeWidth=1,
+                roughness=0,
+                groupIds=[group_id],
+                customData={"type": "diagram-label", "diagramId": p.id},
+                # Text-specific fields
+                text=p.content,
+                originalText=p.content,
+                fontSize=16,
+                fontFamily=1,
+                textAlign="center",
+                verticalAlign="middle",
+                lineHeight=1.25,
+                containerId=None,
+                autoResize=True,
+            ))
+
+    # Add arrows
+    for arrow in arrows:
+        start_x = arrow["from_x"]
+        start_y = arrow["from_y"]
+        end_x = arrow["to_x"]
+        end_y = arrow["to_y"]
+
+        stroke_style = "solid"
+        if arrow.get("style") == "dashed":
+            stroke_style = "dashed"
+        elif arrow.get("style") == "dotted":
+            stroke_style = "dotted"
+
+        scene["elements"].append(_base_element(
+            id=f"arrow-{arrow['from_id']}-{arrow['to_id']}",
+            type="arrow",
+            x=start_x, y=start_y,
+            width=end_x - start_x,
+            height=end_y - start_y,
+            strokeColor="#6b7280" if dark else "#9ca3af",
+            backgroundColor="transparent",
+            fillStyle="solid",
+            strokeWidth=2,
+            strokeStyle=stroke_style,
+            roughness=0,
+            points=[[0, 0], [end_x - start_x, end_y - start_y]],
+            startArrowhead=None,
+            endArrowhead="arrow",
+            startBinding=None,
+            endBinding=None,
+            lastCommittedPoint=None,
+            customData={"type": "diagram-arrow"},
+        ))
+
+    await db.update_page(page_id, canvas_data=scene)
+    return scene

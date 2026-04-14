@@ -6,88 +6,72 @@
 import type { CanvasOp } from "./canvasOps";
 
 // Streaming text accumulator
-const streamBuffers = new Map<string, { text: string; x: number; y: number; style: string }>();
-
-// Style presets matching backend
-const STYLE_COLORS: Record<string, Record<string, { bg: string; border: string; text: string }>> = {
-  dark: {
-    default: { bg: "#1e1e2e", border: "#374151", text: "#e5e7eb" },
-    accent: { bg: "#312e81", border: "#6366f1", text: "#c7d2fe" },
-    muted: { bg: "#1f2937", border: "#4b5563", text: "#9ca3af" },
-    warning: { bg: "#431407", border: "#ea580c", text: "#fed7aa" },
-    success: { bg: "#052e16", border: "#16a34a", text: "#bbf7d0" },
-    compose: { bg: "transparent", border: "transparent", text: "#e5e7eb" },
-  },
-  light: {
-    default: { bg: "#ffffff", border: "#e5e7eb", text: "#1f2937" },
-    accent: { bg: "#eef2ff", border: "#6366f1", text: "#312e81" },
-    muted: { bg: "#f9fafb", border: "#d1d5db", text: "#6b7280" },
-    warning: { bg: "#fff7ed", border: "#ea580c", text: "#7c2d12" },
-    success: { bg: "#f0fdf4", border: "#16a34a", text: "#14532d" },
-    compose: { bg: "transparent", border: "transparent", text: "#1f2937" },
-  },
-};
+const streamBuffers = new Map<string, { text: string; x: number; y: number }>();
 
 export class CanvasApplier {
   private api: any
-  private theme: "dark" | "light" = "dark"
 
   constructor(api: any) {
     this.api = api;
-    const appState = api.getAppState();
-    this.theme = appState.theme === "light" ? "light" : "dark";
+    this.ensureSceneElementShape();
   }
 
   apply(op: CanvasOp) {
-    switch (op.op) {
-      case "set_background":
-        this.applySetBackground(op);
-        break;
-      case "set_theme":
-        this.applySetTheme(op);
-        break;
-      case "pan_to":
-        this.applyPanTo(op);
-        break;
-      case "zoom_to":
-        this.applyZoomTo(op);
-        break;
-      case "stream_start":
-        this.applyStreamStart(op);
-        break;
-      case "stream_chunk":
-        this.applyStreamChunk(op);
-        break;
-      case "stream_end":
-        this.applyStreamEnd(op);
-        break;
-      case "create_text":
-        this.applyCreateText(op);
-        break;
-      case "create_diagram":
-        this.applyCreateDiagram(op);
-        break;
-      case "move_element":
-        this.applyMoveElement(op);
-        break;
-      case "delete_element":
-        this.applyDeleteElement(op);
-        break;
-      case "create_note":
-        // Note cards are created by the backend scene sync
-        // Frontend just needs to refresh the scene
-        this.refreshScene();
-        break;
-      case "batch":
-        if (op.operations) {
-          for (const subOp of op.operations) {
-            this.apply(subOp);
+    try {
+      this.ensureSceneElementShape();
+
+      switch (op.op) {
+        case "set_background":
+          this.applySetBackground(op);
+          break;
+        case "set_theme":
+          this.applySetTheme(op);
+          break;
+        case "pan_to":
+          this.applyPanTo(op);
+          break;
+        case "zoom_to":
+          this.applyZoomTo(op);
+          break;
+        case "stream_start":
+          this.applyStreamStart(op);
+          break;
+        case "stream_chunk":
+          this.applyStreamChunk(op);
+          break;
+        case "stream_end":
+          this.applyStreamEnd(op);
+          break;
+        case "create_text":
+          this.applyCreateText(op);
+          break;
+        case "create_diagram":
+          this.applyCreateDiagram(op);
+          break;
+        case "move_element":
+          this.applyMoveElement(op);
+          break;
+        case "delete_element":
+          this.applyDeleteElement(op);
+          break;
+        case "create_note":
+          // Note cards are created by the backend scene sync
+          // Frontend just needs to refresh the scene
+          this.refreshScene();
+          break;
+        case "batch":
+          if (op.operations) {
+            for (const subOp of op.operations) {
+              this.apply(subOp);
+            }
           }
-        }
-        break;
-      case "info":
-        this.handleInfo(op);
-        break;
+          break;
+        case "info":
+          this.handleInfo(op);
+          break;
+      }
+    } catch (error) {
+      console.error("Canvas op apply failed", op, error);
     }
   }
 
@@ -102,7 +86,6 @@ export class CanvasApplier {
 
   private applySetTheme(op: CanvasOp) {
     if (!op.theme) return;
-    this.theme = op.theme as "dark" | "light";
     this.api.updateScene({
       appState: { theme: op.theme as "dark" | "light" },
     });
@@ -110,6 +93,8 @@ export class CanvasApplier {
 
   private applyPanTo(op: CanvasOp) {
     if (op.x == null || op.y == null) return;
+    if (this.isEditingActive()) return;
+
     this.api.scrollToContent(
       this.api.getSceneElements().filter((el: any) => {
         // Find element near target coordinates
@@ -137,82 +122,36 @@ export class CanvasApplier {
 
   private applyStreamStart(op: CanvasOp) {
     if (!op.element_id) return;
-    const style = op.style || "compose";
     const x = op.x ?? 200;
     const y = op.y ?? 200;
 
-    streamBuffers.set(op.element_id, { text: "", x, y, style });
-
-    // Create placeholder element
-    const colors = this.getStyleColors(style);
-    const element = this.createTextElement(
-      op.element_id,
-      "Writing…",
-      x,
-      y,
-      colors.text,
-      { opacity: 60 }
-    );
-
-    const elements = this.api.getSceneElements();
-    this.api.updateScene({
-      elements: [...elements, element],
-    });
+    streamBuffers.set(op.element_id, { text: "", x, y });
   }
 
   private applyStreamChunk(op: CanvasOp) {
-    if (!op.element_id || !op.text) return;
+    if (!op.element_id) return;
 
     const buffer = streamBuffers.get(op.element_id);
     if (!buffer) return;
 
-    buffer.text += op.text;
+    if (op.text) {
+      buffer.text += op.text;
+    }
 
-    // Update the element text
-    const elements = this.api.getSceneElements().map((el: any) => {
-      if (el.id === op.element_id) {
-        return {
-          ...el,
-          text: buffer.text,
-          originalText: buffer.text,
-          opacity: 100,
-          // Auto-resize
-          width: Math.min(Math.max(200, buffer.text.length * 4), 600),
-          height: Math.max(100, Math.ceil(buffer.text.split("\n").length * 20)),
-        } as any;
-      }
-      return el;
-    });
-
-    this.api.updateScene({ elements });
+    // Avoid per-chunk scene writes; rapid updates can race with Excalidraw editor cleanup.
   }
 
   private applyStreamEnd(op: CanvasOp) {
     if (!op.element_id) return;
     const buffer = streamBuffers.get(op.element_id);
-    if (!buffer) return;
+    const focusX = buffer?.x ?? op.x ?? 200;
+    const focusY = buffer?.y ?? op.y ?? 200;
+    const focusW = op.width ?? 600;
+    const focusH = op.height ?? 240;
 
-    const finalText = op.text || buffer.text;
-
-    // Finalize with proper dimensions
-    const elements = this.api.getSceneElements().map((el: any) => {
-      if (el.id === op.element_id) {
-        const lines = finalText.split("\n");
-        const maxLineLen = Math.max(...lines.map((l: string) => l.length));
-        return {
-          ...el,
-          text: finalText,
-          originalText: finalText,
-          opacity: 100,
-          width: Math.min(Math.max(200, maxLineLen * 7.5), 600),
-          height: Math.max(60, lines.length * 20 + 20),
-        } as any;
-      }
-      return el;
-    });
-
-    this.api.updateScene({ elements });
     streamBuffers.delete(op.element_id);
+    void this.refreshScene();
+    this.focusRegionAfterRefresh(focusX, focusY, focusW, focusH);
   }
 
   // ── Element Creation ──
@@ -220,170 +159,20 @@ export class CanvasApplier {
   private applyCreateText(op: CanvasOp) {
     if (!op.text || op.x == null || op.y == null) return;
 
-    const style = op.style || "default";
-    const colors = this.getStyleColors(style);
-    const elementId = op.element_id || this.generateId();
-
-    const element = this.createTextElement(
-      elementId,
-      op.text,
-      op.x,
-      op.y,
-      colors.text
-    );
-
-    const elements = this.api.getSceneElements();
-    this.api.updateScene({
-      elements: [...elements, element],
-    });
+    // Text is persisted by backend using measured bounds; refresh and focus persisted result.
+    void this.refreshScene();
+    this.focusRegionAfterRefresh(op.x, op.y, op.width ?? 600, op.height ?? 240);
   }
 
   private applyCreateDiagram(op: CanvasOp) {
-    if (!op.topology) return;
-    const baseX = op.x ?? 200;
-    const baseY = op.y ?? 200;
-    const topology = op.topology;
+    const focusX = op.x ?? 200;
+    const focusY = op.y ?? 200;
+    const focusW = op.width ?? 600;
+    const focusH = op.height ?? 400;
 
-    const newElements: any[] = [];
-    const elementPositions = new Map<string, { x: number; y: number; w: number; h: number }>();
-
-    // Layout elements based on layout_type
-    const layoutType = topology.layout_type || "flow";
-    const topoElements = topology.elements || [];
-    const connections = topology.connections || [];
-
-    // Position elements
-    topoElements.forEach((el: any, index: number) => {
-      const { x, y } = this.layoutPosition(
-        layoutType,
-        index,
-        topoElements.length,
-        baseX,
-        baseY,
-        el.width || 200,
-        el.height || 60
-      );
-
-      const w = el.width || 200;
-      const h = el.height || 60;
-      elementPositions.set(el.id, { x, y, w, h });
-
-      const colors = this.getStyleColors(el.style || "default");
-
-      if (el.type === "box" || el.type === "text") {
-        // Background rectangle
-        const rectId = `${el.id}-rect`;
-        newElements.push({
-          id: rectId,
-          type: "rectangle",
-          x,
-          y,
-          width: w,
-          height: h,
-          strokeColor: colors.border,
-          backgroundColor: colors.bg,
-          fillStyle: "solid",
-          strokeWidth: 2,
-          roughness: 0,
-          opacity: 100,
-          roundness: { type: 3, value: 8 },
-          groupIds: [`group-${el.id}`],
-          isDeleted: false,
-          seed: Math.floor(Math.random() * 2147483647),
-          version: 1,
-          versionNonce: Math.floor(Math.random() * 2147483647),
-        });
-
-        // Text label
-        newElements.push({
-          id: `${el.id}-text`,
-          type: "text",
-          x: x + 12,
-          y: y + h / 2 - 10,
-          width: w - 24,
-          height: 20,
-          text: el.label || "",
-          originalText: el.label || "",
-          fontSize: 16,
-          fontFamily: 1,
-          textAlign: "center",
-          verticalAlign: "middle",
-          strokeColor: colors.text,
-          backgroundColor: "transparent",
-          fillStyle: "solid",
-          strokeWidth: 1,
-          roughness: 0,
-          opacity: 100,
-          groupIds: [`group-${el.id}`],
-          isDeleted: false,
-          lineHeight: 1.25,
-          containerId: null,
-          autoResize: true,
-          seed: Math.floor(Math.random() * 2147483647),
-          version: 1,
-          versionNonce: Math.floor(Math.random() * 2147483647),
-        });
-      }
-    });
-
-    // Create arrows for connections
-    connections.forEach((conn: any, index: number) => {
-      const fromPos = elementPositions.get(conn.from);
-      const toPos = elementPositions.get(conn.to);
-      if (!fromPos || !toPos) return;
-
-      const startX = fromPos.x + fromPos.w / 2;
-      const startY = fromPos.y + fromPos.h;
-      const endX = toPos.x + toPos.w / 2;
-      const endY = toPos.y;
-
-      newElements.push({
-        id: `arrow-${conn.from}-${conn.to}-${index}`,
-        type: "arrow",
-        x: startX,
-        y: startY,
-        width: endX - startX,
-        height: endY - startY,
-        points: [
-          [0, 0],
-          [endX - startX, endY - startY],
-        ],
-        strokeColor: this.theme === "dark" ? "#6b7280" : "#9ca3af",
-        backgroundColor: "transparent",
-        fillStyle: "solid",
-        strokeWidth: 2,
-        strokeStyle:
-          conn.style === "dashed"
-            ? "dashed"
-            : conn.style === "dotted"
-              ? "dotted"
-              : "solid",
-        roughness: 0,
-        opacity: 100,
-        startArrowhead: null,
-        endArrowhead: "arrow",
-        isDeleted: false,
-        seed: Math.floor(Math.random() * 2147483647),
-        version: 1,
-        versionNonce: Math.floor(Math.random() * 2147483647),
-      });
-    });
-
-    const elements = this.api.getSceneElements();
-    this.api.updateScene({
-      elements: [...elements, ...newElements],
-    });
-
-    // Pan to new diagram
-    if (newElements.length > 0) {
-      setTimeout(() => {
-        this.api.scrollToContent(newElements as any, {
-          fitToContent: true,
-          animate: true,
-          duration: 400,
-        });
-      }, 100);
-    }
+    // Diagram geometry is produced and persisted by backend; refresh scene and focus it.
+    void this.refreshScene();
+    this.focusRegionAfterRefresh(focusX, focusY, focusW, focusH);
   }
 
   private applyMoveElement(op: CanvasOp) {
@@ -454,125 +243,89 @@ export class CanvasApplier {
 
   // ── Helpers ──
 
-  private getStyleColors(style: string) {
-    return (
-      STYLE_COLORS[this.theme]?.[style] ||
-      STYLE_COLORS[this.theme]?.default ||
-      STYLE_COLORS.dark.default
+  private focusRegionAfterRefresh(x: number, y: number, width: number, height: number) {
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const tryFocus = () => {
+      if (this.isEditingActive()) {
+        attempts += 1;
+        if (attempts < maxAttempts) {
+          setTimeout(tryFocus, 140);
+        }
+        return;
+      }
+
+      const padding = 80;
+      const left = x - padding;
+      const top = y - padding;
+      const right = x + width + padding;
+      const bottom = y + height + padding;
+
+      const regionElements = this.api.getSceneElements().filter((el: any) => {
+        if (el.isDeleted) return false;
+        const ex = Number(el.x) || 0;
+        const ey = Number(el.y) || 0;
+        const ew = Number(el.width) || 0;
+        const eh = Number(el.height) || 0;
+        return ex <= right && ex + ew >= left && ey <= bottom && ey + eh >= top;
+      });
+
+      if (regionElements.length > 0) {
+        this.api.scrollToContent(regionElements as any, {
+          fitToContent: true,
+          animate: true,
+          duration: 400,
+        });
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < maxAttempts) {
+        setTimeout(tryFocus, 140);
+      }
+    };
+
+    setTimeout(tryFocus, 140);
+  }
+
+  private isEditingActive(): boolean {
+    const appState = this.api?.getAppState?.();
+    if (!appState) return false;
+    return Boolean(
+      appState.editingTextElement ||
+      appState.editingLinearElement ||
+      appState.editingGroupId ||
+      appState.editingFrame
     );
   }
 
-  private layoutPosition(
-    layoutType: string,
-    index: number,
-    total: number,
-    baseX: number,
-    baseY: number,
-    itemW: number,
-    itemH: number
-  ): { x: number; y: number } {
-    const gapX = 80;
-    const gapY = 100;
+  private ensureSceneElementShape() {
+    const current = this.api?.getSceneElements?.();
+    if (!Array.isArray(current) || current.length === 0) return;
 
-    switch (layoutType) {
-      case "flow": {
-        // Top to bottom
-        return {
-          x: baseX + (600 - itemW) / 2,
-          y: baseY + index * (itemH + gapY),
-        };
+    let changed = false;
+    const normalized = current.map((el: any) => {
+      const next = { ...el };
+
+      if (!Array.isArray(next.groupIds)) {
+        next.groupIds = [];
+        changed = true;
       }
-      case "mindmap": {
-        if (index === 0) {
-          return { x: baseX + 200, y: baseY + 200 };
-        }
-        const angle = ((index - 1) / (total - 1)) * 2 * Math.PI;
-        const radius = 250;
-        return {
-          x: baseX + 200 + radius * Math.cos(angle) - itemW / 2,
-          y: baseY + 200 + radius * Math.sin(angle) - itemH / 2,
-        };
+      if (next.frameId === undefined) {
+        next.frameId = null;
+        changed = true;
       }
-      case "list": {
-        return {
-          x: baseX,
-          y: baseY + index * (itemH + 20),
-        };
+      if (!next.customData || typeof next.customData !== "object") {
+        next.customData = {};
+        changed = true;
       }
-      case "comparison": {
-        const col = index % 2;
-        const row = Math.floor(index / 2);
-        return {
-          x: baseX + col * (itemW + gapX),
-          y: baseY + row * (itemH + gapY),
-        };
-      }
-      case "timeline": {
-        return {
-          x: baseX + index * (itemW + gapX),
-          y: baseY,
-        };
-      }
-      default: {
-        // Freeform: grid
-        const cols = Math.ceil(Math.sqrt(total));
-        const col = index % cols;
-        const row = Math.floor(index / cols);
-        return {
-          x: baseX + col * (itemW + gapX),
-          y: baseY + row * (itemH + gapY),
-        };
-      }
+
+      return next;
+    });
+
+    if (changed) {
+      this.api.updateScene({ elements: normalized });
     }
-  }
-
-  private createTextElement(
-    id: string,
-    text: string,
-    x: number,
-    y: number,
-    color: string,
-    overrides: Record<string, any> = {}
-  ): any {
-    const lines = text.split("\n");
-    const maxLineLen = Math.max(...lines.map((l) => l.length), 10);
-    return {
-      id,
-      type: "text",
-      x,
-      y,
-      width: Math.min(Math.max(200, maxLineLen * 7.5), 600),
-      height: Math.max(40, lines.length * 20 + 10),
-      text,
-      originalText: text,
-      fontSize: 16,
-      fontFamily: 1,
-      textAlign: "left",
-      verticalAlign: "top",
-      strokeColor: color,
-      backgroundColor: "transparent",
-      fillStyle: "solid",
-      strokeWidth: 1,
-      roughness: 0,
-      opacity: 100,
-      lineHeight: 1.25,
-      autoResize: true,
-      isDeleted: false,
-      containerId: null,
-      seed: Math.floor(Math.random() * 2147483647),
-      version: 1,
-      versionNonce: Math.floor(Math.random() * 2147483647),
-      customData: { type: "composed-text" },
-      ...overrides,
-    };
-  }
-
-  private generateId(): string {
-    const chars =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    return Array.from(
-      { length: 21 },
-      () => chars[Math.floor(Math.random() * chars.length)]
-    ).join("");
   }
 }

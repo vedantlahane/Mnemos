@@ -17,6 +17,11 @@ export default function Stream() {
   const canvasDispatch = useCanvasEvents((s) => s.dispatch)
   const endRef = useRef<HTMLDivElement>(null)
   const isCanvas = current.type === "page"
+  const pageItems = isCanvas
+    ? items.filter(
+        (item) => !(item.type === "block" && item.blockType === "welcome")
+      )
+    : items
 
   const [collapsed, setCollapsed] = useState(false)
   const [maximized, setMaximized] = useState(false)
@@ -226,7 +231,7 @@ export default function Stream() {
                 </div>
               )}
 
-              {items.length === 0 && (
+              {pageItems.length === 0 && (
                 <div className="text-center py-8">
                   <div className="text-[13px] font-semibold text-white mb-1.5">
                     {current.pageName || "Page"} Chat
@@ -252,7 +257,7 @@ export default function Stream() {
                   </div>
                 </div>
               )}
-              {items.map((item) => (
+              {pageItems.map((item) => (
                 <ErrorBoundary key={item.id}>
                   <StreamItemRenderer item={item} />
                 </ErrorBoundary>

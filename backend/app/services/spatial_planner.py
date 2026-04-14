@@ -75,9 +75,7 @@ class SpatialPlanner:
 
         if anchor is None:
             xs = [n.get("canvas_x", 0) for n in notes if n.get("canvas_x") is not None]
-            ys = [n.get("canvas_y", 0) for n in notes if n.get("canvas_y") is # === FILE: backend/app/services/spatial_planner.py (continued) ===
-
- not None]
+            ys = [n.get("canvas_y", 0) for n in notes if n.get("canvas_y") is not None]
             if xs and ys:
                 anchor = (float(np.mean(xs)), float(np.mean(ys)))
             else:
@@ -158,36 +156,48 @@ class SpatialPlanner:
         return positions
 
     def get_occupied_regions(self, notes: list[dict], elements: list[dict] = None) -> list[Rect]:
-        """Build rectangles from notes and canvas elements."""
+        """Build rectangles from notes and canvas elements using REAL measured bounds."""
+        from app.services.element_layout import measure_element
+
         rects: list[Rect] = []
+
         for n in notes:
             cx = n.get("canvas_x")
             cy = n.get("canvas_y")
             if cx is not None and cy is not None:
-                rects.append(Rect(
-                    x=float(cx),
-                    y=float(cy),
-                    w=float(n.get("canvas_width") or CW),
-                    h=float(n.get("canvas_height") or CH),
-                ))
+                # Use stored dimensions if available, otherwise default card size
+                w = float(n.get("canvas_width") or CW)
+                h = float(n.get("canvas_height") or CH)
+                rects.append(Rect(x=float(cx), y=float(cy), w=w, h=h))
+
         for el in (elements or []):
-            px = el.get("position_x") or el.get("x")
-            py = el.get("position_y") or el.get("y")
-            if px is not None and py is not None:
-                rects.append(Rect(
-                    x=float(px),
-                    y=float(py),
-                    w=float(el.get("width") or 200),
-                    h=float(el.get("height") or 100),
-                ))
+            has_position = any(
+                el.get(key) is not None for key in ("x", "y", "position_x", "position_y")
+            )
+            if not has_position:
+                continue
+            measured = measure_element(el)
+            rects.append(Rect(
+                x=measured.x,
+                y=measured.y,
+                w=measured.width,
+                h=measured.height,
+            ))
+
         return rects
 
     # ── Private ──
 
     async def _get_occupied(self, page_id: str) -> list[Rect]:
         notes = await db.get_notes_for_page(page_id)
-        elements = await db.list_elements(page_id)
-        return self.get_occupied_regions(notes, elements)
+        db_elements = await db.list_elements(page_id)
+
+        page = await db.get_page(page_id)
+        scene_elements = []
+        if page and isinstance(page.get("canvas_data"), dict):
+            scene_elements = page["canvas_data"].get("elements") or []
+
+        return self.get_occupied_regions(notes, [*db_elements, *scene_elements])
 
     def _pick_strategy(
         self,
@@ -395,10 +405,12 @@ class SpatialPlanner:
     def _bounding_rect(self, notes: list[dict]) -> Rect:
         xs = [float(n["canvas_x"]) for n in notes]
         ys = [float(n["canvas_y"]) for n in notes]
+        rights = [float(n["canvas_x"]) + float(n.get("canvas_width") or CW) for n in notes]
+        bottoms = [float(n["canvas_y"]) + float(n.get("canvas_height") or CH) for n in notes]
         min_x = min(xs)
         min_y = min(ys)
-        max_x = max(xs) + CW
-        max_y = max(ys) + CH
+        max_x = max(rights)
+        max_y = max(bottoms)
         return Rect(x=min_x, y=min_y, w=max_x - min_x, h=max_y - min_y)
 
     def _grid_layout(self, notes: list[dict]) -> list[dict]:

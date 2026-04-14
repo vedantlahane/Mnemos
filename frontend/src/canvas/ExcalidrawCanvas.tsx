@@ -346,7 +346,6 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   const canvasConsume = useCanvasEvents((s) => s.consume)
   const { getViewport, onScrollChange } = useViewport(excalidrawRef)
 
-  const userHasInteracted = useRef(false)
   const sceneApplied = useRef(false)
   const suppressAutosaveRef = useRef(false)
   const applierRef = useRef<CanvasApplier | null>(null)
@@ -371,6 +370,9 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       const exc = excalidrawRef.current
       if (!exc) return
 
+      // Avoid persisting transient state while replaying backend scene.
+      suppressAutosaveRef.current = true
+
       // Always include at least one element to prevent welcome screen
       const elements = initialScene.elements.length > 0
         ? initialScene.elements
@@ -389,9 +391,11 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       }
 
       sceneApplied.current = true
+
+      // Resume autosave after hydration updates settle.
       setTimeout(() => {
-        userHasInteracted.current = true
-      }, 2000)
+        suppressAutosaveRef.current = false
+      }, 60)
     }, 150)
 
     return () => clearTimeout(timer)
@@ -400,7 +404,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   // ─── Reset on page change ─────────────────────
   useEffect(() => {
     sceneApplied.current = false
-    userHasInteracted.current = false
+    suppressAutosaveRef.current = true
     setEmptyOverlayDismissed(false)
     setHasLiveContent(false)
   }, [pageId])
@@ -408,6 +412,9 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   // ─── Backend-triggered scene refresh ──────────
   useEffect(() => {
     const handler = () => {
+      // Force scene re-application on backend refresh events.
+      sceneApplied.current = false
+      suppressAutosaveRef.current = true
       reload()
     }
 
@@ -797,7 +804,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       )
 
       if (suppressAutosaveRef.current) return
-      if (!userHasInteracted.current) return
+      if (!sceneApplied.current) return
       saveScene(
         elements as unknown as readonly Record<string, unknown>[],
         appState as unknown as Record<string, unknown>,

@@ -12,13 +12,9 @@ from langgraph.graph import StateGraph, END
 from app.agents.state import CanvasBrainState
 from app.services.intent_classifier import classify_intent, extract_topic
 from app.services.canvas_state import canvas_state
+from app.services.canvas_text_search import find_canvas_text_matches, build_canvas_text_context
 from app.services import embeddings
-from app.services.composition import compose_content
-from app.services.canvas_gen import generate_diagram, fallback_diagram
 from app.services.spatial_planner import spatial_planner
-from app.services.excalidraw_scene import (
-    sync_note_to_canvas, add_text_block_to_canvas,
-)
 from app.models.canvas_ops import (
     CanvasOp, OpType, Intent, Viewport, Placement, make_element_id,
 )
@@ -50,31 +46,47 @@ async def classify_node(state: CanvasBrainState) -> dict:
         "status": "routing",
     }
 
-
 async def compose_node(state: CanvasBrainState) -> dict:
-    """Generate content and place on canvas."""
+    """Generate content and place on canvas with MEASURED bounds."""
     topic = state["target_topic"] or state["user_message"]
     page_id = state["page_id"]
     user_id = state.get("user_id")
 
     try:
-        # Generate content
+        from app.services.composition import compose_content
         content = await compose_content(topic, page_id=page_id, user_id=user_id)
 
-        # Plan placement
+        # MEASURE the text first to know its actual size
+        from app.services.element_layout import measure_text
+        measurement = measure_text(
+            content,
+            font_size=16,
+            font_family=1,
+            max_width=400,
+        )
+
+        actual_width = measurement["width"]
+        actual_height = measurement["height"]
+        wrapped_text = measurement["wrapped_text"]
+
+        # Plan placement with REAL measured dimensions
         viewport = Viewport(**state["viewport"]) if state.get("viewport") else None
         placement = await spatial_planner.find_placement(
             page_id=page_id,
             viewport=viewport,
             near_topic=topic,
+            size=(actual_width + 24, actual_height + 24),  # with padding
             strategy="auto",
         )
 
         element_id = make_element_id("compose")
 
-        # Save to canvas
-        await add_text_block_to_canvas(
-            page_id, content, x=placement.x, y=placement.y,
+        # Save to canvas with measured dimensions
+        from app.services.excalidraw_scene import add_measured_text_to_canvas
+        await add_measured_text_to_canvas(
+            page_id, content,
+            x=placement.x, y=placement.y,
+            max_width=400,
             element_id=element_id,
         )
 
@@ -84,7 +96,9 @@ async def compose_node(state: CanvasBrainState) -> dict:
                 element_id=element_id,
                 x=placement.x,
                 y=placement.y,
-                text=content,
+                width=actual_width,
+                height=actual_height,
+                text=wrapped_text,
                 style="compose",
                 message=f"Composed content about '{topic}'",
             ).model_dump(),
@@ -100,9 +114,87 @@ async def compose_node(state: CanvasBrainState) -> dict:
         logger.error(f"Compose failed: {e}")
         return {
             "errors": state.get("errors", []) + [f"compose: {e}"],
-            "chat_response": f"I tried to write about {topic} but encountered an error: {str(e)[:100]}",
+            "chat_response": f"Error composing about {topic}: {str(e)[:100]}",
             "status": "done",
         }
+
+
+async def diagram_node(state: CanvasBrainState) -> dict:
+    """Generate diagram with MEASURED text labels."""
+    topic = state["target_topic"] or state["user_message"]
+    page_id = state["page_id"]
+    user_id = state.get("user_id")
+
+    context = ""
+    try:
+        notes = await db.get_notes_for_page(page_id, user_id=user_id)
+        context = "\n".join(
+            f"Note: {n.get('title', 'Untitled')} — {n.get('summary', '')[:200]}"
+            for n in notes[:8]
+        )
+    except Exception:
+        pass
+
+    try:
+        selected_model = None
+        try:
+            user_settings = await db.get_settings(user_id=user_id)
+            if isinstance(user_settings, dict):
+                m = user_settings.get("model")
+                if isinstance(m, str) and m.strip():
+                    selected_model = m.strip()
+        except Exception:
+            pass
+
+        from app.services.canvas_gen import generate_diagram, fallback_diagram
+        topology = await generate_diagram(topic, context, model=selected_model)
+    except Exception as e:
+        logger.warning(f"Diagram generation failed: {e}")
+        from app.services.canvas_gen import fallback_diagram
+        topology = fallback_diagram(topic)
+
+    # Measure and layout the diagram elements to know total size
+    from app.services.element_layout import layout_diagram_topology
+    positioned, arrows = layout_diagram_topology(topology, 0, 0)
+
+    # Calculate diagram bounding box
+    if positioned:
+        diagram_width = max(p.right for p in positioned) - min(p.x for p in positioned) + 40
+        diagram_height = max(p.bottom for p in positioned) - min(p.y for p in positioned) + 40
+    else:
+        diagram_width, diagram_height = 600, 400
+
+    # Place with real measured bounds
+    viewport = Viewport(**state["viewport"]) if state.get("viewport") else None
+    placement = await spatial_planner.find_placement(
+        page_id=page_id,
+        viewport=viewport,
+        near_topic=topic,
+        size=(diagram_width, diagram_height),
+        strategy="auto",
+    )
+
+    # Save to canvas with measured layout
+    from app.services.excalidraw_scene import add_diagram_to_canvas
+    await add_diagram_to_canvas(page_id, topology, placement.x, placement.y)
+
+    ops = [
+        CanvasOp(
+            op=OpType.CREATE_DIAGRAM,
+            x=placement.x,
+            y=placement.y,
+            width=diagram_width,
+            height=diagram_height,
+            topology=topology,
+            message=f"Diagram: {topology.get('title', topic)}",
+        ).model_dump(),
+    ]
+
+    return {
+        "operations": ops,
+        "chat_response": f"I've generated a {topology.get('layout_type', 'flow')} diagram about **{topic}** ({len(positioned)} elements).",
+        "status": "done",
+    }
 
 
 async def command_node(state: CanvasBrainState) -> dict:
@@ -167,68 +259,6 @@ async def command_node(state: CanvasBrainState) -> dict:
     return {
         "operations": ops,
         "chat_response": message,
-        "status": "done",
-    }
-
-
-async def diagram_node(state: CanvasBrainState) -> dict:
-    """Generate diagram and place on canvas."""
-    topic = state["target_topic"] or state["user_message"]
-    page_id = state["page_id"]
-    user_id = state.get("user_id")
-
-    # Gather context
-    context = ""
-    try:
-        notes = await db.get_notes_for_page(page_id, user_id=user_id)
-        context_parts = [
-            f"Note: {n.get('title', 'Untitled')} — {n.get('summary', '')[:200]}"
-            for n in notes[:8]
-        ]
-        context = "\n".join(context_parts)
-    except Exception:
-        pass
-
-    try:
-        # Get user's preferred model
-        selected_model = None
-        try:
-            user_settings = await db.get_settings(user_id=user_id)
-            if isinstance(user_settings, dict):
-                m = user_settings.get("model")
-                if isinstance(m, str) and m.strip():
-                    selected_model = m.strip()
-        except Exception:
-            pass
-
-        topology = await generate_diagram(topic, context, model=selected_model)
-    except Exception as e:
-        logger.warning(f"Diagram generation failed: {e}")
-        topology = fallback_diagram(topic)
-
-    # Plan placement
-    viewport = Viewport(**state["viewport"]) if state.get("viewport") else None
-    placement = await spatial_planner.find_placement(
-        page_id=page_id,
-        viewport=viewport,
-        near_topic=topic,
-        size=(600, 400),
-        strategy="auto",
-    )
-
-    ops = [
-        CanvasOp(
-            op=OpType.CREATE_DIAGRAM,
-            x=placement.x,
-            y=placement.y,
-            topology=topology,
-            message=f"Diagram: {topology.get('title', topic)}",
-        ).model_dump(),
-    ]
-
-    return {
-        "operations": ops,
-        "chat_response": f"I've generated a {topology.get('layout_type', 'flow')} diagram about **{topic}**.",
         "status": "done",
     }
 
@@ -334,6 +364,39 @@ async def search_node(state: CanvasBrainState) -> dict:
             ][:5]
 
         if not results:
+            page = await db.get_page(page_id, user_id=user_id)
+            canvas_matches = find_canvas_text_matches(topic, (page or {}).get("canvas_data") or {}, limit=5)
+            if canvas_matches:
+                ops = []
+                first = canvas_matches[0]
+                if first.get("x") is not None and first.get("y") is not None:
+                    ops.append(CanvasOp(
+                        op=OpType.PAN_TO,
+                        x=float(first["x"]),
+                        y=float(first["y"]),
+                        message="Found matching canvas text",
+                    ).model_dump())
+
+                sources = [
+                    {
+                        "id": m["id"],
+                        "title": m.get("snippet", "Canvas text"),
+                        "similarity": m.get("score", 0.0),
+                    }
+                    for m in canvas_matches
+                ]
+
+                snippets = ", ".join(
+                    f"\"{m.get('snippet', '')[:48]}\"" for m in canvas_matches[:3]
+                )
+
+                return {
+                    "operations": ops,
+                    "chat_response": f"Found {len(canvas_matches)} canvas text match(es) for {topic}: {snippets}",
+                    "sources": sources,
+                    "status": "done",
+                }
+
             return {
                 "operations": [],
                 "chat_response": f"No notes found about **{topic}** on this page.",
@@ -398,6 +461,51 @@ async def query_node(state: CanvasBrainState) -> dict:
                     relevant.append(r)
 
         if not relevant:
+            page = await db.get_page(page_id, user_id=user_id)
+            canvas_matches = find_canvas_text_matches(question, (page or {}).get("canvas_data") or {}, limit=6)
+            if canvas_matches:
+                page_context = page.get("name") if page else None
+                context = build_canvas_text_context(canvas_matches)
+                answer = await llm.chat(
+                    question=question,
+                    context=context,
+                    history=state.get("history", []),
+                    page_context=page_context,
+                    user_id=user_id,
+                )
+
+                follow_ups = []
+                try:
+                    follow_ups = await llm.generate_follow_ups(question, answer, user_id=user_id)
+                except Exception:
+                    pass
+
+                sources = [
+                    {
+                        "id": m["id"],
+                        "title": m.get("snippet", "Canvas text"),
+                        "similarity": m.get("score", 0.0),
+                    }
+                    for m in canvas_matches
+                ]
+
+                ops = []
+                first = canvas_matches[0]
+                if first.get("x") is not None and first.get("y") is not None:
+                    ops.append(CanvasOp(
+                        op=OpType.PAN_TO,
+                        x=float(first["x"]),
+                        y=float(first["y"]),
+                    ).model_dump())
+
+                return {
+                    "operations": ops,
+                    "chat_response": answer,
+                    "sources": sources,
+                    "follow_ups": follow_ups,
+                    "status": "done",
+                }
+
             return {
                 "chat_response": "I couldn't find any related notes. Try capturing some notes on this topic first, or ask me to write about it with 'write about [topic]'.",
                 "sources": [],

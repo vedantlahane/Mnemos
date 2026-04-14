@@ -72,17 +72,115 @@ function getGridPos(index: number, note: Note): { x: number; y: number } {
   return { x: 100 + col * 420, y: 100 + row * 350 }
 }
 
+function normalizeElementShape(value: unknown): ExcalidrawEl | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+
+  const id = typeof raw.id === "string" ? raw.id : ""
+  if (!id) return null
+
+  const toFiniteNumber = (input: unknown, fallback = 0): number => {
+    const n = typeof input === "number" ? input : Number(input ?? fallback)
+    return Number.isFinite(n) ? n : fallback
+  }
+
+  const groupIds = Array.isArray(raw.groupIds)
+    ? raw.groupIds.filter((g): g is string => typeof g === "string")
+    : []
+
+  const customData =
+    raw.customData && typeof raw.customData === "object"
+      ? (raw.customData as Record<string, unknown>)
+      : {}
+
+  return {
+    ...raw,
+    id,
+    type: typeof raw.type === "string" ? raw.type : "rectangle",
+    x: toFiniteNumber(raw.x),
+    y: toFiniteNumber(raw.y),
+    width: toFiniteNumber(raw.width),
+    height: toFiniteNumber(raw.height),
+    groupIds,
+    frameId: raw.frameId ?? null,
+    customData,
+  } as ExcalidrawEl
+}
+
 function normalizeScene(value: unknown): CanvasScene {
   if (!value || typeof value !== "object") return { ...EMPTY_SCENE, elements: [] }
   const s = value as Partial<CanvasScene>
   return {
-    elements: Array.isArray(s.elements) ? s.elements as ExcalidrawEl[] : [],
+    elements: Array.isArray(s.elements)
+      ? s.elements
+          .map((el) => normalizeElementShape(el))
+          .filter((el): el is ExcalidrawEl => !!el)
+      : [],
     appState: {
       ...EMPTY_SCENE.appState,
       ...(s.appState && typeof s.appState === "object" ? s.appState : {}),
     },
     files: s.files && typeof s.files === "object" ? s.files : {},
   }
+}
+
+function toRounded(value: unknown, digits = 2): number {
+  const num = typeof value === "number" ? value : Number(value || 0)
+  if (!Number.isFinite(num)) return 0
+  const factor = 10 ** digits
+  return Math.round(num * factor) / factor
+}
+
+function buildSaveFingerprint(
+  elements: readonly Record<string, unknown>[],
+  appState: Record<string, unknown>,
+  files: Record<string, unknown>
+): string {
+  const elementSignature = elements
+    .map((el) => {
+      const id = String(el.id || "")
+      const type = String(el.type || "")
+      const version = Number(el.version || 0)
+      const deleted = el.isDeleted ? 1 : 0
+      const x = toRounded(el.x)
+      const y = toRounded(el.y)
+      const w = toRounded(el.width)
+      const h = toRounded(el.height)
+      const textLen = typeof el.text === "string" ? el.text.length : 0
+      return `${id}:${type}:${version}:${deleted}:${x}:${y}:${w}:${h}:${textLen}`
+    })
+    .join("|")
+
+  const zoomValue =
+    appState.zoom && typeof appState.zoom === "object"
+      ? (appState.zoom as { value: number }).value
+      : (appState.zoom as number) || 1
+
+  const appSignature = [
+    toRounded(appState.scrollX),
+    toRounded(appState.scrollY),
+    toRounded(zoomValue, 4),
+    String(appState.theme || ""),
+    String(appState.viewBackgroundColor || ""),
+    String(appState.currentItemStrokeColor || ""),
+    String(appState.currentItemBackgroundColor || ""),
+    String(appState.currentItemFillStyle || ""),
+    String(appState.currentItemStrokeWidth || ""),
+    String(appState.currentItemStrokeStyle || ""),
+    String(appState.currentItemRoughness || ""),
+    String(appState.currentItemOpacity || ""),
+    String(appState.currentItemFontFamily || ""),
+    String(appState.currentItemFontSize || ""),
+    String(appState.currentItemTextAlign || ""),
+    String(appState.currentItemStartArrowhead || ""),
+    String(appState.currentItemEndArrowhead || ""),
+    String(appState.currentItemRoundness || ""),
+    String(appState.gridSize || ""),
+  ].join(",")
+
+  const fileSignature = Object.keys(files || {}).sort().join(",")
+
+  return `${elements.length}::${elementSignature}::${appSignature}::${fileSignature}`
 }
 
 // ─── Note position map for edge rendering ─────────
@@ -123,6 +221,17 @@ export function useExcalidraw(pageId: string | undefined) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isSaving = useRef(false)
   const currentPageId = useRef<string | undefined>(undefined)
+  const pendingSave = useRef(false)
+  const lastQueuedFingerprint = useRef("")
+  const lastSavedFingerprint = useRef("")
+  const pendingPayload = useRef<{
+    elements: readonly Record<string, unknown>[]
+    appState: Record<string, unknown>
+    files: Record<string, unknown>
+    fingerprint: string
+    sessionId: number
+  } | null>(null)
+  const saveSessionRef = useRef(0)
 
   // ─── Load ──────────────────────────────────────
   const loadScene = useCallback(async () => {
@@ -130,6 +239,18 @@ export function useExcalidraw(pageId: string | undefined) {
       setLoading(false)
       return
     }
+
+    saveSessionRef.current += 1
+
+    // Cancel any queued local save so stale scene snapshots cannot overwrite
+    // freshly loaded backend canvas updates.
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    pendingSave.current = false
+    pendingPayload.current = null
+    lastQueuedFingerprint.current = ""
 
     setLoading(true)
     setError(null)
@@ -326,6 +447,16 @@ export function useExcalidraw(pageId: string | undefined) {
         scene.elements = [...(frames as ExcalidrawEl[]), ...scene.elements, ...(rest as ExcalidrawEl[])]
       }
 
+      // Baseline autosave fingerprint to loaded backend scene to avoid immediate
+      // no-op or stale rewrites right after hydration.
+      const loadedFingerprint = buildSaveFingerprint(
+        scene.elements as unknown as readonly Record<string, unknown>[],
+        scene.appState,
+        scene.files,
+      )
+      lastSavedFingerprint.current = loadedFingerprint
+      lastQueuedFingerprint.current = loadedFingerprint
+
       setInitialScene(scene)
     } catch (err) {
       console.error("Canvas load error:", err)
@@ -344,6 +475,10 @@ export function useExcalidraw(pageId: string | undefined) {
   useEffect(() => {
     setInitialScene(null)
     excalidrawRef.current = null
+    pendingSave.current = false
+    pendingPayload.current = null
+    lastQueuedFingerprint.current = ""
+    lastSavedFingerprint.current = ""
     loadScene()
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -351,8 +486,6 @@ export function useExcalidraw(pageId: string | undefined) {
   }, [loadScene])
 
   // ─── Save (debounced, uses dedicated canvas endpoint) ──
-  const pendingSave = useRef(false)
-
   const saveScene = useCallback(
     (
       elements: readonly Record<string, unknown>[],
@@ -361,21 +494,42 @@ export function useExcalidraw(pageId: string | undefined) {
     ) => {
       if (!pageId) return
 
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      
-      saveTimer.current = setTimeout(async () => {
-        // If already saving, just mark that we need another save after this one
-        if (isSaving.current) {
-          pendingSave.current = true
-          return
-        }
+      const fingerprint = buildSaveFingerprint(elements, appState, files)
+      if (
+        fingerprint === lastSavedFingerprint.current ||
+        fingerprint === lastQueuedFingerprint.current
+      ) {
+        return
+      }
 
-        const performSave = async () => {
+      pendingPayload.current = { elements, appState, files, fingerprint, sessionId: saveSessionRef.current }
+      lastQueuedFingerprint.current = fingerprint
+
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+
+      saveTimer.current = setTimeout(async () => {
+        const flushPendingSave = async () => {
+          const payload = pendingPayload.current
+          if (!payload) return
+
+          if (payload.sessionId !== saveSessionRef.current) {
+            return
+          }
+
+          if (payload.fingerprint === lastSavedFingerprint.current) {
+            return
+          }
+
+          if (isSaving.current) {
+            pendingSave.current = true
+            return
+          }
+
           isSaving.current = true
           pendingSave.current = false
 
           try {
-            const safeElements = elements.map((el) => {
+            const clonedElements = payload.elements.map((el) => {
               try {
                 return structuredClone(el)
               } catch {
@@ -387,66 +541,73 @@ export function useExcalidraw(pageId: string | undefined) {
               }
             })
 
+            const safeElements = clonedElements
+              .map((el) => normalizeElementShape(el))
+              .filter((el): el is ExcalidrawEl => !!el)
+
             const zoomValue =
-              appState.zoom && typeof appState.zoom === "object"
-                ? (appState.zoom as { value: number }).value
-                : (appState.zoom as number) || 1
+              payload.appState.zoom && typeof payload.appState.zoom === "object"
+                ? (payload.appState.zoom as { value: number }).value
+                : (payload.appState.zoom as number) || 1
 
             const viewBackgroundColor =
-              typeof appState.viewBackgroundColor === "string" && appState.viewBackgroundColor.length > 0
-                ? appState.viewBackgroundColor
+              typeof payload.appState.viewBackgroundColor === "string" &&
+              payload.appState.viewBackgroundColor.length > 0
+                ? payload.appState.viewBackgroundColor
                 : DARK_BG
 
-            const theme = normalizeTheme(appState.theme, viewBackgroundColor)
+            const theme = normalizeTheme(payload.appState.theme, viewBackgroundColor)
 
-            // Expand appState to include editor defaults for persistence
             const persistentAppState = {
               viewBackgroundColor,
               theme,
-              zoom: appState.zoom,
-              scrollX: appState.scrollX,
-              scrollY: appState.scrollY,
-              // Save "current" tool settings
-              currentItemStrokeColor: appState.currentItemStrokeColor,
-              currentItemBackgroundColor: appState.currentItemBackgroundColor,
-              currentItemFillStyle: appState.currentItemFillStyle,
-              currentItemStrokeWidth: appState.currentItemStrokeWidth,
-              currentItemStrokeStyle: appState.currentItemStrokeStyle,
-              currentItemRoughness: appState.currentItemRoughness,
-              currentItemOpacity: appState.currentItemOpacity,
-              currentItemFontFamily: appState.currentItemFontFamily,
-              currentItemFontSize: appState.currentItemFontSize,
-              currentItemTextAlign: appState.currentItemTextAlign,
-              currentItemStartArrowhead: appState.currentItemStartArrowhead,
-              currentItemEndArrowhead: appState.currentItemEndArrowhead,
-              currentItemRoundness: appState.currentItemRoundness,
-              gridSize: appState.gridSize,
+              zoom: payload.appState.zoom,
+              scrollX: payload.appState.scrollX,
+              scrollY: payload.appState.scrollY,
+              currentItemStrokeColor: payload.appState.currentItemStrokeColor,
+              currentItemBackgroundColor: payload.appState.currentItemBackgroundColor,
+              currentItemFillStyle: payload.appState.currentItemFillStyle,
+              currentItemStrokeWidth: payload.appState.currentItemStrokeWidth,
+              currentItemStrokeStyle: payload.appState.currentItemStrokeStyle,
+              currentItemRoughness: payload.appState.currentItemRoughness,
+              currentItemOpacity: payload.appState.currentItemOpacity,
+              currentItemFontFamily: payload.appState.currentItemFontFamily,
+              currentItemFontSize: payload.appState.currentItemFontSize,
+              currentItemTextAlign: payload.appState.currentItemTextAlign,
+              currentItemStartArrowhead: payload.appState.currentItemStartArrowhead,
+              currentItemEndArrowhead: payload.appState.currentItemEndArrowhead,
+              currentItemRoundness: payload.appState.currentItemRoundness,
+              gridSize: payload.appState.gridSize,
             }
 
             await api.savePageCanvas(pageId, {
               canvas_data: {
                 elements: safeElements,
                 appState: persistentAppState,
-                files: files || {},
+                files: payload.files || {},
               },
               viewport: {
-                x: (appState.scrollX as number) || 0,
-                y: (appState.scrollY as number) || 0,
+                x: (payload.appState.scrollX as number) || 0,
+                y: (payload.appState.scrollY as number) || 0,
                 zoom: zoomValue,
               },
             })
+
+            lastSavedFingerprint.current = payload.fingerprint
           } catch (err) {
+            // Allow retry on the next change when the write fails.
+            lastQueuedFingerprint.current = ""
             console.error("Canvas save failed:", err)
           } finally {
             isSaving.current = false
-            // If another change came in while we were saving, trigger again
             if (pendingSave.current) {
-              saveScene(elements, appState, files)
+              pendingSave.current = false
+              await flushPendingSave()
             }
           }
         }
 
-        await performSave()
+        await flushPendingSave()
       }, 2500)
     },
     [pageId]

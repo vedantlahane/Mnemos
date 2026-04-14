@@ -80,6 +80,12 @@ export interface StreamCallbacks {
   onDone?: () => void;
 }
 
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
+function normalizeApiBase(base: string): string {
+  return base.endsWith("/") ? base.slice(0, -1) : base;
+}
+
 /**
  * Stream canvas operations from the backend via SSE.
  * Returns an AbortController so the caller can cancel.
@@ -88,13 +94,14 @@ export function streamCanvasOps(
   pageId: string,
   request: StreamRequest,
   callbacks: StreamCallbacks,
-  apiBase: string = "/api"
+  apiBase: string = API_BASE
 ): AbortController {
   const controller = new AbortController();
+  const baseUrl = normalizeApiBase(apiBase);
 
   const run = async () => {
     try {
-      const response = await fetch(`${apiBase}/canvas/${pageId}/stream`, {
+      const response = await fetch(`${baseUrl}/canvas/${pageId}/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -119,6 +126,29 @@ export function streamCanvasOps(
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let currentEvent = "";
+      let currentDataLines: string[] = [];
+
+      const flushEvent = () => {
+        if (!currentEvent) return;
+
+        const payload = currentDataLines.join("\n");
+        if (!payload) {
+          currentEvent = "";
+          currentDataLines = [];
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(payload);
+          dispatchEvent(currentEvent, parsed, callbacks);
+        } catch {
+          console.warn("Failed to parse SSE data:", payload);
+        }
+
+        currentEvent = "";
+        currentDataLines = [];
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -128,27 +158,25 @@ export function streamCanvasOps(
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        let currentEvent = "";
-        let currentData = "";
-
         for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            currentData = line.slice(6);
+          const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
 
-            if (currentEvent && currentData) {
-              try {
-                const parsed = JSON.parse(currentData);
-                dispatchEvent(currentEvent, parsed, callbacks);
-              } catch (e) {
-                console.warn("Failed to parse SSE data:", currentData);
-              }
-              currentEvent = "";
-              currentData = "";
-            }
+          if (!normalized) {
+            flushEvent();
+            continue;
+          }
+
+          if (normalized.startsWith("event: ")) {
+            currentEvent = normalized.slice(7).trim();
+          } else if (normalized.startsWith("data: ")) {
+            currentDataLines.push(normalized.slice(6));
           }
         }
+      }
+
+      // Flush any terminal event that might not end with a blank line.
+      if (currentEvent && currentDataLines.length > 0) {
+        flushEvent();
       }
     } catch (e: any) {
       if (e.name !== "AbortError") {
