@@ -1,8 +1,12 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
 import { useStream } from "./useStream"
 import { useAppContext } from "./useAppContext"
 import { useCanvasEvents } from "./useCanvasEvents"
 import type { CanvasStyleSettings } from "./useCanvasEvents"
+import { useCanvasChat } from "./useCanvasChat"
+import { useExcalidrawAPI } from "./useExcalidrawAPI"
+import { useViewportStore } from "./useViewport"
 import { api } from "../api/client"
 import type { Command, ContextType } from "../types"
 
@@ -217,6 +221,20 @@ export function useCommands() {
   } = useStream()
   const { current, switchTo, goBack, goHome } = useAppContext()
   const canvasDispatch = useCanvasEvents((s) => s.dispatch)
+  const liveExcalidrawApi = useExcalidrawAPI((s) => s.api) as ExcalidrawImperativeAPI | null
+  const viewport = useViewportStore((s) => s.viewport)
+  const canvasApiRef = useRef<ExcalidrawImperativeAPI | null>(null)
+
+  useEffect(() => {
+    canvasApiRef.current = liveExcalidrawApi
+  }, [liveExcalidrawApi])
+
+  const getViewport = useCallback(() => viewport, [viewport])
+  const { sendMessage: sendCanvasMessage, cancel: cancelCanvasStream } = useCanvasChat(
+    current.type === "page" && current.pageId ? current.pageId : "",
+    canvasApiRef,
+    getViewport
+  )
 
   const isStyleConfirmedForPage =
     styleLockEnabled &&
@@ -311,6 +329,7 @@ export function useCommands() {
             pages.find((p) => p.name.toLowerCase() === lower) ||
             pages.find((p) => p.name.toLowerCase().includes(lower))
           if (match) {
+            cancelCanvasStream()
             switchTo("page", match.id, match.name)
             addSystemMessage(`Opened page: ${match.icon || "📄"} ${match.name}`)
           } else {
@@ -332,12 +351,14 @@ export function useCommands() {
         if (current.type === "page" && items.some((i) => i.type === "assistant")) {
           saveConversation(current.type, current.pageId)
         }
+        cancelCanvasStream()
         goHome()
         addSystemMessage("Returned to home.")
         addBlock("welcome")
         break
 
       case "back":
+        cancelCanvasStream()
         goBack()
         addSystemMessage("Navigated back.")
         break
@@ -476,6 +497,7 @@ export function useCommands() {
             text,
             capture_type: "manual",
             page_hint: pageHint,
+            viewport: current.type === "page" ? viewport : undefined,
           })
           addSystemMessage(
             `Captured (${resp.note_id.slice(0, 8)}…). Processing…`
@@ -755,6 +777,7 @@ export function useCommands() {
         break
 
       case "clear":
+        cancelCanvasStream()
         clearStream()
         break
 
@@ -787,6 +810,11 @@ export function useCommands() {
     if (q.startsWith("/")) {
       addUserMessage(q)
       await executeCommand(q)
+      return
+    }
+
+    if (current.type === "page" && current.pageId) {
+      sendCanvasMessage(q)
       return
     }
 

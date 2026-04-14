@@ -2,6 +2,7 @@ import { FileText, Sparkles } from "lucide-react"
 import type { UserItem, AssistantItem } from "../types"
 import { useStream } from "../hooks/useStream"
 import { useAppContext } from "../hooks/useAppContext"
+import { useCanvasChatBridge } from "../hooks/useCanvasChat"
 import { api } from "../api/client"
 
 function renderBold(text: string) {
@@ -23,8 +24,14 @@ export default function StreamMessage({
 }) {
   const { addUserMessage, addAssistantMessage, setLoading, items, addSystemMessage } = useStream()
   const { current } = useAppContext()
+  const sendCanvasMessage = useCanvasChatBridge((s) => s.send)
 
   async function followUp(q: string) {
+    if (current.type === "page" && sendCanvasMessage) {
+      sendCanvasMessage(q)
+      return
+    }
+
     addUserMessage(q)
     setLoading(true)
     try {

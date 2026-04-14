@@ -2,156 +2,150 @@
  * Chat hook for canvas pages — uses SSE streaming.
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react"
+import { create } from "zustand"
+import type { MutableRefObject } from "react"
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
 import {
   streamCanvasOps,
   type Viewport,
   type StreamCallbacks,
-} from "../lib/canvasOps";
-import { CanvasApplier } from "../lib/canvasApplier";
-
+} from "../lib/canvasOps"
+import { CanvasApplier } from "../lib/canvasApplier"
+import { useStreamStore } from "./useStream"
 
 export interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  sources?: Array<{ id: string; title: string; similarity: number }>;
-  followUps?: string[];
-  intent?: string;
-  topic?: string;
+  role: "user" | "assistant"
+  content: string
+  sources?: Array<{ id: string; title: string; similarity: number }>
+  followUps?: string[]
+  intent?: string
+  topic?: string
 }
+
+interface CanvasChatBridgeState {
+  send: ((text: string) => void) | null
+  cancel: (() => void) | null
+  setHandlers: (
+    send: ((text: string) => void) | null,
+    cancel: (() => void) | null
+  ) => void
+}
+
+export const useCanvasChatBridge = create<CanvasChatBridgeState>((set) => ({
+  send: null,
+  cancel: null,
+  setHandlers: (send, cancel) => set({ send, cancel }),
+}))
 
 export function useCanvasChat(
   pageId: string,
-  excalidrawApiRef: React.MutableRefObject<any>,
+  excalidrawApiRef: MutableRefObject<ExcalidrawImperativeAPI | null>,
   getViewport: () => Viewport
 ) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [currentIntent, setCurrentIntent] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const applierRef = useRef<CanvasApplier | null>(null);
+  const items = useStreamStore((s) => s.items)
+  const isLoading = useStreamStore((s) => s.isLoading)
+  const currentIntent = useStreamStore((s) => s.canvasIntent)
+  const addUserMessage = useStreamStore((s) => s.addUserMessage)
+  const addAssistantMessage = useStreamStore((s) => s.addAssistantMessage)
+  const upsertAssistantMessage = useStreamStore((s) => s.upsertAssistantMessage)
+  const setLoading = useStreamStore((s) => s.setLoading)
+  const setCanvasIntent = useStreamStore((s) => s.setCanvasIntent)
+
+  const abortRef = useRef<AbortController | null>(null)
+  const applierRef = useRef<CanvasApplier | null>(null)
+
+  const messages = useMemo<ChatMessage[]>(() => {
+    return items
+      .filter((item) => item.type === "user" || item.type === "assistant")
+      .map((item) => {
+        if (item.type === "user") {
+          return { role: "user", content: item.content }
+        }
+        return {
+          role: "assistant",
+          content: item.content,
+          sources: item.sources,
+          followUps: item.followUps,
+        }
+      })
+  }, [items])
 
   const getApplier = useCallback(() => {
-    const api = excalidrawApiRef.current;
-    if (!api) return null;
+    const api = excalidrawApiRef.current
+    if (!api) return null
     if (!applierRef.current) {
-      applierRef.current = new CanvasApplier(api);
+      applierRef.current = new CanvasApplier(api)
     }
-    return applierRef.current;
-  }, [excalidrawApiRef]);
+    return applierRef.current
+  }, [excalidrawApiRef])
 
   const sendMessage = useCallback(
     (text: string) => {
-      if (!text.trim() || isLoading) return;
+      if (!text.trim() || isLoading || !pageId) return
 
-      // Add user message
-      const userMsg: ChatMessage = { role: "user", content: text };
-      setMessages((prev) => [...prev, userMsg]);
-      setIsLoading(true);
-      setCurrentIntent(null);
+      addUserMessage(text)
+      setLoading(true)
+      setCanvasIntent(null)
 
-      // Build assistant message progressively
-      let assistantContent = "";
-      let assistantIntent = "";
-      let assistantTopic = "";
+      let assistantContent = ""
+      let assistantSources: ChatMessage["sources"] = []
+      let assistantFollowUps: string[] = []
 
-      // Cancel previous stream
-      abortRef.current?.abort();
+      abortRef.current?.abort()
 
       const callbacks: StreamCallbacks = {
-        onIntent: (intent, topic, _meta) => {
-          assistantIntent = intent;
-          assistantTopic = topic;
-          setCurrentIntent(intent);
+        onIntent: (intent, _topic, _meta) => {
+          setCanvasIntent(intent)
         },
 
         onChat: (content) => {
-          assistantContent = content;
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === "assistant") {
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...last,
-                  content,
-                  intent: assistantIntent,
-                  topic: assistantTopic,
-                },
-              ];
-            }
-            return [
-              ...prev,
-              {
-                role: "assistant",
-                content,
-                intent: assistantIntent,
-                topic: assistantTopic,
-              },
-            ];
-          });
+          assistantContent = content
+          upsertAssistantMessage(content, assistantSources, assistantFollowUps)
         },
 
         onCanvasOp: (op) => {
-          const applier = getApplier();
+          const applier = getApplier()
           if (applier) {
-            applier.apply(op);
+            applier.apply(op)
           }
         },
 
         onSources: (sources) => {
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === "assistant") {
-              return [...prev.slice(0, -1), { ...last, sources }];
-            }
-            return prev;
-          });
+          assistantSources = sources
+          if (assistantContent) {
+            upsertAssistantMessage(assistantContent, sources, assistantFollowUps)
+          }
         },
 
         onFollowUps: (followUps) => {
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === "assistant") {
-              return [...prev.slice(0, -1), { ...last, followUps }];
-            }
-            return prev;
-          });
+          assistantFollowUps = followUps
+          if (assistantContent) {
+            upsertAssistantMessage(assistantContent, assistantSources, followUps)
+          }
         },
 
         onError: (message) => {
-          console.error("Canvas stream error:", message);
+          console.error("Canvas stream error:", message)
           if (!assistantContent) {
-            assistantContent = `Error: ${message}`;
-            setMessages((prev) => [
-              ...prev,
-              { role: "assistant", content: assistantContent },
-            ]);
+            assistantContent = `Error: ${message}`
+            addAssistantMessage(assistantContent)
           }
         },
 
         onDone: () => {
-          setIsLoading(false);
-          setCurrentIntent(null);
+          setLoading(false)
+          setCanvasIntent(null)
 
-          // Ensure assistant message exists
           if (!assistantContent) {
-            setMessages((prev) => {
-              const last = prev[prev.length - 1];
-              if (last?.role !== "assistant") {
-                return [...prev, { role: "assistant", content: "Done." }];
-              }
-              return prev;
-            });
+            upsertAssistantMessage("Done.", assistantSources, assistantFollowUps)
           }
         },
-      };
+      }
 
       const selectedIds = excalidrawApiRef.current
-        ? Object.keys(
-            excalidrawApiRef.current.getAppState().selectedElementIds || {}
-          )
-        : [];
+        ? Object.keys(excalidrawApiRef.current.getAppState().selectedElementIds || {})
+        : []
 
       abortRef.current = streamCanvasOps(
         pageId,
@@ -166,20 +160,51 @@ export function useCanvasChat(
           context_type: "page",
         },
         callbacks
-      );
+      )
     },
-    [pageId, messages, isLoading, getViewport, getApplier, excalidrawApiRef]
-  );
+    [
+      pageId,
+      messages,
+      isLoading,
+      getViewport,
+      getApplier,
+      excalidrawApiRef,
+      addUserMessage,
+      addAssistantMessage,
+      upsertAssistantMessage,
+      setLoading,
+      setCanvasIntent,
+    ]
+  )
 
   const cancel = useCallback(() => {
-    abortRef.current?.abort();
-    setIsLoading(false);
-    setCurrentIntent(null);
-  }, []);
+    abortRef.current?.abort()
+    setLoading(false)
+    setCanvasIntent(null)
+  }, [setLoading, setCanvasIntent])
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
+
+  useEffect(() => {
+    abortRef.current?.abort()
+    setLoading(false)
+    setCanvasIntent(null)
+  }, [pageId, setLoading, setCanvasIntent])
+
+  useEffect(() => {
+    useCanvasChatBridge.getState().setHandlers(sendMessage, cancel)
+    return () => {
+      useCanvasChatBridge.getState().setHandlers(null, null)
+    }
+  }, [sendMessage, cancel])
 
   const clearHistory = useCallback(() => {
-    setMessages([]);
-  }, []);
+    useStreamStore.getState().clearStream()
+  }, [])
 
   return {
     messages,
@@ -188,5 +213,5 @@ export function useCanvasChat(
     sendMessage,
     cancel,
     clearHistory,
-  };
+  }
 }

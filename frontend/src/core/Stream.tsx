@@ -12,7 +12,7 @@ import { motion, AnimatePresence, useDragControls } from "framer-motion"
 import { useCanvasEvents } from "../hooks/useCanvasEvents"
 
 export default function Stream() {
-  const { items, isLoading } = useStream()
+  const { items, isLoading, canvasIntent } = useStream()
   const { current } = useAppContext()
   const canvasDispatch = useCanvasEvents((s) => s.dispatch)
   const endRef = useRef<HTMLDivElement>(null)
@@ -214,6 +214,18 @@ export default function Stream() {
         >
           {view === "chat" ? (
             <div className="flex flex-col gap-3">
+              {canvasIntent && (
+                <div className="text-[11px] uppercase tracking-wider text-[var(--accent-light)] bg-[var(--accent-subtle)] border border-[rgba(99,102,241,0.25)] rounded-full px-3 py-1 w-fit">
+                  {canvasIntent === "compose" && "Writing..."}
+                  {canvasIntent === "command" && "Executing..."}
+                  {canvasIntent === "diagram" && "Drawing..."}
+                  {canvasIntent === "arrange" && "Arranging..."}
+                  {canvasIntent === "search" && "Searching..."}
+                  {canvasIntent === "query" && "Thinking..."}
+                  {!(["compose", "command", "diagram", "arrange", "search", "query"] as string[]).includes(canvasIntent) && canvasIntent}
+                </div>
+              )}
+
               {items.length === 0 && (
                 <div className="text-center py-8">
                   <div className="text-[13px] font-semibold text-white mb-1.5">

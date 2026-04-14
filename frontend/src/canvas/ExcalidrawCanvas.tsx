@@ -341,12 +341,10 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   } = useExcalidraw(pageId)
 
   const { addSystemMessage } = useStream()
-  const { current } = useAppContext()
+  const { current, switchTo } = useAppContext()
   const canvasSeq = useCanvasEvents((s) => s.seq)
   const canvasConsume = useCanvasEvents((s) => s.consume)
   const { getViewport, onScrollChange } = useViewport(excalidrawRef)
-  // getViewport is used for SSE operations and API calls that need viewport context
-  void getViewport
 
   const userHasInteracted = useRef(false)
   const sceneApplied = useRef(false)
@@ -406,6 +404,37 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
     setEmptyOverlayDismissed(false)
     setHasLiveContent(false)
   }, [pageId])
+
+  // ─── Backend-triggered scene refresh ──────────
+  useEffect(() => {
+    const handler = () => {
+      reload()
+    }
+
+    window.addEventListener("mnemos:refresh-canvas", handler)
+    return () => window.removeEventListener("mnemos:refresh-canvas", handler)
+  }, [reload])
+
+  // ─── Backend-triggered navigation ─────────────
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ pageId?: string }>).detail
+      const targetPageId = detail?.pageId
+      if (!targetPageId || targetPageId === current.pageId) return
+
+      void (async () => {
+        try {
+          const page = await api.getPage(targetPageId)
+          switchTo("page", targetPageId, page.name)
+        } catch {
+          switchTo("page", targetPageId)
+        }
+      })()
+    }
+
+    window.addEventListener("mnemos:navigate", handler)
+    return () => window.removeEventListener("mnemos:navigate", handler)
+  }, [current.pageId, switchTo])
 
   // ─── Process canvas commands ──────────────────
   useEffect(() => {
@@ -495,6 +524,7 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
                 text: cmd.content,
                 capture_type: "manual",
                 page_hint: current.pageName,
+                viewport: getViewport(),
               })
               addSystemMessage(`Note captured (${resp.note_id}). Processing…`)
               setTimeout(async () => {

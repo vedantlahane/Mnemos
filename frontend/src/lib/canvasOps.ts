@@ -194,7 +194,9 @@ function dispatchEvent(
 }
 
 function getAuthHeader(): Record<string, string> | null {
-  const token = localStorage.getItem("access_token");
+  const token =
+    localStorage.getItem("mnemos-token") ||
+    localStorage.getItem("access_token");
   if (token && token !== "auth-disabled") {
     return { Authorization: `Bearer ${token}` };
   }

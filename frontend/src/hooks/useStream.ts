@@ -10,9 +10,15 @@ interface StreamState {
   items: StreamItem[]
   isLoading: boolean
   chatId: string | null
+  canvasIntent: string | null
 
   addUserMessage: (content: string) => void
   addAssistantMessage: (
+    content: string,
+    sources?: ChatSource[],
+    followUps?: string[]
+  ) => void
+  upsertAssistantMessage: (
     content: string,
     sources?: ChatSource[],
     followUps?: string[]
@@ -24,6 +30,7 @@ interface StreamState {
   ) => void
   addSystemMessage: (content: string) => void
   setLoading: (loading: boolean) => void
+  setCanvasIntent: (intent: string | null) => void
   setBlockLoading: (id: string, loading: boolean) => void
   clearStream: () => void
   getLastBlock: () => StreamItem | undefined
@@ -44,6 +51,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   items: [makeWelcome()],
   isLoading: false,
   chatId: null,
+  canvasIntent: null,
 
   addUserMessage: (content) =>
     set((s) => ({
@@ -67,6 +75,39 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         },
       ],
     })),
+
+  upsertAssistantMessage: (content, sources, followUps) =>
+    set((s) => {
+      const last = s.items[s.items.length - 1]
+      if (last?.type === "assistant") {
+        return {
+          items: [
+            ...s.items.slice(0, -1),
+            {
+              ...last,
+              content,
+              sources: sources ?? last.sources,
+              followUps: followUps ?? last.followUps,
+              timestamp: Date.now(),
+            },
+          ],
+        }
+      }
+
+      return {
+        items: [
+          ...s.items,
+          {
+            id: uid(),
+            type: "assistant",
+            content,
+            sources,
+            followUps,
+            timestamp: Date.now(),
+          },
+        ],
+      }
+    }),
 
   addBlock: (blockType, blockData, metadata) =>
     set((s) => ({
@@ -93,6 +134,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
   setLoading: (loading) => set({ isLoading: loading }),
 
+  setCanvasIntent: (intent) => set({ canvasIntent: intent }),
+
   setBlockLoading: (id, loading) =>
     set((s) => ({
       items: s.items.map((item) =>
@@ -100,7 +143,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       ),
     })),
 
-  clearStream: () => set({ items: [makeWelcome()], chatId: null }),
+  clearStream: () => set({ items: [makeWelcome()], chatId: null, canvasIntent: null }),
 
   getLastBlock: () => {
     const blocks = get().items.filter((i) => i.type === "block")
