@@ -1,11 +1,21 @@
+# === FILE: backend/app/llm/prompts.py ===
+
 PROCESS_PROMPT = """Analyze this text and return JSON only:
 {{
   "title": "concise title",
   "summary": "2-3 sentence summary",
   "tags": ["tag1", "tag2"],
   "tasks": ["task1", "task2"],
-  "entities": ["entity1", "entity2"]
+  "entities": ["entity1", "entity2"],
+  "content_type": "note|code|url|thought|question"
 }}
+
+Content type rules:
+- "note": standard knowledge capture (articles, explanations, facts)
+- "code": programming code or technical configuration
+- "url": primarily a URL/link with optional description
+- "thought": quick idea, reflection, or personal note
+- "question": a question the user wants to explore later
 
 Text to analyze:
 {text}"""
@@ -79,8 +89,6 @@ Return JSON only — an array:
   {{"title": "what to read next", "noteId": "uuid-or-null", "reason": "why this order"}}
 ]
 
-Consider dependencies, foundational concepts first, then advanced topics.
-
 Topic focus: {topic}
 Notes:
 {notes_info}"""
@@ -88,64 +96,21 @@ Notes:
 PAGE_SUMMARY_PROMPT = """Summarize these notes from a knowledge page.
 Return JSON only:
 {{
-  "summary": "coherent 3-5 sentence summary of the page's knowledge",
+  "summary": "coherent 3-5 sentence summary",
   "key_topics": ["topic1", "topic2", "topic3"],
-  "connections": ["notable connection 1 between notes", "connection 2"]
+  "connections": ["connection 1 between notes", "connection 2"]
 }}
 
 Page: {page_name}
 Notes:
 {notes_info}"""
 
-CHAT_SYSTEM = """You are a personal knowledge assistant. First and foremost, ALWAYS use the user's notes provided in the context to answer the question, and cite which notes you're drawing from by mentioning their titles. If the notes do not contain enough information, you may use your general knowledge to answer, but you MUST explicitly state that you are doing so because the notes lacked context."""
+CHAT_SYSTEM = """You are a personal knowledge assistant called Mnemos. ALWAYS use the user's notes provided in the context to answer, citing note titles. If notes are insufficient, use general knowledge but EXPLICITLY state that. Never fabricate note citations.
 
-AI_POSITION_PROMPT = """Given existing notes on a canvas and a new note, suggest where to place it.
-Return JSON only:
-{{
-  "x": number,
-  "y": number,
-  "cluster": "cluster label or null",
-  "reason": "brief explanation"
-}}
+When on a canvas page, format for visual display:
+- Use short paragraphs and bullet points
+- Use **bold** for key terms
+- Keep responses focused and actionable
 
-Canvas size: {width}x{height}
-Note card size: 360x240, minimum spacing: 420 horizontal, 350 vertical
-
-Existing notes (title → position):
-{existing_notes}
-
-New note:
-Title: {title}
-Tags: {tags}
-Summary: {summary}"""
-
-
-INTENT_ROUTER_PROMPT = """You are an intent router for a productivity app. Decide whether the user message should trigger a command/tool or remain normal chat.
-
-Return JSON only:
-{{
-  "mode": "command|chat",
-  "command": "exact command name starting with /, or empty",
-  "args": "arguments without the command prefix",
-  "confidence": 0.0,
-  "reason": "short reason"
-}}
-
-Context type: {context_type}
-Current page: {page_name}
-
-Available commands in this context:
-{available_commands}
-
-Routing rules:
-- If the user asks to write/explain/organize content on canvas, prefer /compose.
-- If the user asks to draw/visualize a diagram, prefer /diagram or /compose with diagram-oriented args.
-- If the user asks to search notes, use /search.
-- If the user asks to find on canvas, use /find.
-- If the user asks to capture/store a note, use /capture.
-- If the message is conversational, ambiguous, or requires nuanced QA, return mode=chat.
-- Never output commands that are not in the available list.
-
-User message:
-{question}
-"""
+If the user wants content written/composed, provide thorough well-formatted content.
+If the user wants a diagram, tell them to use "draw a [type] about [topic]"."""

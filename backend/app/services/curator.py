@@ -1,24 +1,31 @@
+# === FILE: backend/app/services/curator.py ===
+"""
+Curator service — knowledge base health scanning.
+"""
+
 from datetime import datetime, timedelta, timezone
+import logging
 import numpy as np
 from app.db.supabase import db
+from app.config import settings
+
+logger = logging.getLogger("mnemos.curator")
 
 
 class Curator:
 
-    MAX_NOTES_FOR_COMPARISON = 200  # Cap to prevent O(n²) timeout
-
-    async def full_scan(self) -> dict:
-        notes_result = await db.list_notes(page=1, limit=self.MAX_NOTES_FOR_COMPARISON)
+    async def full_scan(self, user_id: str = None) -> dict:
+        notes_result = await db.list_notes(page=1, limit=settings.curator_max_comparison, user_id=user_id)
         all_notes = notes_result.get("notes", [])
-        all_edges = await db.get_all_edges()
+        all_edges = await db.get_all_edges(user_id=user_id)
 
         duplicates = self._find_duplicates(all_notes)
         orphans = self._find_orphans(all_notes, all_edges)
         stale = self._find_stale(all_notes)
-        cluster_issues = await self._find_cluster_issues()
+        cluster_issues = await self._find_cluster_issues(user_id=user_id)
         missing = self._find_missing_connections(all_notes, all_edges)
 
-        # Auto-apply safe actions (missing edges only)
+        # Auto-apply safe actions
         auto_applied = 0
         for m in missing[:5]:
             try:
@@ -32,19 +39,16 @@ class Curator:
                         created_by="curator",
                     )
                     auto_applied += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Auto-apply edge failed: {e}")
 
-        # Queue risky actions for user confirmation
         needs_confirmation = []
-
         for d in duplicates:
             needs_confirmation.append({
                 "action_type": "merge_notes",
                 "params": {"note_a": d["note_a"], "note_b": d["note_b"]},
                 "reason": f"Notes are {d['similarity']:.0%} similar",
             })
-
         for s in stale:
             needs_confirmation.append({
                 "action_type": "delete_note",
@@ -62,21 +66,29 @@ class Curator:
             "needs_confirmation": needs_confirmation,
         }
 
-    async def apply_action(self, action_type: str, params: dict) -> dict:
+    async def apply_action(self, action_type: str, params: dict, user_id: str = None) -> dict:
         if action_type == "merge_notes":
-            return await self._merge_notes(params["note_a"], params["note_b"])
+            return await self._merge_notes(params["note_a"], params["note_b"], user_id=user_id)
         elif action_type == "delete_note":
-            await db.delete_note(params["note_id"])
+            note = await db.get_note(params["note_id"], user_id=user_id)
+            if not note:
+                return {"status": "error", "detail": "Note not found"}
+            if note.get("page_id"):
+                await db.decrement_page_note_count(note["page_id"], user_id=user_id)
+                try:
+                    from app.services.excalidraw_scene import remove_note_from_canvas
+                    await remove_note_from_canvas(note["page_id"], params["note_id"])
+                except Exception:
+                    pass
+            await db.delete_note(params["note_id"], user_id=user_id)
             return {"status": "deleted", "note_id": params["note_id"]}
         elif action_type == "add_edge":
             edge = await db.insert_edge(**params)
             return {"status": "edge_created", "edge": edge}
         elif action_type == "connect_orphan":
-            note = await db.get_note(params["note_id"])
+            note = await db.get_note(params["note_id"], user_id=user_id)
             if note and note.get("embedding"):
-                related = await db.vector_search(
-                    note["embedding"], limit=3, threshold=0.65
-                )
+                related = await db.vector_search(note["embedding"], limit=3, threshold=0.65)
                 created = 0
                 for r in related:
                     if r["id"] != params["note_id"]:
@@ -98,7 +110,7 @@ class Curator:
     def _find_duplicates(self, notes: list) -> list:
         duplicates = []
         notes_with_emb = [n for n in notes if n.get("embedding")]
-        cap = min(len(notes_with_emb), self.MAX_NOTES_FOR_COMPARISON)
+        cap = min(len(notes_with_emb), settings.curator_max_comparison)
 
         for i in range(cap):
             emb_a = np.array(notes_with_emb[i]["embedding"])
@@ -111,7 +123,7 @@ class Curator:
                 if norm_b == 0:
                     continue
                 sim = float(np.dot(emb_a, emb_b) / (norm_a * norm_b))
-                if sim > 0.92:
+                if sim > settings.curator_duplicate_threshold:
                     duplicates.append({
                         "note_a": notes_with_emb[i]["id"],
                         "note_b": notes_with_emb[j]["id"],
@@ -131,13 +143,9 @@ class Curator:
         for e in edges:
             connected.add(e["source_id"])
             connected.add(e["target_id"])
-
         orphans = []
         for n in notes:
-            if (
-                n["id"] not in connected
-                and n.get("processing_status") == "done"
-            ):
+            if n["id"] not in connected and n.get("processing_status") == "done":
                 orphans.append({
                     "note_id": n["id"],
                     "title": n.get("title") or "Untitled",
@@ -149,14 +157,13 @@ class Curator:
     def _find_stale(self, notes: list) -> list:
         stale = []
         now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(days=30)
+        cutoff = now - timedelta(days=settings.curator_stale_days)
 
         for n in notes:
             created_str = n.get("created_at", "")
             if not created_str:
                 continue
             try:
-                # Handle various ISO formats from Supabase
                 created_str_clean = created_str.replace("Z", "+00:00")
                 if "+" not in created_str_clean and "-" not in created_str_clean[10:]:
                     created_str_clean += "+00:00"
@@ -177,30 +184,27 @@ class Curator:
                     })
         return stale[:20]
 
-    async def _find_cluster_issues(self) -> list:
+    async def _find_cluster_issues(self, user_id: str = None) -> list:
         issues = []
-        pages = await db.list_pages()
-
+        pages = await db.list_pages(user_id=user_id)
         for page in pages:
             clusters = await db.list_clusters(page_id=page["id"])
             for cluster in clusters:
-                notes_result = await db.list_notes(
-                    page=1, limit=100, page_id=page["id"]
-                )
-                cluster_notes = [
-                    n
-                    for n in notes_result.get("notes", [])
-                    if n.get("cluster_id") == cluster["id"]
-                ]
+                notes_result = await db.list_notes(page=1, limit=100, page_id=page["id"], user_id=user_id)
+                cluster_notes = [n for n in notes_result.get("notes", []) if n.get("cluster_id") == cluster["id"]]
                 if len(cluster_notes) > 15:
                     issues.append({
                         "cluster_id": cluster["id"],
                         "issue": "too_large",
                         "size": len(cluster_notes),
-                        "suggestion": (
-                            f"Split cluster '{cluster['label']}' "
-                            f"({len(cluster_notes)} notes)"
-                        ),
+                        "suggestion": f"Split cluster '{cluster['label']}' ({len(cluster_notes)} notes)",
+                    })
+                elif len(cluster_notes) == 0:
+                    issues.append({
+                        "cluster_id": cluster["id"],
+                        "issue": "empty",
+                        "size": 0,
+                        "suggestion": f"Remove empty cluster '{cluster['label']}'",
                     })
         return issues
 
@@ -212,18 +216,15 @@ class Curator:
 
         missing = []
         notes_with_emb = [n for n in notes if n.get("embedding")]
-        cap = min(len(notes_with_emb), self.MAX_NOTES_FOR_COMPARISON)
+        cap = min(len(notes_with_emb), settings.curator_max_comparison)
 
         for i in range(cap):
             emb_a = np.array(notes_with_emb[i]["embedding"])
             norm_a = np.linalg.norm(emb_a)
             if norm_a == 0:
                 continue
-            # Only check nearby notes to limit work
             for j in range(i + 1, min(cap, i + 20)):
-                pair = tuple(
-                    sorted([notes_with_emb[i]["id"], notes_with_emb[j]["id"]])
-                )
+                pair = tuple(sorted([notes_with_emb[i]["id"], notes_with_emb[j]["id"]]))
                 if pair in edge_pairs:
                     continue
                 emb_b = np.array(notes_with_emb[j]["embedding"])
@@ -231,7 +232,7 @@ class Curator:
                 if norm_b == 0:
                     continue
                 sim = float(np.dot(emb_a, emb_b) / (norm_a * norm_b))
-                if sim > 0.8:
+                if sim > settings.curator_missing_edge_threshold:
                     missing.append({
                         "note_a": notes_with_emb[i]["id"],
                         "note_b": notes_with_emb[j]["id"],
@@ -247,39 +248,28 @@ class Curator:
                 break
         return missing[:20]
 
-    async def _merge_notes(self, note_a_id: str, note_b_id: str) -> dict:
-        note_a = await db.get_note(note_a_id)
-        note_b = await db.get_note(note_b_id)
+    async def _merge_notes(self, note_a_id: str, note_b_id: str, user_id: str = None) -> dict:
+        note_a = await db.get_note(note_a_id, user_id=user_id)
+        note_b = await db.get_note(note_b_id, user_id=user_id)
         if not note_a or not note_b:
             return {"status": "error", "detail": "Note not found"}
 
         merged_text = f"{note_a['raw_text']}\n\n---\n\n{note_b['raw_text']}"
-        merged_tags = list(
-            set((note_a.get("tags") or []) + (note_b.get("tags") or []))
-        )
-        merged_tasks = list(
-            set((note_a.get("tasks") or []) + (note_b.get("tasks") or []))
-        )
-        merged_entities = list(
-            set((note_a.get("entities") or []) + (note_b.get("entities") or []))
-        )
+        merged_tags = list(set((note_a.get("tags") or []) + (note_b.get("tags") or [])))
+        merged_tasks = list(set((note_a.get("tasks") or []) + (note_b.get("tasks") or [])))
+        merged_entities = list(set((note_a.get("entities") or []) + (note_b.get("entities") or [])))
 
         await db.update_note(
-            note_a_id,
+            note_a_id, user_id=user_id,
             raw_text=merged_text,
             tags=merged_tags,
             tasks=merged_tasks,
             entities=merged_entities,
         )
 
-        # Move B's edges to A
         b_edges = await db.get_edges_for_note(note_b_id)
         for edge in b_edges:
-            other_id = (
-                edge["target_id"]
-                if edge["source_id"] == note_b_id
-                else edge["source_id"]
-            )
+            other_id = edge["target_id"] if edge["source_id"] == note_b_id else edge["source_id"]
             if other_id != note_a_id:
                 exists = await db.edge_exists(note_a_id, other_id)
                 if not exists:
@@ -294,11 +284,30 @@ class Curator:
                     except Exception:
                         pass
 
-        # Decrement old page count
         if note_b.get("page_id"):
-            await db.decrement_page_note_count(note_b["page_id"])
+            await db.decrement_page_note_count(note_b["page_id"], user_id=user_id)
+            try:
+                from app.services.excalidraw_scene import remove_note_from_canvas
+                await remove_note_from_canvas(note_b["page_id"], note_b_id)
+            except Exception:
+                pass
 
-        await db.delete_note(note_b_id)
+        await db.delete_note(note_b_id, user_id=user_id)
+
+        # Re-sync merged note on canvas
+        try:
+            if note_a.get("page_id"):
+                from app.services.excalidraw_scene import sync_note_to_canvas
+                updated_a = await db.get_note(note_a_id)
+                if updated_a:
+                    await sync_note_to_canvas(
+                        updated_a["page_id"], updated_a,
+                        x=updated_a.get("canvas_x"),
+                        y=updated_a.get("canvas_y"),
+                    )
+        except Exception:
+            pass
+
         return {"status": "merged", "kept": note_a_id, "deleted": note_b_id}
 
 

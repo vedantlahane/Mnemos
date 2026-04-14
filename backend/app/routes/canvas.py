@@ -1,7 +1,12 @@
+# === FILE: backend/app/routes/canvas.py ===
+
 from fastapi import APIRouter, HTTPException, Depends
 from app.models.schemas import ElementCreate, ElementUpdate
 from app.db.supabase import db
 from app.auth.dependencies import get_optional_user_id
+import logging
+
+logger = logging.getLogger("mnemos.routes.canvas")
 
 router = APIRouter()
 
@@ -45,14 +50,12 @@ async def create_element(page_id: str, payload: ElementCreate, user_id: str = De
         try:
             from app.services.excalidraw_scene import add_sticky_to_canvas
             await add_sticky_to_canvas(
-                page_id,
-                payload.content,
-                x=payload.position_x,
-                y=payload.position_y,
+                page_id, payload.content,
+                x=payload.position_x, y=payload.position_y,
                 legacy_element_id=element["id"],
             )
         except Exception as e:
-            print(f"Excalidraw sticky sync failed for {element['id']}: {e}")
+            logger.warning(f"Sticky sync failed: {e}")
 
     return element
 
@@ -62,16 +65,13 @@ async def update_element(element_id: str, payload: ElementUpdate, user_id: str =
     element = await db.get_element(element_id)
     if not element:
         raise HTTPException(status_code=404, detail="Element not found")
-
     page = await db.get_page(element["page_id"], user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Element not found")
-
     updates = payload.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    element = await db.update_element(element_id, **updates)
-    return element
+    return await db.update_element(element_id, **updates)
 
 
 @router.delete("/elements/{element_id}")
@@ -79,10 +79,8 @@ async def delete_element(element_id: str, user_id: str = Depends(get_optional_us
     element = await db.get_element(element_id)
     if not element:
         raise HTTPException(status_code=404, detail="Element not found")
-
     page = await db.get_page(element["page_id"], user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Element not found")
-
     await db.delete_element(element_id)
     return {"status": "deleted"}

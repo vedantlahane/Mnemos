@@ -1,3 +1,5 @@
+# === FILE: backend/app/llm/groq_provider.py ===
+
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from app.config import settings
@@ -31,11 +33,7 @@ async def groq_json_call(prompt: str, model: str = None) -> dict | list:
 
 
 @with_retry(max_retries=3, base_delay=1.0)
-async def groq_chat_call(
-    system: str,
-    messages: list[dict],
-    model: str = None,
-) -> str:
+async def groq_chat_call(system: str, messages: list[dict], model: str = None) -> str:
     llm = get_groq_llm(model=model, temperature=0.3)
     lc_messages = [SystemMessage(content=system)]
     for msg in messages:

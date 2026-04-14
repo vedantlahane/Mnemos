@@ -1,81 +1,67 @@
-import asyncio
+# === FILE: backend/main.py ===
+
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from app.config import settings
-from app.db.supabase import db
-from app.auth.jwt_handler import verify_token
-from app.services.processor import processor
 from app.services import cache as cache_svc
-from app.routes import (
-    capture,
-    notes,
-    search,
-    chat,
-    context,
-    pages,
-    edges,
-    clusters,
-    canvas,
-    stats,
-    history,
-    curator,
+from app.db.supabase import db
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
-from app.routes.auth import router as auth_router
-from app.routes.ai_endpoints import router as ai_router
-from app.routes.settings_routes import router as settings_router
-from app.routes.workspace import router as workspace_router
+logger = logging.getLogger("mnemos")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Recover stuck notes
-    stuck = await db.get_stuck_notes(older_than_minutes=5)
-    for note in stuck:
-        asyncio.create_task(
-            processor.process_note(note["id"], note["raw_text"])
-        )
-    if stuck:
-        print(f"Recovered {len(stuck)} stuck notes")
+    # ── Startup ──
+    logger.info("Starting Mnemos backend…")
 
     # Ensure Uncategorized page exists
-    uncat = await db.get_page_by_name("Uncategorized")
-    if not uncat:
-        await db.insert_page(
-            name="Uncategorized",
-            description="Notes that have not been assigned to a page yet",
-            icon="📥",
-            color="#64748b",
-        )
-        print("Created Uncategorized page")
+    try:
+        page = await db.get_page_by_name("Uncategorized")
+        if not page:
+            await db.insert_page(
+                name="Uncategorized",
+                description="Default page for uncategorized notes",
+                icon="📥",
+                color="#6b7280",
+            )
+            logger.info("Created default Uncategorized page")
+    except Exception as e:
+        logger.error(f"Failed to ensure Uncategorized page: {e}")
 
-    # Ensure default settings exist
-    default_settings = await db.get_settings(user_id=None)
-    if not default_settings:
-        await db.upsert_settings(
-            user_id=None,
-            theme="glass",
-            model="gemini-2.5-flash",
-            groq_model="llama-3.3-70b-versatile",
-            similarity_threshold=0.65,
-            embedding_dimensions=768,
-        )
-        print("Created default settings")
-    # Initialize Redis cache (optional)
-    redis_ok = await cache_svc.init_redis(settings.redis_url)
-    if redis_ok:
-        print("Redis cache: connected")
-    else:
-        print("Redis cache: disabled (no REDIS_URL)")
+    # Init Redis
+    if settings.redis_url:
+        ok = await cache_svc.init_redis(settings.redis_url)
+        if ok:
+            logger.info("Redis cache enabled")
+
+    # Retry stuck notes
+    try:
+        stuck = await db.get_stuck_notes(older_than_minutes=10)
+        if stuck:
+            from app.services.processor import processor
+            for note in stuck[:10]:
+                logger.info(f"Retrying stuck note {note['id']}")
+                import asyncio
+                asyncio.create_task(
+                    processor.process_note(note["id"], note["raw_text"])
+                )
+    except Exception as e:
+        logger.warning(f"Stuck-note recovery failed: {e}")
 
     yield
 
-    # Shutdown: close Redis
+    # ── Shutdown ──
     await cache_svc.close_redis()
+    logger.info("Mnemos backend stopped")
 
 
-app = FastAPI(title="Mnemos", version="3.0", lifespan=lifespan)
+app = FastAPI(title="Mnemos", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -85,66 +71,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Mount all routers ──
+from app.routes import (
+    auth,
+    capture,
+    chat,
+    canvas,
+    canvas_stream,
+    notes,
+    pages,
+    edges,
+    clusters,
+    search,
+    context,
+    history,
+    ai_endpoints,
+    curator as curator_routes,
+    settings_routes,
+    stats,
+    workspace,
+)
 
-@app.middleware("http")
-async def auth_guard_middleware(request, call_next):
-    if not settings.auth_enabled:
-        return await call_next(request)
-
-    path = request.url.path
-    if path == "/health" or path.startswith("/api/auth/") or request.method == "OPTIONS":
-        return await call_next(request)
-
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
-
-    token = auth_header[7:]
-    payload = verify_token(token)
-    if not payload or "sub" not in payload:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
-
-    request.state.user_id = payload["sub"]
-    return await call_next(request)
-
-# Auth (no prefix — /api/auth/...)
-app.include_router(auth_router, prefix="/api")
-
-# Existing routers
-app.include_router(capture.router, prefix="/api")
-app.include_router(notes.router, prefix="/api")
-app.include_router(search.router, prefix="/api")
-app.include_router(chat.router, prefix="/api")
-app.include_router(context.router, prefix="/api")
-
-# Page/canvas routers
-app.include_router(pages.router, prefix="/api")
-app.include_router(edges.router, prefix="/api")
-app.include_router(clusters.router, prefix="/api")
-app.include_router(canvas.router, prefix="/api")
-app.include_router(stats.router, prefix="/api")
-app.include_router(history.router, prefix="/api")
-app.include_router(curator.router, prefix="/api")
-
-# New routers
-app.include_router(ai_router, prefix="/api")
-app.include_router(settings_router, prefix="/api")
-app.include_router(workspace_router, prefix="/api")
+PREFIX = "/api"
+app.include_router(auth.router, prefix=PREFIX, tags=["Auth"])
+app.include_router(capture.router, prefix=PREFIX, tags=["Capture"])
+app.include_router(chat.router, prefix=PREFIX, tags=["Chat"])
+app.include_router(canvas_stream.router, prefix=PREFIX, tags=["Canvas Stream"])
+app.include_router(canvas.router, prefix=PREFIX, tags=["Canvas Elements"])
+app.include_router(notes.router, prefix=PREFIX, tags=["Notes"])
+app.include_router(pages.router, prefix=PREFIX, tags=["Pages"])
+app.include_router(edges.router, prefix=PREFIX, tags=["Edges"])
+app.include_router(clusters.router, prefix=PREFIX, tags=["Clusters"])
+app.include_router(search.router, prefix=PREFIX, tags=["Search"])
+app.include_router(context.router, prefix=PREFIX, tags=["Context"])
+app.include_router(history.router, prefix=PREFIX, tags=["History"])
+app.include_router(ai_endpoints.router, prefix=PREFIX, tags=["AI"])
+app.include_router(curator_routes.router, prefix=PREFIX, tags=["Curator"])
+app.include_router(settings_routes.router, prefix=PREFIX, tags=["Settings"])
+app.include_router(stats.router, prefix=PREFIX, tags=["Stats"])
+app.include_router(workspace.router, prefix=PREFIX, tags=["Workspace"])
 
 
-@app.get("/health")
+@app.get("/api/health")
 async def health():
-    has_groq = bool(settings.groq_api_key)
     cache_info = await cache_svc.cache_stats()
-    return {
-        "status": "ok",
-        "version": "3.0",
-        "auth_enabled": settings.auth_enabled,
-        "cache": cache_info,
-        "providers": {
-            "google": True,
-            "groq": has_groq,
-        },
-    }
+    return {"status": "ok", "version": "2.0.0", "cache": cache_info}

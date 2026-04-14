@@ -1,20 +1,22 @@
+# === FILE: backend/app/agents/state.py ===
 """
 LangGraph state definitions for all agents.
 """
 
-from typing import TypedDict, Optional, Annotated
-from langgraph.graph.message import add_messages
+from typing import TypedDict, Optional
 
 
 class NoteProcessorState(TypedDict):
     note_id: str
     raw_text: str
     page_hint: Optional[str]
+    viewport: Optional[dict]  # {x, y, width, height, zoom}
     title: Optional[str]
     summary: Optional[str]
     tags: list[str]
     tasks: list[str]
     entities: list[str]
+    content_type: str  # note|code|url|thought|question
     embedding: Optional[list[float]]
     related_notes: list[dict]
     page_id: Optional[str]
@@ -23,7 +25,7 @@ class NoteProcessorState(TypedDict):
     canvas_y: Optional[float]
     cluster_id: Optional[str]
     errors: list[str]
-    status: str  # "extracting" | "embedding" | "routing" | "connecting" | "placing" | "done" | "failed"
+    status: str
 
 
 class CanvasArchitectState(TypedDict):
@@ -43,11 +45,34 @@ class CanvasArchitectState(TypedDict):
 
 
 class AnalystState(TypedDict):
-    task: str  # "gap_analysis" | "reading_path" | "page_summary" | "curator_scan"
+    task: str
     page_id: Optional[str]
     user_id: Optional[str]
     topic: Optional[str]
     notes: list[dict]
     result: Optional[dict]
+    errors: list[str]
+    status: str
+
+
+class CanvasBrainState(TypedDict):
+    """State for the canvas brain orchestrator agent."""
+    user_message: str
+    page_id: str
+    user_id: Optional[str]
+    viewport: Optional[dict]
+    canvas_snapshot: Optional[dict]
+    history: list[dict]
+    selected_element_ids: list[str]
+    # Classification
+    intent: str
+    sub_intent: str
+    target_topic: str
+    intent_metadata: dict
+    # Execution results
+    operations: list[dict]
+    chat_response: Optional[str]
+    sources: list[dict]
+    follow_ups: list[str]
     errors: list[str]
     status: str

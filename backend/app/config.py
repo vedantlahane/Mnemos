@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings
-from pydantic_settings import SettingsConfigDict
+# === FILE: backend/app/config.py ===
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -22,11 +23,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret-change-in-production"
     jwt_expiry_hours: int = 72
 
-    # Canvas defaults
-    canvas_width: int = 2000
-    canvas_height: int = 1500
-
-    # Redis (optional — leave empty to disable caching)
+    # Redis
     redis_url: str = ""
 
     # Routing
@@ -40,10 +37,24 @@ class Settings(BaseSettings):
     similarity_threshold: float = 0.65
     embedding_dimensions: int = 768
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        extra="ignore",
-    )
+    # Spatial planning (infinite canvas — no fixed bounds)
+    default_card_width: int = 360
+    default_card_height: int = 240
+    card_spacing_x: int = 420
+    card_spacing_y: int = 350
+    min_element_gap: int = 80
+    cluster_padding: int = 60
+
+    # Curator
+    curator_duplicate_threshold: float = 0.92
+    curator_missing_edge_threshold: float = 0.80
+    curator_stale_days: int = 30
+    curator_max_comparison: int = 200
+
+    # Streaming
+    stream_chunk_delay: float = 0.02
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()

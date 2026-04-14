@@ -178,6 +178,7 @@ export const api = {
     capture_type?: string
     page_hint?: string
     custom_command?: string
+    viewport?: { x: number; y: number; width: number; height: number; zoom: number }
   }) =>
     request<{ status: string; note_id: string }>("/capture", {
       method: "POST",

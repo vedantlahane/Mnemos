@@ -1,3 +1,5 @@
+# === FILE: backend/app/llm/google_provider.py ===
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from app.config import settings
@@ -23,7 +25,6 @@ async def google_json_call(prompt: str, model: str = None) -> dict | list:
     ]
     response = await llm.ainvoke(messages)
     text = response.content.strip()
-    # Strip markdown fences if present
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else text[3:]
         if text.endswith("```"):
@@ -33,11 +34,7 @@ async def google_json_call(prompt: str, model: str = None) -> dict | list:
 
 
 @with_retry(max_retries=3, base_delay=2.0)
-async def google_chat_call(
-    system: str,
-    messages: list[dict],
-    model: str = None,
-) -> str:
+async def google_chat_call(system: str, messages: list[dict], model: str = None) -> str:
     llm = get_google_llm(model=model, temperature=0.3)
     lc_messages = [SystemMessage(content=system)]
     for msg in messages:

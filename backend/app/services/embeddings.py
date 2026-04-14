@@ -1,3 +1,5 @@
+# === FILE: backend/app/services/embeddings.py ===
+
 from google import genai
 from app.config import settings
 from app.services.retry import with_retry
@@ -12,7 +14,7 @@ async def generate(text: str) -> list[float]:
     result = await client.aio.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text,
-        config={"task_type": "RETRIEVAL_DOCUMENT", "output_dimensionality": 768},
+        config={"task_type": "RETRIEVAL_DOCUMENT", "output_dimensionality": settings.embedding_dimensions},
     )
     return result.embeddings[0].values
 
@@ -23,6 +25,6 @@ async def generate_query(text: str) -> list[float]:
     result = await client.aio.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text,
-        config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": 768},
+        config={"task_type": "RETRIEVAL_QUERY", "output_dimensionality": settings.embedding_dimensions},
     )
     return result.embeddings[0].values

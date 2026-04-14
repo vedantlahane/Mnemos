@@ -12,6 +12,8 @@ import { useStream } from "../hooks/useStream"
 import { useCanvasEvents, type CanvasCommand } from "../hooks/useCanvasEvents"
 import { useAppContext } from "../hooks/useAppContext"
 import { useExcalidrawAPI } from "../hooks/useExcalidrawAPI"
+import { useViewport } from "../hooks/useViewport"
+import { CanvasApplier } from "../lib/canvasApplier"
 import { createNoteCard, createSticky, createTextBare, layoutText } from "./canvasAI"
 import { readCanvasContext, findOpenPosition, findStackPosition } from "./canvasContext"
 import { renderTopology } from "./diagramRenderer"
@@ -342,10 +344,14 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
   const { current } = useAppContext()
   const canvasSeq = useCanvasEvents((s) => s.seq)
   const canvasConsume = useCanvasEvents((s) => s.consume)
+  const { getViewport, onScrollChange } = useViewport(excalidrawRef)
+  // getViewport is used for SSE operations and API calls that need viewport context
+  void getViewport
 
   const userHasInteracted = useRef(false)
   const sceneApplied = useRef(false)
   const suppressAutosaveRef = useRef(false)
+  const applierRef = useRef<CanvasApplier | null>(null)
   const [emptyOverlayDismissed, setEmptyOverlayDismissed] = useState(false)
   const [hasLiveContent, setHasLiveContent] = useState(false)
 
@@ -754,6 +760,12 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
       setHasLiveContent(hasReal)
       if (hasReal) setEmptyOverlayDismissed(true)
 
+      // Track scroll changes for viewport
+      onScrollChange(
+        (appState.scrollX || 0) as number,
+        (appState.scrollY || 0) as number
+      )
+
       if (suppressAutosaveRef.current) return
       if (!userHasInteracted.current) return
       saveScene(
@@ -762,12 +774,15 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
         files as unknown as Record<string, unknown>
       )
     },
-    [saveScene]
+    [saveScene, onScrollChange]
   )
 
   const handleExcalidrawAPI = useCallback(
     (apiRef: ExcalidrawImperativeAPI) => {
       excalidrawRef.current = apiRef as unknown as typeof excalidrawRef.current
+
+      // Initialize the CanvasApplier for SSE operations
+      applierRef.current = new CanvasApplier(apiRef)
 
       // Share the API globally so Library panel can access it
       useExcalidrawAPI.getState().setAPI(apiRef)

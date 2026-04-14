@@ -1,8 +1,10 @@
+# === FILE: backend/app/models/schemas.py ===
+
 from pydantic import BaseModel
 from typing import Optional
 
 
-# ── Capture / Chat ────────────────────────────────────
+# ── Capture / Chat ──
 
 class CaptureRequest(BaseModel):
     text: str
@@ -11,6 +13,7 @@ class CaptureRequest(BaseModel):
     capture_type: str = "manual"
     page_hint: Optional[str] = None
     custom_command: Optional[str] = None
+    viewport: Optional[dict] = None  # {x, y, width, height, zoom}
 
 
 class ChatRequest(BaseModel):
@@ -25,7 +28,7 @@ class ContextRequest(BaseModel):
     text: str
 
 
-# ── Notes ─────────────────────────────────────────────
+# ── Notes ──
 
 class NoteUpdate(BaseModel):
     title: Optional[str] = None
@@ -51,9 +54,10 @@ class ProcessedCapture(BaseModel):
     tags: list[str]
     tasks: list[str]
     entities: list[str]
+    content_type: str = "note"  # note|code|url|thought|question
 
 
-# ── Pages ─────────────────────────────────────────────
+# ── Pages ──
 
 class PageCreate(BaseModel):
     name: str
@@ -72,7 +76,7 @@ class PageUpdate(BaseModel):
     is_archived: Optional[bool] = None
 
 
-# ── Edges ─────────────────────────────────────────────
+# ── Edges ──
 
 class EdgeCreate(BaseModel):
     source_id: str
@@ -89,7 +93,7 @@ class EdgeClassification(BaseModel):
     confidence: float
 
 
-# ── Clusters ──────────────────────────────────────────
+# ── Clusters ──
 
 class ClusterCreate(BaseModel):
     page_id: str
@@ -104,7 +108,7 @@ class ClusterUpdate(BaseModel):
     color: Optional[str] = None
 
 
-# ── Canvas Elements ───────────────────────────────────
+# ── Canvas Elements ──
 
 class ElementCreate(BaseModel):
     element_type: str
@@ -128,7 +132,7 @@ class ElementUpdate(BaseModel):
     style: Optional[dict] = None
 
 
-# ── Chat History ──────────────────────────────────────
+# ── Chat History ──
 
 class ChatSave(BaseModel):
     context_type: str = "home"
@@ -137,7 +141,7 @@ class ChatSave(BaseModel):
     title: Optional[str] = None
 
 
-# ── Canvas State ──────────────────────────────────────
+# ── Canvas State ──
 
 class CanvasState(BaseModel):
     page: dict
@@ -148,7 +152,7 @@ class CanvasState(BaseModel):
     viewport: dict
 
 
-# ── Curator ───────────────────────────────────────────
+# ── Curator ──
 
 class CuratorReport(BaseModel):
     potential_duplicates: list[dict]
@@ -165,7 +169,7 @@ class CuratorAction(BaseModel):
     params: dict
 
 
-# ── Routing / Stats ───────────────────────────────────
+# ── Routing / Stats ──
 
 class PageRoutingResult(BaseModel):
     page_id: str

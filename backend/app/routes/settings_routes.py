@@ -1,3 +1,5 @@
+# === FILE: backend/app/routes/settings_routes.py ===
+
 from fastapi import APIRouter, Depends
 from typing import Optional
 from pydantic import BaseModel
@@ -17,20 +19,14 @@ DEFAULT_SETTINGS = {
 }
 
 GOOGLE_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
+    "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite",
+    "gemini-2.0-flash", "gemini-2.0-flash-lite",
 ]
 
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "mixtral-8x7b-32768",
-    "qwen/qwen3-32b",
-    "deepseek-r1-distill-llama-70b",
-    "gemma2-9b-it",
+    "llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768", "qwen/qwen3-32b",
+    "deepseek-r1-distill-llama-70b", "gemma2-9b-it",
 ]
 
 
@@ -49,17 +45,12 @@ async def get_settings(user_id: str = Depends(get_optional_user_id)):
     stored = await db.get_settings(user_id=user_id)
     if not stored:
         return DEFAULT_SETTINGS
-    # Merge with defaults for any missing keys
-    result = {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if v is not None and k in DEFAULT_SETTINGS}}
-    return result
+    return {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if v is not None and k in DEFAULT_SETTINGS}}
 
 
 @router.get("/settings/models")
 async def get_model_catalog():
-    return {
-        "google": GOOGLE_MODELS,
-        "groq": GROQ_MODELS,
-    }
+    return {"google": GOOGLE_MODELS, "groq": GROQ_MODELS}
 
 
 @router.put("/settings")
@@ -67,7 +58,5 @@ async def update_settings(payload: SettingsUpdate, user_id: str = Depends(get_op
     updates = payload.model_dump(exclude_none=True)
     if not updates:
         return await get_settings(user_id)
-
     stored = await db.upsert_settings(user_id=user_id, **updates)
-    result = {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if v is not None and k in DEFAULT_SETTINGS}}
-    return result
+    return {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if v is not None and k in DEFAULT_SETTINGS}}

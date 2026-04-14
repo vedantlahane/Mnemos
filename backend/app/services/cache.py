@@ -1,10 +1,6 @@
+# === FILE: backend/app/services/cache.py ===
 """
-Redis-based caching layer for Mnemos.
-
-Wraps frequently-accessed DB queries (canvas data, pages, notes) with
-a Redis TTL cache to reduce Supabase round-trips.
-
-If Redis is unavailable, all methods fall back gracefully to direct DB access.
+Redis caching — unchanged from original but with added helpers.
 """
 from __future__ import annotations
 
@@ -14,26 +10,22 @@ from typing import Any, Optional
 
 logger = logging.getLogger("mnemos.cache")
 
-# Will be set at startup
 _redis = None
 
 
 async def init_redis(redis_url: str) -> bool:
-    """Initialize the Redis connection pool. Returns True if successful."""
     global _redis
     if not redis_url:
-        logger.info("No REDIS_URL configured — caching disabled")
+        logger.info("No REDIS_URL — caching disabled")
         return False
     try:
         import redis.asyncio as aioredis
         _redis = aioredis.from_url(
-            redis_url,
-            decode_responses=True,
-            socket_connect_timeout=3,
-            socket_timeout=2,
+            redis_url, decode_responses=True,
+            socket_connect_timeout=3, socket_timeout=2,
         )
         await _redis.ping()
-        logger.info(f"Redis connected: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
+        logger.info("Redis connected")
         return True
     except Exception as e:
         logger.warning(f"Redis unavailable ({e}) — caching disabled")
@@ -42,7 +34,6 @@ async def init_redis(redis_url: str) -> bool:
 
 
 async def close_redis():
-    """Close the Redis connection pool on shutdown."""
     global _redis
     if _redis:
         await _redis.close()
@@ -50,56 +41,40 @@ async def close_redis():
 
 
 def _key(namespace: str, *parts: str) -> str:
-    """Build a cache key like 'mnemos:canvas:page_id'"""
     return f"mnemos:{namespace}:{':'.join(parts)}"
 
 
-# ── Core get/set/delete ──────────────────────────────
-
 async def get(namespace: str, *parts: str) -> Optional[Any]:
-    """Get a cached value. Returns None on miss or if Redis is down."""
     if not _redis:
         return None
     try:
         raw = await _redis.get(_key(namespace, *parts))
-        if raw is None:
-            return None
-        return json.loads(raw)
-    except Exception as e:
-        logger.debug(f"Cache get error: {e}")
+        return json.loads(raw) if raw else None
+    except Exception:
         return None
 
 
 async def set(namespace: str, *parts: str, value: Any, ttl: int = 300) -> bool:
-    """Set a cached value with TTL (seconds). Returns True if successful."""
     if not _redis:
         return False
     try:
-        await _redis.set(
-            _key(namespace, *parts),
-            json.dumps(value, default=str),
-            ex=ttl,
-        )
+        await _redis.set(_key(namespace, *parts), json.dumps(value, default=str), ex=ttl)
         return True
-    except Exception as e:
-        logger.debug(f"Cache set error: {e}")
+    except Exception:
         return False
 
 
 async def delete(namespace: str, *parts: str) -> bool:
-    """Delete a cached key. Returns True if successful."""
     if not _redis:
         return False
     try:
         await _redis.delete(_key(namespace, *parts))
         return True
-    except Exception as e:
-        logger.debug(f"Cache delete error: {e}")
+    except Exception:
         return False
 
 
 async def invalidate_pattern(namespace: str, pattern: str = "*") -> int:
-    """Invalidate all keys matching a pattern within a namespace."""
     if not _redis:
         return 0
     try:
@@ -110,39 +85,24 @@ async def invalidate_pattern(namespace: str, pattern: str = "*") -> int:
         if keys:
             await _redis.delete(*keys)
         return len(keys)
-    except Exception as e:
-        logger.debug(f"Cache invalidate error: {e}")
+    except Exception:
         return 0
 
 
-# ── High-level cache-through helpers ──────────────────
-
-async def get_or_fetch(
-    namespace: str,
-    *parts: str,
-    fetcher,
-    ttl: int = 300,
-) -> Any:
-    """
-    Try to get from cache. On miss, call fetcher(), cache and return the result.
-    fetcher must be an async callable returning JSON-serializable data.
-    """
+async def get_or_fetch(namespace: str, *parts: str, fetcher, ttl: int = 300) -> Any:
     cached = await get(namespace, *parts)
     if cached is not None:
         return cached
-
     result = await fetcher()
     if result is not None:
         await set(namespace, *parts, value=result, ttl=ttl)
     return result
 
 
-# ── Convenience: page-specific cache ──────────────────
-
-TTL_PAGE = 600       # 10 min — pages change rarely
-TTL_CANVAS = 120     # 2 min — canvas data changes on every edit
-TTL_NOTES = 180      # 3 min — note list
-TTL_OVERVIEW = 300   # 5 min — workspace overview
+TTL_PAGE = 600
+TTL_CANVAS = 120
+TTL_NOTES = 180
+TTL_OVERVIEW = 300
 
 
 async def get_page_cached(page_id: str, fetcher) -> Optional[dict]:
@@ -170,10 +130,7 @@ async def invalidate_overview():
     await delete("overview", "global")
 
 
-# ── Stats ──────────────────────────────────────────────
-
 async def cache_stats() -> dict:
-    """Return basic cache stats for monitoring."""
     if not _redis:
         return {"enabled": False}
     try:
@@ -182,7 +139,6 @@ async def cache_stats() -> dict:
             "enabled": True,
             "hits": info.get("keyspace_hits", 0),
             "misses": info.get("keyspace_misses", 0),
-            "connected_clients": info.get("connected_clients", 0),
         }
     except Exception:
         return {"enabled": True, "error": "stats unavailable"}

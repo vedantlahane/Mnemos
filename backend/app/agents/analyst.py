@@ -1,5 +1,6 @@
+# === FILE: backend/app/agents/analyst.py ===
 """
-LangGraph agent: handles gap analysis, reading paths, page summaries, curator scans.
+LangGraph agent: gap analysis, reading paths, page summaries, curator scans.
 """
 
 from collections import Counter
@@ -7,6 +8,9 @@ from langgraph.graph import StateGraph, END
 from app.agents.state import AnalystState
 from app.db.supabase import db
 from app.llm import router as llm
+import logging
+
+logger = logging.getLogger("mnemos.analyst")
 
 
 def _top_topics(notes: list[dict], limit: int = 5) -> list[str]:
@@ -33,31 +37,22 @@ def _normalize_str_list(value: object, limit: int = 8) -> list[str]:
 
 def _fallback_gap_result(notes: list[dict], topic: str) -> dict:
     topics = _top_topics(notes)
-    covered = topics[:3]
-    missing = [
-        f"Foundational overview for {topic}",
-        f"Practical examples for {topic}",
-    ]
-    suggestions = [
-        "Capture 3-5 notes that fill missing subtopics.",
-        "Link related notes with explicit edges after capture.",
-    ]
-    return {"covered": covered, "missing": missing, "suggestions": suggestions}
+    return {
+        "covered": topics[:3],
+        "missing": [f"Foundational overview for {topic}", f"Practical examples for {topic}"],
+        "suggestions": ["Capture 3-5 notes that fill missing subtopics.", "Link related notes with explicit edges."],
+    }
 
 
 def _fallback_reading_steps(notes: list[dict], topic: str) -> list[dict]:
-    candidates = [n for n in notes if n.get("id")]
-    candidates.sort(key=lambda n: (n.get("created_at") or "", n.get("title") or ""))
-    steps = []
-    for n in candidates[:12]:
-        steps.append(
-            {
-                "title": n.get("title") or "Untitled",
-                "noteId": n.get("id"),
-                "reason": f"Build context progressively for {topic}.",
-            }
-        )
-    return steps
+    candidates = sorted(
+        [n for n in notes if n.get("id")],
+        key=lambda n: (n.get("created_at") or "", n.get("title") or ""),
+    )
+    return [
+        {"title": n.get("title") or "Untitled", "noteId": n.get("id"), "reason": f"Build context for {topic}."}
+        for n in candidates[:12]
+    ]
 
 
 def _fallback_page_summary(notes: list[dict], page_name: str) -> dict:
@@ -68,10 +63,9 @@ def _fallback_page_summary(notes: list[dict], page_name: str) -> dict:
         summary = (n.get("summary") or n.get("raw_text") or "")[:120]
         if summary:
             snippets.append(f"{title}: {summary}")
-    text = " ".join(snippets).strip()
-    summary = text if text else f"{page_name} has notes, but summaries are still sparse."
+    text = " ".join(snippets).strip() or f"{page_name} has notes, but summaries are still sparse."
     return {
-        "summary": summary,
+        "summary": text,
         "key_topics": topics[:5],
         "connections": ["Connect notes with explicit dependencies to improve navigation."],
     }
@@ -98,13 +92,11 @@ def _normalize_reading_steps(steps: object, notes: list[dict], topic: str) -> li
         title = str(step.get("title") or "").strip()
         reason = str(step.get("reason") or "").strip()
         note_id = step.get("noteId")
-        normalized.append(
-            {
-                "title": title or "Untitled",
-                "noteId": note_id if isinstance(note_id, str) else None,
-                "reason": reason or "Recommended next in sequence.",
-            }
-        )
+        normalized.append({
+            "title": title or "Untitled",
+            "noteId": note_id if isinstance(note_id, str) else None,
+            "reason": reason or "Recommended next.",
+        })
     return normalized if normalized else _fallback_reading_steps(notes, topic)
 
 
@@ -124,10 +116,11 @@ def _normalize_page_summary(result: object, notes: list[dict], page_name: str) -
 
 async def load_notes_node(state: AnalystState) -> dict:
     page_id = state.get("page_id")
+    user_id = state.get("user_id")
     if page_id:
-        notes = await db.get_notes_for_page(page_id)
+        notes = await db.get_notes_for_page(page_id, user_id=user_id)
     else:
-        result = await db.list_notes(page=1, limit=200)
+        result = await db.list_notes(page=1, limit=200, user_id=user_id)
         notes = result.get("notes", [])
     return {"notes": notes, "status": "analyzing"}
 
@@ -137,7 +130,7 @@ async def gap_analysis_node(state: AnalystState) -> dict:
     user_id = state.get("user_id")
     if not notes:
         return {
-            "result": {"covered": [], "missing": ["No notes captured yet"], "suggestions": ["Start capturing notes on any topic"]},
+            "result": {"covered": [], "missing": ["No notes captured yet"], "suggestions": ["Start capturing notes"]},
             "status": "done",
         }
 
@@ -178,7 +171,6 @@ async def reading_path_node(state: AnalystState) -> dict:
     try:
         steps = await llm.generate_reading_path(topic, notes_info, user_id=user_id)
         steps = _normalize_reading_steps(steps, notes, topic)
-        # Map partial IDs back to full IDs
         id_map = {n["id"][:8]: n["id"] for n in notes}
         for step in steps:
             note_id = step.get("noteId")
@@ -229,18 +221,14 @@ async def page_summary_node(state: AnalystState) -> dict:
 async def curator_scan_node(state: AnalystState) -> dict:
     try:
         from app.services.curator import curator
-        report = await curator.full_scan()
+        report = await curator.full_scan(user_id=state.get("user_id"))
         return {"result": report, "status": "done"}
     except Exception as e:
         return {
             "result": {
-                "potential_duplicates": [],
-                "orphan_notes": [],
-                "stale_notes": [],
-                "cluster_issues": [],
-                "missing_connections": [],
-                "auto_applied": 0,
-                "needs_confirmation": [],
+                "potential_duplicates": [], "orphan_notes": [], "stale_notes": [],
+                "cluster_issues": [], "missing_connections": [],
+                "auto_applied": 0, "needs_confirmation": [],
             },
             "errors": state.get("errors", []) + [str(e)],
             "status": "done",
@@ -248,16 +236,9 @@ async def curator_scan_node(state: AnalystState) -> dict:
 
 
 def route_task(state: AnalystState) -> str:
-    task = state.get("task", "")
-    if task == "gap_analysis":
-        return "gap_analysis"
-    elif task == "reading_path":
-        return "reading_path"
-    elif task == "page_summary":
-        return "page_summary"
-    elif task == "curator_scan":
-        return "curator_scan"
-    return "gap_analysis"
+    task = state.get("task", "gap_analysis")
+    valid = {"gap_analysis", "reading_path", "page_summary", "curator_scan"}
+    return task if task in valid else "gap_analysis"
 
 
 def build_analyst_graph():

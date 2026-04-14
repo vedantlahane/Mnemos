@@ -1,3 +1,5 @@
+# === FILE: backend/app/routes/auth.py ===
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from app.config import settings
@@ -9,7 +11,7 @@ router = APIRouter()
 
 
 class GoogleAuthRequest(BaseModel):
-    token: str  # Google OAuth access_token or id_token
+    token: str
 
 
 class RefreshRequest(BaseModel):
@@ -29,7 +31,6 @@ async def google_login(payload: GoogleAuthRequest):
     if not user_info:
         raise HTTPException(status_code=401, detail="Invalid Google token")
 
-    # Upsert user in DB
     user = await db.upsert_user(
         google_id=user_info["google_id"],
         email=user_info["email"],
@@ -44,10 +45,8 @@ async def google_login(payload: GoogleAuthRequest):
         "access_token": access_token,
         "refresh_token": refresh_token,
         "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "name": user.get("name"),
-            "avatar_url": user.get("avatar_url"),
+            "id": user["id"], "email": user["email"],
+            "name": user.get("name"), "avatar_url": user.get("avatar_url"),
         },
     }
 
@@ -57,19 +56,14 @@ async def refresh_token(payload: RefreshRequest):
     claims = verify_token(payload.refresh_token)
     if not claims or claims.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
-
-    user_id = claims["sub"]
-    user = await db.get_user(user_id)
+    user = await db.get_user(claims["sub"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
-
-    access_token = create_access_token(user["id"], user["email"])
-    return {"access_token": access_token}
+    return {"access_token": create_access_token(user["id"], user["email"])}
 
 
 @router.get("/auth/me")
 async def get_current_user_info(request: Request):
-    """Public endpoint — frontend calls this to check auth status."""
     if not settings.auth_enabled:
         return {
             "auth_enabled": False,
@@ -86,10 +80,8 @@ async def get_current_user_info(request: Request):
             db_user = await db.get_user(claims["sub"])
             if db_user:
                 user = {
-                    "id": db_user["id"],
-                    "email": db_user["email"],
-                    "name": db_user.get("name"),
-                    "avatar_url": db_user.get("avatar_url"),
+                    "id": db_user["id"], "email": db_user["email"],
+                    "name": db_user.get("name"), "avatar_url": db_user.get("avatar_url"),
                 }
 
     return {

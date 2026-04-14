@@ -1,47 +1,15 @@
+# === FILE: backend/app/routes/ai_endpoints.py ===
+
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from pydantic import BaseModel
 from app.db.supabase import db
 from app.agents.analyst import analyst_graph
 from app.agents.canvas_architect import canvas_architect_graph
-from app.llm import router as llm
+from app.services.spatial_planner import spatial_planner
 from app.auth.dependencies import get_optional_user_id
 
 router = APIRouter()
-
-
-def _build_canvas_style_context(page: dict | None) -> str:
-    if not isinstance(page, dict):
-        return ""
-
-    canvas_data = page.get("canvas_data")
-    if not isinstance(canvas_data, dict):
-        return ""
-
-    app_state = canvas_data.get("appState")
-    if not isinstance(app_state, dict):
-        return ""
-
-    bg = app_state.get("viewBackgroundColor") or "#0e0e1a"
-    theme = app_state.get("theme") or "dark"
-    stroke = app_state.get("currentItemStrokeColor") or "default"
-    fill = app_state.get("currentItemBackgroundColor") or "transparent"
-    stroke_width = app_state.get("currentItemStrokeWidth")
-    stroke_style = app_state.get("currentItemStrokeStyle")
-    font_family = app_state.get("currentItemFontFamily")
-    font_size = app_state.get("currentItemFontSize")
-
-    return (
-        "Canvas style context:\n"
-        f"- theme: {theme}\n"
-        f"- background: {bg}\n"
-        f"- default stroke color: {stroke}\n"
-        f"- default fill color: {fill}\n"
-        f"- stroke width/style: {stroke_width}/{stroke_style}\n"
-        f"- default font family/size: {font_family}/{font_size}\n"
-        "- keep text contrast high against the current background\n"
-        "- for flow diagrams, vary node styles (accent/default/muted) to improve readability"
-    )
 
 
 class GapAnalysisRequest(BaseModel):
@@ -53,11 +21,10 @@ class ReadingPathRequest(BaseModel):
     page_id: Optional[str] = None
 
 
-class AIPositionRequest(BaseModel):
-    note_id: str
+class DiagramRequest(BaseModel):
+    request: str
+    page_id: Optional[str] = None
 
-
-# ── AI Layout ─────────────────────────────────────────
 
 @router.post("/pages/{page_id}/ai-layout")
 async def ai_layout(page_id: str, user_id: str = Depends(get_optional_user_id)):
@@ -83,7 +50,6 @@ async def ai_layout(page_id: str, user_id: str = Depends(get_optional_user_id)):
 
     result = await canvas_architect_graph.ainvoke(initial_state)
 
-    # Build edges list from DB
     edges_data = await db.get_edges_for_page(page_id)
     edges_out = [
         {"source_id": e["source_id"], "target_id": e["target_id"], "edge_type": e["edge_type"]}
@@ -97,32 +63,28 @@ async def ai_layout(page_id: str, user_id: str = Depends(get_optional_user_id)):
     }
 
 
-# ── AI Position ───────────────────────────────────────
-
 @router.post("/pages/{page_id}/ai-position")
-async def ai_position(page_id: str, payload: AIPositionRequest, user_id: str = Depends(get_optional_user_id)):
+async def ai_position(page_id: str, payload: dict, user_id: str = Depends(get_optional_user_id)):
     page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    note = await db.get_note(payload.note_id, user_id=user_id)
+    note_id = payload.get("note_id")
+    if not note_id:
+        raise HTTPException(status_code=400, detail="note_id required")
+
+    note = await db.get_note(note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    from app.services.cartographer import cartographer
-    placement = await cartographer.place_single_note(payload.note_id, page_id)
+    placement = await spatial_planner.find_placement(
+        page_id=page_id,
+        note=note,
+        strategy="auto",
+    )
 
-    if not placement:
-        return {"x": 100, "y": 100, "cluster": None}
+    return {"x": placement.x, "y": placement.y, "cluster": placement.cluster_id}
 
-    return {
-        "x": placement["x"],
-        "y": placement["y"],
-        "cluster": placement.get("cluster_id"),
-    }
-
-
-# ── Page Summary ──────────────────────────────────────
 
 @router.post("/pages/{page_id}/summary")
 async def page_summary(page_id: str, user_id: str = Depends(get_optional_user_id)):
@@ -140,11 +102,8 @@ async def page_summary(page_id: str, user_id: str = Depends(get_optional_user_id
         "errors": [],
         "status": "loading",
     })
-
     return result.get("result", {"summary": "", "key_topics": [], "connections": []})
 
-
-# ── Gap Analysis ──────────────────────────────────────
 
 @router.post("/ai/gap-analysis")
 async def gap_analysis(payload: GapAnalysisRequest, user_id: str = Depends(get_optional_user_id)):
@@ -158,11 +117,8 @@ async def gap_analysis(payload: GapAnalysisRequest, user_id: str = Depends(get_o
         "errors": [],
         "status": "loading",
     })
-
     return result.get("result", {"covered": [], "missing": [], "suggestions": []})
 
-
-# ── Reading Path ──────────────────────────────────────
 
 @router.post("/ai/reading-path")
 async def reading_path(payload: ReadingPathRequest, user_id: str = Depends(get_optional_user_id)):
@@ -176,23 +132,13 @@ async def reading_path(payload: ReadingPathRequest, user_id: str = Depends(get_o
         "errors": [],
         "status": "loading",
     })
-
     return result.get("result", {"steps": []})
 
 
-# ── Diagram Generation ────────────────────────────────
-
-class DiagramRequest(BaseModel):
-    request: str
-    page_id: Optional[str] = None
-
-
 @router.post("/ai/generate-diagram")
-async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_optional_user_id)):
-    """Generate a structured diagram topology from a natural language request."""
+async def generate_diagram_endpoint(payload: DiagramRequest, user_id: str = Depends(get_optional_user_id)):
     from app.services.canvas_gen import generate_diagram as gen_diagram, fallback_diagram
 
-    # Optionally include page notes as context
     context = ""
     if payload.page_id:
         try:
@@ -202,9 +148,6 @@ async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_o
                 f"Note: {n.get('title', 'Untitled')} — {n.get('summary', '')[:200]}"
                 for n in notes[:8]
             ]
-            style_context = _build_canvas_style_context(page)
-            if style_context:
-                context_parts.append(style_context)
             context = "\n".join(context_parts)
         except Exception:
             pass
@@ -213,11 +156,11 @@ async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_o
     try:
         user_settings = await db.get_settings(user_id=user_id)
         if isinstance(user_settings, dict):
-            maybe_model = user_settings.get("model")
-            if isinstance(maybe_model, str) and maybe_model.strip():
-                selected_model = maybe_model.strip()
+            m = user_settings.get("model")
+            if isinstance(m, str) and m.strip():
+                selected_model = m.strip()
     except Exception:
-        selected_model = None
+        pass
 
     try:
         topology = await gen_diagram(payload.request, context, model=selected_model)
