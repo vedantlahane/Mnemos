@@ -3,6 +3,7 @@ import Stream from "./core/Stream"
 import CommandBar from "./core/CommandBar"
 import CanvasOverlay from "./canvas/CanvasOverlay"
 import { ErrorBoundary } from "./components/ErrorBoundary"
+import { AuthGate } from "./components/AuthGate"
 
 /**
  * Z-index layers:
@@ -19,18 +20,20 @@ import { ErrorBoundary } from "./components/ErrorBoundary"
  */
 export default function App() {
   return (
-    <ContextProvider>
-      <ErrorBoundary>
-        <div className="w-full h-full relative overflow-hidden bg-[var(--color-void)]">
-          <ErrorBoundary>
-            <CanvasOverlay />
-          </ErrorBoundary>
-          <ErrorBoundary>
-            <Stream />
-          </ErrorBoundary>
-          <CommandBar />
-        </div>
-      </ErrorBoundary>
-    </ContextProvider>
+    <AuthGate>
+      <ContextProvider>
+        <ErrorBoundary>
+          <div className="w-full h-full relative overflow-hidden bg-[var(--color-void)]">
+            <ErrorBoundary>
+              <CanvasOverlay />
+            </ErrorBoundary>
+            <ErrorBoundary>
+              <Stream />
+            </ErrorBoundary>
+            <CommandBar />
+          </div>
+        </ErrorBoundary>
+      </ContextProvider>
+    </AuthGate>
   )
 }

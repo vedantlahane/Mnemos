@@ -45,6 +45,7 @@ class CanvasArchitectState(TypedDict):
 class AnalystState(TypedDict):
     task: str  # "gap_analysis" | "reading_path" | "page_summary" | "curator_scan"
     page_id: Optional[str]
+    user_id: Optional[str]
     topic: Optional[str]
     notes: list[dict]
     result: Optional[dict]

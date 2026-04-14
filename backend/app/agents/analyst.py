@@ -134,6 +134,7 @@ async def load_notes_node(state: AnalystState) -> dict:
 
 async def gap_analysis_node(state: AnalystState) -> dict:
     notes = state.get("notes", [])
+    user_id = state.get("user_id")
     if not notes:
         return {
             "result": {"covered": [], "missing": ["No notes captured yet"], "suggestions": ["Start capturing notes on any topic"]},
@@ -152,7 +153,7 @@ async def gap_analysis_node(state: AnalystState) -> dict:
     )
 
     try:
-        result = await llm.analyze_gaps(topic, notes_info)
+        result = await llm.analyze_gaps(topic, notes_info, user_id=user_id)
         return {"result": _normalize_gap_result(result, notes, topic), "status": "done"}
     except Exception as e:
         return {
@@ -164,6 +165,7 @@ async def gap_analysis_node(state: AnalystState) -> dict:
 
 async def reading_path_node(state: AnalystState) -> dict:
     notes = state.get("notes", [])
+    user_id = state.get("user_id")
     if not notes:
         return {"result": {"steps": []}, "status": "done"}
 
@@ -174,7 +176,7 @@ async def reading_path_node(state: AnalystState) -> dict:
     )
 
     try:
-        steps = await llm.generate_reading_path(topic, notes_info)
+        steps = await llm.generate_reading_path(topic, notes_info, user_id=user_id)
         steps = _normalize_reading_steps(steps, notes, topic)
         # Map partial IDs back to full IDs
         id_map = {n["id"][:8]: n["id"] for n in notes}
@@ -194,6 +196,7 @@ async def reading_path_node(state: AnalystState) -> dict:
 async def page_summary_node(state: AnalystState) -> dict:
     notes = state.get("notes", [])
     page_id = state.get("page_id")
+    user_id = state.get("user_id")
 
     if not notes:
         return {
@@ -213,7 +216,7 @@ async def page_summary_node(state: AnalystState) -> dict:
     )
 
     try:
-        result = await llm.generate_page_summary(page_name, notes_info)
+        result = await llm.generate_page_summary(page_name, notes_info, user_id=user_id)
         return {"result": _normalize_page_summary(result, notes, page_name), "status": "done"}
     except Exception as e:
         return {

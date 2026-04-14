@@ -16,6 +16,23 @@ DEFAULT_SETTINGS = {
     "auto_connect": True,
 }
 
+GOOGLE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768",
+    "qwen/qwen3-32b",
+    "deepseek-r1-distill-llama-70b",
+    "gemma2-9b-it",
+]
+
 
 class SettingsUpdate(BaseModel):
     theme: Optional[str] = None
@@ -35,6 +52,14 @@ async def get_settings(user_id: str = Depends(get_optional_user_id)):
     # Merge with defaults for any missing keys
     result = {**DEFAULT_SETTINGS, **{k: v for k, v in stored.items() if v is not None and k in DEFAULT_SETTINGS}}
     return result
+
+
+@router.get("/settings/models")
+async def get_model_catalog():
+    return {
+        "google": GOOGLE_MODELS,
+        "groq": GROQ_MODELS,
+    }
 
 
 @router.put("/settings")

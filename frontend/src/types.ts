@@ -327,6 +327,11 @@ export interface WorkspaceSettings {
   auto_connect: boolean
 }
 
+export interface ModelCatalog {
+  google: string[]
+  groq: string[]
+}
+
 export const DEFAULT_SETTINGS: WorkspaceSettings = {
   theme: "glass",
   model: "gemini-2.5-flash",

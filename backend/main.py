@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db.supabase import db
+from app.auth.jwt_handler import verify_token
 from app.services.processor import processor
 from app.services import cache as cache_svc
 from app.routes import (
@@ -83,6 +84,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def auth_guard_middleware(request, call_next):
+    if not settings.auth_enabled:
+        return await call_next(request)
+
+    path = request.url.path
+    if path == "/health" or path.startswith("/api/auth/") or request.method == "OPTIONS":
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+
+    token = auth_header[7:]
+    payload = verify_token(token)
+    if not payload or "sub" not in payload:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+
+    request.state.user_id = payload["sub"]
+    return await call_next(request)
 
 # Auth (no prefix — /api/auth/...)
 app.include_router(auth_router, prefix="/api")

@@ -49,6 +49,7 @@ async def chat_intent(payload: IntentRequest, user_id: str = Depends(get_optiona
         context_type=context_type,
         page_name=page_name,
         available_commands=available_commands,
+        user_id=user_id,
     )
     return decision
 
@@ -133,11 +134,12 @@ async def chat_with_notes(payload: ChatRequest, user_id: str = Depends(get_optio
         context=context,
         history=payload.history,
         page_context=page_context,
+        user_id=user_id,
     )
 
     follow_ups = []
     try:
-        follow_ups = await llm.generate_follow_ups(payload.question, answer)
+        follow_ups = await llm.generate_follow_ups(payload.question, answer, user_id=user_id)
     except Exception as e:
         print(f"Follow-up generation failed: {e}")
 

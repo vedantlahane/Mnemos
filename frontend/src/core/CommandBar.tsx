@@ -12,6 +12,7 @@ export default function CommandBar() {
   const {
     inputValue,
     handleInput,
+    handleSuggestionClick,
     suggestions,
     selectedIndex,
     setSelectedIndex,
@@ -43,7 +44,7 @@ export default function CommandBar() {
                 <div
                   key={cmd.name}
                   onClick={() => {
-                    handleInput(cmd.name + " ")
+                    void handleSuggestionClick(cmd)
                     inputRef.current?.focus()
                   }}
                   onMouseEnter={() => setSelectedIndex(i)}

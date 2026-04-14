@@ -266,6 +266,19 @@ export function useCommands() {
     }
   }
 
+  const handleSuggestionClick = async (cmd: Command) => {
+    // Commands that require arguments should still be autofilled for editing.
+    if (cmd.args) {
+      handleInput(`${cmd.name} `)
+      return
+    }
+
+    setInputValue("")
+    setSuggestions([])
+    addUserMessage(cmd.name)
+    await executeCommand(cmd.name)
+  }
+
   const executeCommand = async (raw: string) => {
     const parts = raw.trim().split(/\s+/)
     const cmdStr = parts[0].toLowerCase()
@@ -825,6 +838,7 @@ export function useCommands() {
   return {
     inputValue,
     handleInput,
+    handleSuggestionClick,
     suggestions,
     selectedIndex,
     setSelectedIndex,

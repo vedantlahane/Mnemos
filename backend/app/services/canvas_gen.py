@@ -7,8 +7,9 @@ into Excalidraw elements using the canvas context (colors, positions).
 """
 from __future__ import annotations
 
-import json
-from app.services.llm import client, MODEL
+from app.config import settings
+from app.llm.google_provider import google_json_call
+from app.llm.groq_provider import groq_json_call
 from app.services.retry import with_retry
 
 
@@ -75,8 +76,13 @@ Additional context (if any):
 {context}"""
 
 
+def _is_groq_model(model: str | None) -> bool:
+    m = (model or "").lower()
+    return any(token in m for token in ["llama", "mixtral", "qwen", "deepseek", "gemma"])
+
+
 @with_retry(max_retries=2, base_delay=2.0)
-async def generate_diagram(request: str, context: str = "") -> dict:
+async def generate_diagram(request: str, context: str = "", model: str | None = None) -> dict:
     """
     Ask the LLM to generate a structured diagram topology.
     Returns the parsed JSON topology with elements and connections.
@@ -85,12 +91,16 @@ async def generate_diagram(request: str, context: str = "") -> dict:
         request=request[:2000],
         context=context[:3000] if context else "None",
     )
-    response = await client.aio.models.generate_content(
-        model=MODEL,
-        contents=prompt,
-        config={"response_mime_type": "application/json"},
-    )
-    return json.loads(response.text)
+    chosen_model = (model or settings.gemini_model or "").strip() or "gemini-2.5-flash"
+
+    if _is_groq_model(chosen_model) and settings.groq_api_key:
+        result = await groq_json_call(prompt, model=chosen_model)
+    else:
+        result = await google_json_call(prompt, model=chosen_model)
+
+    if not isinstance(result, dict):
+      raise ValueError("Diagram model returned non-object JSON")
+    return result
 
 
 def fallback_diagram(request: str) -> dict:

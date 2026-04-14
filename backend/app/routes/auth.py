@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from app.config import settings
 from app.auth.google_oauth import verify_google_token
@@ -68,11 +68,32 @@ async def refresh_token(payload: RefreshRequest):
 
 
 @router.get("/auth/me")
-async def get_current_user_info():
+async def get_current_user_info(request: Request):
     """Public endpoint — frontend calls this to check auth status."""
     if not settings.auth_enabled:
         return {
             "auth_enabled": False,
             "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"},
+            "google_client_id": "",
         }
-    return {"auth_enabled": True, "user": None}
+
+    user = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        claims = verify_token(token)
+        if claims and claims.get("sub"):
+            db_user = await db.get_user(claims["sub"])
+            if db_user:
+                user = {
+                    "id": db_user["id"],
+                    "email": db_user["email"],
+                    "name": db_user.get("name"),
+                    "avatar_url": db_user.get("avatar_url"),
+                }
+
+    return {
+        "auth_enabled": True,
+        "user": user,
+        "google_client_id": settings.google_client_id,
+    }

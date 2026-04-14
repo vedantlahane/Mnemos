@@ -5,8 +5,48 @@ import { GlassInput } from "../glass/GlassInput"
 import { GlassDropdown } from "../glass/GlassDropdown"
 import type { BlockItem } from "../types"
 
+const FALLBACK_GOOGLE_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+]
+
+const FALLBACK_GROQ_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "mixtral-8x7b-32768",
+  "qwen/qwen3-32b",
+  "deepseek-r1-distill-llama-70b",
+  "gemma2-9b-it",
+]
+
+function prettifyModelLabel(model: string): string {
+  return model
+    .replace(/^models\//, "")
+    .replace(/^gemini-/, "Gemini ")
+    .replace(/^llama-/, "Llama ")
+    .replace(/^mixtral-/, "Mixtral ")
+}
+
 export default function SettingsBlock(_props: { item: BlockItem }) {
   const { settings, update } = useSettings()
+  const [googleModels, setGoogleModels] = useState<string[]>(FALLBACK_GOOGLE_MODELS)
+  const [groqModels, setGroqModels] = useState<string[]>(FALLBACK_GROQ_MODELS)
+
+  useEffect(() => {
+    api
+      .getModelCatalog()
+      .then((catalog) => {
+        if (catalog.google?.length) setGoogleModels(catalog.google)
+        if (catalog.groq?.length) setGroqModels(catalog.groq)
+      })
+      .catch(() => {
+        setGoogleModels(FALLBACK_GOOGLE_MODELS)
+        setGroqModels(FALLBACK_GROQ_MODELS)
+      })
+  }, [])
 
   return (
     <div className="glass-surface-1 p-6 rounded-2xl">
@@ -30,10 +70,7 @@ export default function SettingsBlock(_props: { item: BlockItem }) {
           <GlassDropdown
             value={settings.model}
             onChange={(v) => update({ model: v })}
-            options={[
-              { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-              { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-            ]}
+            options={googleModels.map((model) => ({ value: model, label: prettifyModelLabel(model) }))}
           />
         </SettingRow>
 
@@ -41,11 +78,7 @@ export default function SettingsBlock(_props: { item: BlockItem }) {
           <GlassDropdown
             value={settings.groq_model}
             onChange={(v) => update({ groq_model: v })}
-            options={[
-              { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
-              { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B (faster)" },
-              { value: "mixtral-8x7b-32768", label: "Mixtral 8x7B" },
-            ]}
+            options={groqModels.map((model) => ({ value: model, label: prettifyModelLabel(model) }))}
           />
         </SettingRow>
 

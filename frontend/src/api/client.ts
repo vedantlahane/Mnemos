@@ -78,6 +78,7 @@ import type {
   TagWithCount, WorkspaceStats, CuratorReport,
   AILayoutResult, GapAnalysisResult, ReadingStep,
   PageSummary, WorkspaceSettings,
+  ModelCatalog,
 } from "../types"
 
 // ─── Response types ───────────────────────────────
@@ -133,7 +134,11 @@ export const api = {
     }),
 
   authMe: () =>
-    request<{ auth_enabled: boolean; user: null | { id: string; email: string; name: string } }>(
+    request<{
+      auth_enabled: boolean
+      user: null | { id: string; email: string; name: string; avatar_url?: string }
+      google_client_id?: string
+    }>(
       "/auth/me"
     ),
 
@@ -434,6 +439,9 @@ export const api = {
   // ─── Settings ───────────────────────────────────
   getSettings: () =>
     request<WorkspaceSettings>("/settings"),
+
+  getModelCatalog: () =>
+    request<ModelCatalog>("/settings/models"),
 
   updateSettings: (data: Partial<WorkspaceSettings>) =>
     request<WorkspaceSettings>("/settings", {

@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import type { AppContext, ContextType } from "../types"
+import { useStreamStore } from "./useStream"
 
 interface ContextState {
   current: AppContext
@@ -12,10 +13,8 @@ export const useAppContextStore = create<ContextState>((set, get) => ({
   current: { type: "home" },
 
   switchTo: (type, pageId, pageName) => {
-    // Clear stream when switching contexts
-    import("./useStream").then(({ useStreamStore }) => {
-      useStreamStore.getState().clearStream()
-    })
+    // Clear stream synchronously when switching contexts to avoid race conditions
+    useStreamStore.getState().clearStream()
 
     set({
       current: {
@@ -28,9 +27,7 @@ export const useAppContextStore = create<ContextState>((set, get) => ({
   },
 
   goBack: () => {
-    import("./useStream").then(({ useStreamStore }) => {
-      useStreamStore.getState().clearStream()
-    })
+    useStreamStore.getState().clearStream()
 
     set((state) => ({
       current: state.current.previousContext || { type: "home" },
@@ -38,9 +35,7 @@ export const useAppContextStore = create<ContextState>((set, get) => ({
   },
 
   goHome: () => {
-    import("./useStream").then(({ useStreamStore }) => {
-      useStreamStore.getState().clearStream()
-    })
+    useStreamStore.getState().clearStream()
 
     set({ current: { type: "home" } })
   },

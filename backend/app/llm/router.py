@@ -10,19 +10,47 @@ from app.llm.google_provider import google_json_call, google_chat_call
 from app.llm.groq_provider import groq_json_call, groq_chat_call
 from app.llm import prompts
 from app.models.schemas import ProcessedCapture, EdgeClassification
+from app.db.supabase import db
 
 
 def _has_groq() -> bool:
     return bool(settings.groq_api_key)
 
 
+def _looks_like_google_model(model: str | None) -> bool:
+    m = (model or "").lower()
+    return m.startswith("gemini") or m.startswith("models/gemini")
+
+
+def _looks_like_groq_model(model: str | None) -> bool:
+    m = (model or "").lower()
+    tokens = ["llama", "mixtral", "qwen", "deepseek", "gemma"]
+    return any(t in m for t in tokens)
+
+
+async def _runtime_models(user_id: str | None = None) -> tuple[str, str]:
+    primary = settings.gemini_model
+    fast = settings.groq_model
+    try:
+        stored = await db.get_settings(user_id=user_id)
+        if isinstance(stored, dict):
+            if isinstance(stored.get("model"), str) and stored["model"].strip():
+                primary = stored["model"].strip()
+            if isinstance(stored.get("groq_model"), str) and stored["groq_model"].strip():
+                fast = stored["groq_model"].strip()
+    except Exception:
+        pass
+    return primary, fast
+
+
 # ── Fast JSON tasks → Groq primary, Google fallback ──
 
-async def process_capture(text: str) -> ProcessedCapture:
+async def process_capture(text: str, user_id: str | None = None) -> ProcessedCapture:
     prompt = prompts.PROCESS_PROMPT.format(text=text[:3000])
+    _, fast_model = await _runtime_models(user_id=user_id)
     try:
         if _has_groq():
-            result = await groq_json_call(prompt)
+            result = await groq_json_call(prompt, model=fast_model)
         else:
             result = await google_json_call(prompt)
     except Exception as e:
@@ -32,15 +60,16 @@ async def process_capture(text: str) -> ProcessedCapture:
 
 
 async def classify_edge(
-    title_a: str, content_a: str, title_b: str, content_b: str
+    title_a: str, content_a: str, title_b: str, content_b: str, user_id: str | None = None
 ) -> EdgeClassification:
     prompt = prompts.EDGE_CLASSIFICATION_PROMPT.format(
         title_a=title_a, content_a=content_a[:1000],
         title_b=title_b, content_b=content_b[:1000],
     )
+    _, fast_model = await _runtime_models(user_id=user_id)
     try:
         if _has_groq():
-            result = await groq_json_call(prompt)
+            result = await groq_json_call(prompt, model=fast_model)
         else:
             result = await google_json_call(prompt)
     except Exception as e:
@@ -50,7 +79,7 @@ async def classify_edge(
 
 
 async def route_to_page(
-    title: str, tags: list, content: str, source_url: str, pages_info: str
+    title: str, tags: list, content: str, source_url: str, pages_info: str, user_id: str | None = None
 ) -> dict:
     prompt = prompts.PAGE_ROUTING_PROMPT.format(
         title=title or "Untitled",
@@ -59,20 +88,22 @@ async def route_to_page(
         source_url=source_url or "none",
         pages_info=pages_info,
     )
+    _, fast_model = await _runtime_models(user_id=user_id)
     try:
         if _has_groq():
-            return await groq_json_call(prompt)
+            return await groq_json_call(prompt, model=fast_model)
         return await google_json_call(prompt)
     except Exception as e:
         print(f"Primary LLM failed for route_to_page: {e}")
         return await google_json_call(prompt)
 
 
-async def name_cluster(notes_info: str) -> dict:
+async def name_cluster(notes_info: str, user_id: str | None = None) -> dict:
     prompt = prompts.CLUSTER_NAMING_PROMPT.format(notes_info=notes_info)
+    _, fast_model = await _runtime_models(user_id=user_id)
     try:
         if _has_groq():
-            return await groq_json_call(prompt)
+            return await groq_json_call(prompt, model=fast_model)
         return await google_json_call(prompt)
     except Exception as e:
         print(f"Primary LLM failed for name_cluster: {e}")
@@ -82,7 +113,7 @@ async def name_cluster(notes_info: str) -> dict:
 # ── Complex reasoning tasks → Google primary, Groq fallback ──
 
 async def chat(
-    question: str, context: str, history: list, page_context: str = None
+    question: str, context: str, history: list, page_context: str = None, user_id: str | None = None
 ) -> str:
     system = prompts.CHAT_SYSTEM
     if page_context:
@@ -96,76 +127,94 @@ async def chat(
         "content": f"Context from notes:\n{context}\n\nQuestion: {question}",
     })
 
+    primary_model, fast_model = await _runtime_models(user_id=user_id)
     try:
-        return await google_chat_call(system, messages)
+        if _looks_like_groq_model(primary_model) and _has_groq():
+            return await groq_chat_call(system, messages, model=primary_model)
+        return await google_chat_call(system, messages, model=primary_model if _looks_like_google_model(primary_model) else None)
     except Exception as e:
         print(f"Google chat failed: {e}")
         if _has_groq():
-            return await groq_chat_call(system, messages)
+            return await groq_chat_call(system, messages, model=fast_model)
         raise
 
 
-async def generate_follow_ups(question: str, answer: str) -> list[str]:
+async def generate_follow_ups(question: str, answer: str, user_id: str | None = None) -> list[str]:
     prompt = prompts.FOLLOW_UP_PROMPT.format(
         question=question, answer=answer[:1500]
     )
+    primary_model, fast_model = await _runtime_models(user_id=user_id)
     try:
-        result = await google_json_call(prompt)
+        if _looks_like_groq_model(primary_model) and _has_groq():
+            result = await groq_json_call(prompt, model=primary_model)
+        else:
+            result = await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
         return result if isinstance(result, list) else []
     except Exception:
         try:
             if _has_groq():
-                result = await groq_json_call(prompt)
+                result = await groq_json_call(prompt, model=fast_model)
                 return result if isinstance(result, list) else []
         except Exception:
             pass
         return []
 
 
-async def analyze_gaps(topic: str, notes_info: str) -> dict:
+async def analyze_gaps(topic: str, notes_info: str, user_id: str | None = None) -> dict:
     prompt = prompts.GAP_ANALYSIS_PROMPT.format(
         topic=topic, notes_info=notes_info
     )
+    primary_model, fast_model = await _runtime_models(user_id=user_id)
     try:
-        return await google_json_call(prompt)
+        if _looks_like_groq_model(primary_model) and _has_groq():
+            return await groq_json_call(prompt, model=primary_model)
+        return await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
     except Exception as e:
         print(f"Google gap analysis failed: {e}")
         if _has_groq():
-            return await groq_json_call(prompt)
+            return await groq_json_call(prompt, model=fast_model)
         raise
 
 
-async def generate_reading_path(topic: str, notes_info: str) -> list:
+async def generate_reading_path(topic: str, notes_info: str, user_id: str | None = None) -> list:
     prompt = prompts.READING_PATH_PROMPT.format(
         topic=topic, notes_info=notes_info
     )
+    primary_model, fast_model = await _runtime_models(user_id=user_id)
     try:
-        result = await google_json_call(prompt)
+        if _looks_like_groq_model(primary_model) and _has_groq():
+            result = await groq_json_call(prompt, model=primary_model)
+        else:
+            result = await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
         return result if isinstance(result, list) else []
     except Exception as e:
         print(f"Google reading path failed: {e}")
         if _has_groq():
-            result = await groq_json_call(prompt)
+            result = await groq_json_call(prompt, model=fast_model)
             return result if isinstance(result, list) else []
         raise
 
 
-async def generate_page_summary(page_name: str, notes_info: str) -> dict:
+async def generate_page_summary(page_name: str, notes_info: str, user_id: str | None = None) -> dict:
     prompt = prompts.PAGE_SUMMARY_PROMPT.format(
         page_name=page_name, notes_info=notes_info
     )
+    primary_model, fast_model = await _runtime_models(user_id=user_id)
     try:
-        return await google_json_call(prompt)
+        if _looks_like_groq_model(primary_model) and _has_groq():
+            return await groq_json_call(prompt, model=primary_model)
+        return await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
     except Exception as e:
         print(f"Google page summary failed: {e}")
         if _has_groq():
-            return await groq_json_call(prompt)
+            return await groq_json_call(prompt, model=fast_model)
         raise
 
 
 async def ai_position_note(
     title: str, tags: list, summary: str,
     existing_notes: str, width: int, height: int,
+    user_id: str | None = None,
 ) -> dict:
     prompt = prompts.AI_POSITION_PROMPT.format(
         title=title or "Untitled",
@@ -174,10 +223,11 @@ async def ai_position_note(
         existing_notes=existing_notes,
         width=width, height=height,
     )
+    primary_model, _ = await _runtime_models(user_id=user_id)
     try:
-        if _has_groq():
-            return await groq_json_call(prompt)
-        return await google_json_call(prompt)
+        if _looks_like_groq_model(primary_model) and _has_groq():
+            return await groq_json_call(prompt, model=primary_model)
+        return await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
     except Exception as e:
         print(f"AI position failed: {e}")
         return await google_json_call(prompt)
@@ -188,7 +238,9 @@ async def decide_command_intent(
     context_type: str,
     page_name: str | None,
     available_commands: list[str],
+    user_id: str | None = None,
 ) -> dict:
+    primary_model, fast_model = await _runtime_models(user_id=user_id)
     prompt = prompts.INTENT_ROUTER_PROMPT.format(
         question=(question or "")[:1000],
         context_type=context_type or "home",
@@ -226,17 +278,19 @@ async def decide_command_intent(
         }
 
     try:
-        if _has_groq():
-            result = await groq_json_call(prompt)
+        if _looks_like_groq_model(primary_model) and _has_groq():
+            result = await groq_json_call(prompt, model=primary_model)
+        elif _has_groq():
+            result = await groq_json_call(prompt, model=fast_model)
         else:
-            result = await google_json_call(prompt)
+            result = await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
         if isinstance(result, dict):
             return _normalize(result)
     except Exception as e:
         print(f"Intent routing primary failed: {e}")
 
     try:
-        result = await google_json_call(prompt)
+        result = await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
         if isinstance(result, dict):
             return _normalize(result)
     except Exception as e:

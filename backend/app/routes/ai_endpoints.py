@@ -133,6 +133,7 @@ async def page_summary(page_id: str, user_id: str = Depends(get_optional_user_id
     result = await analyst_graph.ainvoke({
         "task": "page_summary",
         "page_id": page_id,
+        "user_id": user_id,
         "topic": None,
         "notes": [],
         "result": None,
@@ -150,6 +151,7 @@ async def gap_analysis(payload: GapAnalysisRequest, user_id: str = Depends(get_o
     result = await analyst_graph.ainvoke({
         "task": "gap_analysis",
         "page_id": payload.page_id,
+        "user_id": user_id,
         "topic": None,
         "notes": [],
         "result": None,
@@ -167,6 +169,7 @@ async def reading_path(payload: ReadingPathRequest, user_id: str = Depends(get_o
     result = await analyst_graph.ainvoke({
         "task": "reading_path",
         "page_id": payload.page_id,
+        "user_id": user_id,
         "topic": payload.topic,
         "notes": [],
         "result": None,
@@ -206,8 +209,18 @@ async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_o
         except Exception:
             pass
 
+    selected_model = None
     try:
-        topology = await gen_diagram(payload.request, context)
+        user_settings = await db.get_settings(user_id=user_id)
+        if isinstance(user_settings, dict):
+            maybe_model = user_settings.get("model")
+            if isinstance(maybe_model, str) and maybe_model.strip():
+                selected_model = maybe_model.strip()
+    except Exception:
+        selected_model = None
+
+    try:
+        topology = await gen_diagram(payload.request, context, model=selected_model)
         return {"topology": topology}
     except Exception as e:
         topology = fallback_diagram(payload.request)
