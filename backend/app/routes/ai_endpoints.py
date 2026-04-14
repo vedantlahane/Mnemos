@@ -61,7 +61,7 @@ class AIPositionRequest(BaseModel):
 
 @router.post("/pages/{page_id}/ai-layout")
 async def ai_layout(page_id: str, user_id: str = Depends(get_optional_user_id)):
-    page = await db.get_page(page_id)
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
@@ -101,11 +101,11 @@ async def ai_layout(page_id: str, user_id: str = Depends(get_optional_user_id)):
 
 @router.post("/pages/{page_id}/ai-position")
 async def ai_position(page_id: str, payload: AIPositionRequest, user_id: str = Depends(get_optional_user_id)):
-    page = await db.get_page(page_id)
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
-    note = await db.get_note(payload.note_id)
+    note = await db.get_note(payload.note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
@@ -126,7 +126,7 @@ async def ai_position(page_id: str, payload: AIPositionRequest, user_id: str = D
 
 @router.post("/pages/{page_id}/summary")
 async def page_summary(page_id: str, user_id: str = Depends(get_optional_user_id)):
-    page = await db.get_page(page_id)
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
@@ -196,8 +196,8 @@ async def generate_diagram(payload: DiagramRequest, user_id: str = Depends(get_o
     context = ""
     if payload.page_id:
         try:
-            page = await db.get_page(payload.page_id)
-            notes = await db.get_notes_for_page(payload.page_id)
+            page = await db.get_page(payload.page_id, user_id=user_id)
+            notes = await db.get_notes_for_page(payload.page_id, user_id=user_id)
             context_parts = [
                 f"Note: {n.get('title', 'Untitled')} — {n.get('summary', '')[:200]}"
                 for n in notes[:8]

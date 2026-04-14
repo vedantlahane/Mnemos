@@ -1,20 +1,21 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.models.schemas import PageCreate, PageUpdate
 from app.db.supabase import db
 from app.services import cache as cache_svc
+from app.auth.dependencies import get_optional_user_id
 
 router = APIRouter()
 
 
 @router.get("/pages")
-async def list_pages(include_archived: bool = False):
-    pages = await db.list_pages(include_archived=include_archived)
+async def list_pages(include_archived: bool = False, user_id: str = Depends(get_optional_user_id)):
+    pages = await db.list_pages(include_archived=include_archived, user_id=user_id)
     return {"pages": pages}
 
 
 @router.post("/pages")
-async def create_page(payload: PageCreate):
-    existing = await db.get_page_by_name(payload.name)
+async def create_page(payload: PageCreate, user_id: str = Depends(get_optional_user_id)):
+    existing = await db.get_page_by_name(payload.name, user_id=user_id)
     if existing:
         raise HTTPException(status_code=400, detail=f"Page '{payload.name}' already exists")
 
@@ -23,14 +24,15 @@ async def create_page(payload: PageCreate):
         description=payload.description,
         icon=payload.icon,
         color=payload.color,
+        user_id=user_id,
     )
     return page
 
 
 @router.get("/pages/{page_id}")
-async def get_page(page_id: str):
+async def get_page(page_id: str, user_id: str = Depends(get_optional_user_id)):
     page = await cache_svc.get_page_cached(
-        page_id, fetcher=lambda: db.get_page(page_id)
+        page_id, fetcher=lambda: db.get_page(page_id, user_id=user_id)
     )
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
@@ -38,55 +40,55 @@ async def get_page(page_id: str):
 
 
 @router.put("/pages/{page_id}")
-async def update_page(page_id: str, payload: PageUpdate):
+async def update_page(page_id: str, payload: PageUpdate, user_id: str = Depends(get_optional_user_id)):
     updates = payload.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    page = await db.get_page(page_id)
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
     # Prevent renaming to existing name
     if "name" in updates:
-        existing = await db.get_page_by_name(updates["name"])
+        existing = await db.get_page_by_name(updates["name"], user_id=user_id)
         if existing and existing["id"] != page_id:
             raise HTTPException(status_code=400, detail=f"Page '{updates['name']}' already exists")
 
-    updated = await db.update_page(page_id, **updates)
+    updated = await db.update_page(page_id, user_id=user_id, **updates)
     await cache_svc.invalidate_page(page_id)
     return updated
 
 
 @router.delete("/pages/{page_id}")
-async def delete_page(page_id: str):
-    page = await db.get_page(page_id)
+async def delete_page(page_id: str, user_id: str = Depends(get_optional_user_id)):
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
     if page["name"] == "Uncategorized":
         raise HTTPException(status_code=400, detail="Cannot delete the Uncategorized page")
 
-    await db.delete_page(page_id)
+    await db.delete_page(page_id, user_id=user_id)
     await cache_svc.invalidate_page(page_id)
     await cache_svc.invalidate_overview()
     return {"status": "deleted"}
 
 
 @router.get("/pages/{page_id}/canvas")
-async def get_page_canvas(page_id: str):
-    page = await db.get_page(page_id)
+async def get_page_canvas(page_id: str, user_id: str = Depends(get_optional_user_id)):
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
     canvas = await cache_svc.get_canvas_cached(
-        page_id, fetcher=lambda: db.get_page_canvas(page_id)
+        page_id, fetcher=lambda: db.get_page_canvas(page_id, user_id=user_id)
     )
     return canvas
 
 
 @router.put("/pages/{page_id}/canvas")
-async def save_page_canvas(page_id: str, payload: dict):
-    page = await db.get_page(page_id)
+async def save_page_canvas(page_id: str, payload: dict, user_id: str = Depends(get_optional_user_id)):
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
@@ -105,7 +107,7 @@ async def save_page_canvas(page_id: str, payload: dict):
     if not updates:
         raise HTTPException(status_code=400, detail="viewport or canvas_data required")
 
-    await db.update_page(page_id, **updates)
+    await db.update_page(page_id, user_id=user_id, **updates)
     # Invalidate cache after canvas save
     await cache_svc.invalidate_canvas(page_id)
 
@@ -126,7 +128,7 @@ async def save_page_canvas(page_id: str, payload: dict):
                     y = el.get("y")
                     if x is not None and y is not None:
                         # note-frame is drawn with a 12px outer offset; persist logical card origin
-                        await db.update_note(cd["noteId"], canvas_x=float(x) + 12.0, canvas_y=float(y) + 12.0)
+                        await db.update_note(cd["noteId"], user_id=user_id, canvas_x=float(x) + 12.0, canvas_y=float(y) + 12.0)
 
         asyncio.create_task(sync_positions())
     except Exception as e:
@@ -135,8 +137,8 @@ async def save_page_canvas(page_id: str, payload: dict):
 
 
 @router.post("/pages/{page_id}/layout")
-async def trigger_page_layout(page_id: str):
-    page = await db.get_page(page_id)
+async def trigger_page_layout(page_id: str, user_id: str = Depends(get_optional_user_id)):
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 

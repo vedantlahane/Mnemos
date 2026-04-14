@@ -16,27 +16,39 @@ class NotesDB:
         )
         return result.data[0]
 
-    async def update_note(self, note_id: str, **kwargs) -> dict:
+    async def update_note(self, note_id: str, user_id: str = None, **kwargs) -> dict:
         updates = {k: v for k, v in kwargs.items() if v is not None}
         if not updates:
             return {}
         updates["updated_at"] = datetime.utcnow().isoformat()
+
+        _uid = user_id
+        _nid = note_id
+
+        def _query():
+            q = client.table("notes").update(updates).eq("id", _nid)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
         result = await asyncio.to_thread(
-            lambda: client.table("notes")
-            .update(updates)
-            .eq("id", note_id)
-            .execute()
+            _query
         )
         return result.data[0] if result.data else {}
 
-    async def get_note(self, note_id: str) -> dict | None:
+    async def get_note(self, note_id: str, user_id: str = None) -> dict | None:
         try:
+            _uid = user_id
+            _nid = note_id
+
+            def _query():
+                q = client.table("notes").select("*").eq("id", _nid)
+                if _uid:
+                    q = q.eq("user_id", _uid)
+                return q.maybe_single().execute()
+
             result = await asyncio.to_thread(
-                lambda: client.table("notes")
-                .select("*")
-                .eq("id", note_id)
-                .maybe_single()
-                .execute()
+                _query
             )
             return result.data
         except Exception:
@@ -67,12 +79,18 @@ class NotesDB:
         result = await asyncio.to_thread(_query)
         return {"notes": result.data or [], "total": result.count or 0}
 
-    async def delete_note(self, note_id: str) -> None:
+    async def delete_note(self, note_id: str, user_id: str = None) -> None:
+        _uid = user_id
+        _nid = note_id
+
+        def _query():
+            q = client.table("notes").delete().eq("id", _nid)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
         await asyncio.to_thread(
-            lambda: client.table("notes")
-            .delete()
-            .eq("id", note_id)
-            .execute()
+            _query
         )
 
     async def vector_search(
@@ -133,19 +151,31 @@ class NotesDB:
         )
         return result.data or []
 
-    async def get_all_tags(self) -> list[str]:
-        result = await asyncio.to_thread(
-            lambda: client.table("notes").select("tags").execute()
-        )
+    async def get_all_tags(self, user_id: str = None) -> list[str]:
+        _uid = user_id
+
+        def _query():
+            q = client.table("notes").select("tags")
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
+        result = await asyncio.to_thread(_query)
         all_tags: set[str] = set()
         for note in (result.data or []):
             all_tags.update(note.get("tags") or [])
         return sorted(list(all_tags))
 
-    async def get_all_tags_with_counts(self) -> list[dict]:
-        result = await asyncio.to_thread(
-            lambda: client.table("notes").select("tags").execute()
-        )
+    async def get_all_tags_with_counts(self, user_id: str = None) -> list[dict]:
+        _uid = user_id
+
+        def _query():
+            q = client.table("notes").select("tags")
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
+        result = await asyncio.to_thread(_query)
         counts: dict[str, int] = {}
         for note in (result.data or []):
             for tag in (note.get("tags") or []):
@@ -156,15 +186,17 @@ class NotesDB:
             reverse=True,
         )
 
-    async def get_notes_for_page(self, page_id: str) -> list:
+    async def get_notes_for_page(self, page_id: str, user_id: str = None) -> list:
         _pid = page_id
-        result = await asyncio.to_thread(
-            lambda: client.table("notes")
-            .select("*")
-            .eq("page_id", _pid)
-            .order("created_at", desc=True)
-            .execute()
-        )
+        _uid = user_id
+
+        def _query():
+            q = client.table("notes").select("*").eq("page_id", _pid)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.order("created_at", desc=True).execute()
+
+        result = await asyncio.to_thread(_query)
         return result.data or []
 
     async def get_notes_with_embeddings(self, page_id: str) -> list:
@@ -190,13 +222,16 @@ class NotesDB:
         )
         return result.data or []
 
-    async def count_notes(self, page_id: str = None) -> int:
+    async def count_notes(self, page_id: str = None, user_id: str = None) -> int:
         _pid = page_id
+        _uid = user_id
 
         def _query():
             q = client.table("notes").select("id", count="exact")
             if _pid:
                 q = q.eq("page_id", _pid)
+            if _uid:
+                q = q.eq("user_id", _uid)
             return q.execute()
 
         result = await asyncio.to_thread(_query)
@@ -210,80 +245,109 @@ class NotesDB:
         )
         return result.data[0]
 
-    async def update_page(self, page_id: str, **kwargs) -> dict:
+    async def update_page(self, page_id: str, user_id: str = None, **kwargs) -> dict:
         updates = {k: v for k, v in kwargs.items() if v is not None}
         if not updates:
             return {}
         updates["updated_at"] = datetime.utcnow().isoformat()
+
+        _uid = user_id
+        _pid = page_id
+
+        def _query():
+            q = client.table("pages").update(updates).eq("id", _pid)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
         result = await asyncio.to_thread(
-            lambda: client.table("pages")
-            .update(updates)
-            .eq("id", page_id)
-            .execute()
+            _query
         )
         return result.data[0] if result.data else {}
 
-    async def get_page(self, page_id: str) -> dict | None:
+    async def get_page(self, page_id: str, user_id: str = None) -> dict | None:
         try:
+            _uid = user_id
+            _pid = page_id
+
+            def _query():
+                q = client.table("pages").select("*").eq("id", _pid)
+                if _uid:
+                    q = q.eq("user_id", _uid)
+                return q.maybe_single().execute()
+
             result = await asyncio.to_thread(
-                lambda: client.table("pages")
-                .select("*")
-                .eq("id", page_id)
-                .maybe_single()
-                .execute()
+                _query
             )
             return result.data
         except Exception:
             return None
 
-    async def get_page_by_name(self, name: str) -> dict | None:
+    async def get_page_by_name(self, name: str, user_id: str = None) -> dict | None:
         _name = name
+        _uid = user_id
         try:
+            def _query():
+                q = client.table("pages").select("*").ilike("name", _name)
+                if _uid:
+                    q = q.eq("user_id", _uid)
+                return q.maybe_single().execute()
+
             result = await asyncio.to_thread(
-                lambda: client.table("pages")
-                .select("*")
-                .ilike("name", _name)
-                .maybe_single()
-                .execute()
+                _query
             )
             return result.data if result else None
         except Exception:
             return None
 
-    async def list_pages(self, include_archived: bool = False) -> list:
+    async def list_pages(self, include_archived: bool = False, user_id: str = None) -> list:
         _inc = include_archived
+        _uid = user_id
 
         def _query():
             q = client.table("pages").select("*").order("last_activity", desc=True)
             if not _inc:
                 q = q.eq("is_archived", False)
+            if _uid:
+                q = q.eq("user_id", _uid)
             return q.execute()
 
         result = await asyncio.to_thread(_query)
         return result.data or []
 
-    async def delete_page(self, page_id: str) -> None:
-        uncat = await self.get_page_by_name("Uncategorized")
+    async def delete_page(self, page_id: str, user_id: str = None) -> None:
+        uncat = await self.get_page_by_name("Uncategorized", user_id=user_id)
         _pid = page_id
+        _uid = user_id
         if uncat:
             _uncat_id = uncat["id"]
-            await asyncio.to_thread(
-                lambda: client.table("notes")
-                .update(
+            def _move_notes_query():
+                q = client.table("notes").update(
                     {
                         "page_id": _uncat_id,
                         "updated_at": datetime.utcnow().isoformat(),
                     }
-                )
-                .eq("page_id", _pid)
-                .execute()
+                ).eq("page_id", _pid)
+                if _uid:
+                    q = q.eq("user_id", _uid)
+                return q.execute()
+
+            await asyncio.to_thread(
+                _move_notes_query
             )
+
+        def _delete_page_query():
+            q = client.table("pages").delete().eq("id", _pid)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
         await asyncio.to_thread(
-            lambda: client.table("pages").delete().eq("id", _pid).execute()
+            _delete_page_query
         )
 
-    async def get_page_canvas(self, page_id: str) -> dict:
-        page = await self.get_page(page_id)
+    async def get_page_canvas(self, page_id: str, user_id: str = None) -> dict:
+        page = await self.get_page(page_id, user_id=user_id)
         if not page:
             return {
                 "page": {},
@@ -296,13 +360,15 @@ class NotesDB:
             }
 
         _pid = page_id
-        notes = await asyncio.to_thread(
-            lambda: client.table("notes")
-            .select("*")
-            .eq("page_id", _pid)
-            .order("created_at", desc=True)
-            .execute()
-        )
+        _uid = user_id
+
+        def _notes_query():
+            q = client.table("notes").select("*").eq("page_id", _pid)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.order("created_at", desc=True).execute()
+
+        notes = await asyncio.to_thread(_notes_query)
 
         note_ids = [n["id"] for n in (notes.data or [])]
 
@@ -351,21 +417,22 @@ class NotesDB:
             "viewport": page.get("viewport") or {"x": 0, "y": 0, "zoom": 1},
         }
 
-    async def increment_page_note_count(self, page_id: str) -> None:
-        page = await self.get_page(page_id)
+    async def increment_page_note_count(self, page_id: str, user_id: str = None) -> None:
+        page = await self.get_page(page_id, user_id=user_id)
         if page:
             new_count = (page.get("note_count") or 0) + 1
             await self.update_page(
                 page_id,
+                user_id=user_id,
                 note_count=new_count,
                 last_activity=datetime.utcnow().isoformat(),
             )
 
-    async def decrement_page_note_count(self, page_id: str) -> None:
-        page = await self.get_page(page_id)
+    async def decrement_page_note_count(self, page_id: str, user_id: str = None) -> None:
+        page = await self.get_page(page_id, user_id=user_id)
         if page:
             new_count = max((page.get("note_count") or 0) - 1, 0)
-            await self.update_page(page_id, note_count=new_count)
+            await self.update_page(page_id, user_id=user_id, note_count=new_count)
 
     # ── Edges ─────────────────────────────────────────
 
@@ -474,11 +541,36 @@ class NotesDB:
         )
         return bool(r2.data)
 
-    async def get_all_edges(self) -> list:
-        result = await asyncio.to_thread(
-            lambda: client.table("note_edges").select("*").execute()
+    async def get_all_edges(self, user_id: str = None) -> list:
+        if not user_id:
+            result = await asyncio.to_thread(
+                lambda: client.table("note_edges").select("*").execute()
+            )
+            return result.data or []
+
+        _uid = user_id
+
+        notes_result = await asyncio.to_thread(
+            lambda: client.table("notes").select("id").eq("user_id", _uid).execute()
         )
-        return result.data or []
+        note_ids = [n["id"] for n in (notes_result.data or [])]
+        if not note_ids:
+            return []
+
+        _nids = note_ids
+        source = await asyncio.to_thread(
+            lambda: client.table("note_edges").select("*").in_("source_id", _nids).execute()
+        )
+        target = await asyncio.to_thread(
+            lambda: client.table("note_edges").select("*").in_("target_id", _nids).execute()
+        )
+        seen: set[str] = set()
+        edges: list[dict] = []
+        for e in (source.data or []) + (target.data or []):
+            if e["id"] not in seen:
+                seen.add(e["id"])
+                edges.append(e)
+        return edges
 
     # ── Clusters ──────────────────────────────────────
 
@@ -565,6 +657,20 @@ class NotesDB:
             .execute()
         )
         return result.data[0] if result.data else {}
+
+    async def get_element(self, element_id: str) -> dict | None:
+        _eid = element_id
+        try:
+            result = await asyncio.to_thread(
+                lambda: client.table("canvas_elements")
+                .select("*")
+                .eq("id", _eid)
+                .maybe_single()
+                .execute()
+            )
+            return result.data
+        except Exception:
+            return None
 
     async def list_elements(self, page_id: str) -> list:
         _pid = page_id
@@ -805,19 +911,23 @@ class NotesDB:
 
     # ── Stats ─────────────────────────────────────────
 
-    async def get_global_stats(self) -> dict:
-        notes_result = await asyncio.to_thread(
-            lambda: client.table("notes")
-            .select("processing_status, tags, tasks, created_at", count="exact")
-            .execute()
-        )
+    async def get_global_stats(self, user_id: str = None) -> dict:
+        _uid = user_id
 
-        pages_result = await asyncio.to_thread(
-            lambda: client.table("pages")
-            .select("id", count="exact")
-            .eq("is_archived", False)
-            .execute()
-        )
+        def _notes_query():
+            q = client.table("notes").select("processing_status, tags, tasks, created_at", count="exact")
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
+        def _pages_query():
+            q = client.table("pages").select("id", count="exact").eq("is_archived", False)
+            if _uid:
+                q = q.eq("user_id", _uid)
+            return q.execute()
+
+        notes_result = await asyncio.to_thread(_notes_query)
+        pages_result = await asyncio.to_thread(_pages_query)
 
         total_notes = notes_result.count or 0
         total_pages = pages_result.count or 0

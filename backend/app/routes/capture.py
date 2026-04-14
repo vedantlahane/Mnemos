@@ -1,7 +1,8 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from app.models.schemas import CaptureRequest
 from app.db.supabase import db
 from app.services.processor import processor
+from app.auth.dependencies import get_optional_user_id
 
 router = APIRouter()
 
@@ -14,6 +15,7 @@ MAX_TEXT_LENGTH = 50_000
 async def capture_note(
     payload: CaptureRequest,
     background_tasks: BackgroundTasks,
+    user_id: str = Depends(get_optional_user_id),
 ):
     # Validate text
     text = payload.text.strip()
@@ -35,6 +37,7 @@ async def capture_note(
         page_title=payload.page_title,
         capture_type=payload.capture_type,
         processing_status="pending",
+        user_id=user_id,
     )
 
     # Phase 2: Process in background

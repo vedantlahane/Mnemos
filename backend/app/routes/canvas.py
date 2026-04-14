@@ -1,13 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.models.schemas import ElementCreate, ElementUpdate
 from app.db.supabase import db
+from app.auth.dependencies import get_optional_user_id
 
 router = APIRouter()
 
 
 @router.get("/pages/{page_id}/elements")
-async def list_elements(page_id: str):
-    page = await db.get_page(page_id)
+async def list_elements(page_id: str, user_id: str = Depends(get_optional_user_id)):
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
     elements = await db.list_elements(page_id)
@@ -15,8 +16,8 @@ async def list_elements(page_id: str):
 
 
 @router.post("/pages/{page_id}/elements")
-async def create_element(page_id: str, payload: ElementCreate):
-    page = await db.get_page(page_id)
+async def create_element(page_id: str, payload: ElementCreate, user_id: str = Depends(get_optional_user_id)):
+    page = await db.get_page(page_id, user_id=user_id)
     if not page:
         raise HTTPException(status_code=404, detail="Page not found")
 
@@ -37,7 +38,7 @@ async def create_element(page_id: str, payload: ElementCreate):
         width=payload.width,
         height=payload.height,
         style=payload.style,
-        created_by=payload.created_by,
+        created_by=(user_id or payload.created_by),
     )
 
     if payload.element_type == "sticky" and payload.content:
@@ -57,7 +58,15 @@ async def create_element(page_id: str, payload: ElementCreate):
 
 
 @router.put("/elements/{element_id}")
-async def update_element(element_id: str, payload: ElementUpdate):
+async def update_element(element_id: str, payload: ElementUpdate, user_id: str = Depends(get_optional_user_id)):
+    element = await db.get_element(element_id)
+    if not element:
+        raise HTTPException(status_code=404, detail="Element not found")
+
+    page = await db.get_page(element["page_id"], user_id=user_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Element not found")
+
     updates = payload.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -66,6 +75,14 @@ async def update_element(element_id: str, payload: ElementUpdate):
 
 
 @router.delete("/elements/{element_id}")
-async def delete_element(element_id: str):
+async def delete_element(element_id: str, user_id: str = Depends(get_optional_user_id)):
+    element = await db.get_element(element_id)
+    if not element:
+        raise HTTPException(status_code=404, detail="Element not found")
+
+    page = await db.get_page(element["page_id"], user_id=user_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Element not found")
+
     await db.delete_element(element_id)
     return {"status": "deleted"}

@@ -1,16 +1,25 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from typing import Optional
 from app.services import embeddings
 from app.db.supabase import db
+from app.auth.dependencies import get_optional_user_id
 
 router = APIRouter()
 
 
 @router.get("/search")
-async def search_notes(q: str, limit: int = 10, page_id: Optional[str] = None):
+async def search_notes(
+    q: str,
+    limit: int = 10,
+    page_id: Optional[str] = None,
+    user_id: str = Depends(get_optional_user_id),
+):
     query_embedding = await embeddings.generate_query(q)
 
     if page_id:
+        page = await db.get_page(page_id, user_id=user_id)
+        if not page:
+            return {"query": q, "results": []}
         results = await db.vector_search_in_page(
             query_embedding, page_id, limit=limit, threshold=0.65
         )
@@ -19,11 +28,14 @@ async def search_notes(q: str, limit: int = 10, page_id: Optional[str] = None):
             query_embedding, limit=limit, threshold=0.65
         )
 
+    if user_id:
+        results = [r for r in results if r.get("user_id") == user_id]
+
     return {"query": q, "results": results}
 
 
 @router.post("/search/canvas")
-async def search_canvas(payload: dict):
+async def search_canvas(payload: dict, user_id: str = Depends(get_optional_user_id)):
     """Text search within canvas elements for a page."""
     page_id = payload.get("page_id")
     query = payload.get("query", "").lower()
@@ -32,7 +44,11 @@ async def search_canvas(payload: dict):
         return {"results": []}
 
     # Search notes
-    notes_result = await db.list_notes(page=1, limit=200, page_id=page_id)
+    page = await db.get_page(page_id, user_id=user_id)
+    if not page:
+        return {"results": []}
+
+    notes_result = await db.list_notes(page=1, limit=200, page_id=page_id, user_id=user_id)
     matching_notes = []
     for note in notes_result.get("notes", []):
         title = (note.get("title") or "").lower()

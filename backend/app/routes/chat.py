@@ -37,7 +37,7 @@ async def chat_intent(payload: IntentRequest, user_id: str = Depends(get_optiona
     page_name = None
     if context_type == "page" and payload.page_id:
         try:
-            page = await db.get_page(payload.page_id)
+            page = await db.get_page(payload.page_id, user_id=user_id)
             if page:
                 page_name = page.get("name")
         except Exception:
@@ -60,16 +60,24 @@ async def chat_with_notes(payload: ChatRequest, user_id: str = Depends(get_optio
 
     # Scoped or global search
     if payload.context_type == "page" and payload.page_id:
-        relevant = await db.vector_search_in_page(
-            query_embedding,
-            page_id=payload.page_id,
-            limit=5,
-            threshold=0.60,
-        )
+        page = await db.get_page(payload.page_id, user_id=user_id)
+        if not page:
+            relevant = []
+        else:
+            relevant = await db.vector_search_in_page(
+                query_embedding,
+                page_id=payload.page_id,
+                limit=5,
+                threshold=0.60,
+            )
+        if user_id:
+            relevant = [r for r in relevant if r.get("user_id") == user_id]
         if len(relevant) < 2:
             global_results = await db.vector_search(
                 query_embedding, limit=5, threshold=0.65
             )
+            if user_id:
+                global_results = [r for r in global_results if r.get("user_id") == user_id]
             seen = {r["id"] for r in relevant}
             for r in global_results:
                 if r["id"] not in seen:
@@ -79,6 +87,8 @@ async def chat_with_notes(payload: ChatRequest, user_id: str = Depends(get_optio
         relevant = await db.vector_search(
             query_embedding, limit=5, threshold=0.65
         )
+        if user_id:
+            relevant = [r for r in relevant if r.get("user_id") == user_id]
 
     if not relevant:
         return {
@@ -96,7 +106,7 @@ async def chat_with_notes(payload: ChatRequest, user_id: str = Depends(get_optio
             for edge in edges[:2]:
                 neighbor_id = edge["target_id"] if edge["source_id"] == r["id"] else edge["source_id"]
                 if neighbor_id not in expanded_ids:
-                    neighbor = await db.get_note(neighbor_id)
+                    neighbor = await db.get_note(neighbor_id, user_id=user_id)
                     if neighbor:
                         extra_context_notes.append(neighbor)
                         expanded_ids.add(neighbor_id)
@@ -123,7 +133,7 @@ async def chat_with_notes(payload: ChatRequest, user_id: str = Depends(get_optio
     page_context = None
     if payload.context_type == "page" and payload.page_id:
         try:
-            page = await db.get_page(payload.page_id)
+            page = await db.get_page(payload.page_id, user_id=user_id)
             if page:
                 page_context = page["name"]
         except Exception:

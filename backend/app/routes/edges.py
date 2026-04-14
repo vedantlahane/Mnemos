@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from app.models.schemas import EdgeCreate
 from app.db.supabase import db
+from app.auth.dependencies import get_optional_user_id
 
 router = APIRouter()
 
@@ -10,18 +11,31 @@ router = APIRouter()
 async def list_edges(
     page_id: Optional[str] = None,
     note_id: Optional[str] = None,
+    user_id: str = Depends(get_optional_user_id),
 ):
+    if page_id:
+        page = await db.get_page(page_id, user_id=user_id)
+        if not page:
+            return {"edges": []}
+    if note_id:
+        note = await db.get_note(note_id, user_id=user_id)
+        if not note:
+            return {"edges": []}
+
+    if not page_id and not note_id and user_id:
+        return {"edges": await db.get_all_edges(user_id=user_id)}
+
     edges = await db.list_edges(page_id=page_id, note_id=note_id)
     return {"edges": edges}
 
 
 @router.post("/edges")
-async def create_edge(payload: EdgeCreate):
+async def create_edge(payload: EdgeCreate, user_id: str = Depends(get_optional_user_id)):
     # Verify both notes exist
-    source = await db.get_note(payload.source_id)
+    source = await db.get_note(payload.source_id, user_id=user_id)
     if not source:
         raise HTTPException(status_code=404, detail="Source note not found")
-    target = await db.get_note(payload.target_id)
+    target = await db.get_note(payload.target_id, user_id=user_id)
     if not target:
         raise HTTPException(status_code=404, detail="Target note not found")
 
@@ -49,6 +63,10 @@ async def create_edge(payload: EdgeCreate):
 
 
 @router.delete("/edges/{edge_id}")
-async def delete_edge(edge_id: str):
+async def delete_edge(edge_id: str, user_id: str = Depends(get_optional_user_id)):
+    if user_id:
+        user_edges = await db.get_all_edges(user_id=user_id)
+        if not any(e.get("id") == edge_id for e in user_edges):
+            raise HTTPException(status_code=404, detail="Edge not found")
     await db.delete_edge(edge_id)
     return {"status": "deleted"}
