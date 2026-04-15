@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { api, documentApi, pages } from "../api/client"
+import { documentApi, pages } from "../api/client"
 import type { PageBlock, PageDocumentBundle } from "../types"
 import { uid } from "../utils"
 
@@ -208,7 +208,6 @@ export function useNotebook(pageId: string) {
           if (!block) continue
           try {
             await documentApi.createBlock(pageId, {
-              id: block.id,
               block_type: block.blockType,
               text_content: block.textContent,
               depth: block.depth,

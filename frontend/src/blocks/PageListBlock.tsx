@@ -1,5 +1,5 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api, pages } from "../api/client"
+import { pages } from "../api/client"
 import { AsyncBlock } from "../components/AsyncBlock"
 import { useAppContext } from "../hooks/useAppContext"
 import type { Page, BlockItem } from "../types"
@@ -23,16 +23,16 @@ export default function PageListBlock(_props: { item: BlockItem }) {
       emptyMessage="No pages. Use /page create <name> to create one."
       loadingMessage="Loading pagesâ€¦"
     >
-      {(pages) => (
+      {(pageList) => (
         <div>
           <div className="text-[10px] uppercase font-bold tracking-widest text-[var(--glass-text-muted)] mb-3">
             Pages
             <span className="ml-2 text-[var(--glass-text-dim)]">
-              ({pages.length})
+              ({pageList.length})
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            {pages.map((page, i) => (
+            {pageList.map((page, i) => (
               <PageCard
                 key={page.id}
                 page={page}

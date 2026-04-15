@@ -1,10 +1,9 @@
 import { useState } from "react"
 import { capture } from "../api/client"
-import { AsyncBlock } from "../components/AsyncBlock"
 import type { BlockItem } from "../types"
 import { Send, CheckCircle2, AlertTriangle, Layers } from "lucide-react"
 
-export default function BatchCaptureBlock({ item }: { item: BlockItem }) {
+export default function BatchCaptureBlock(_props: { item: BlockItem }) {
   const [text, setText] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ count: number; error?: string } | null>(null)

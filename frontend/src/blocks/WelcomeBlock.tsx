@@ -26,8 +26,20 @@ export default function WelcomeBlock(_props: { item: BlockItem }) {
       try {
         const overview = await workspace.overview()
         return {
-          stats: overview.stats,
-          pages: overview.pages || [],
+          stats: overview.stats ?? null,
+          pages: (overview.pages || []).map((p) => ({
+            id: p.id,
+            user_id: null,
+            name: p.name,
+            description: null,
+            icon: p.icon,
+            color: p.color,
+            layout_mode: p.layout_mode,
+            is_archived: p.is_archived,
+            created_at: p.updated_at,
+            updated_at: p.updated_at,
+            note_count: p.note_count,
+          })),
           recentNotes: (overview.recent_notes || []).map((n) => ({
             id: n.id,
             title: n.title,

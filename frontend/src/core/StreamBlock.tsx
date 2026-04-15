@@ -12,11 +12,7 @@ const SearchResultsBlock = lazy(() => import("../blocks/SearchResultsBlock"))
 const HelpBlock = lazy(() => import("../blocks/HelpBlock"))
 const NoteDetailBlock = lazy(() => import("../blocks/NoteDetailBlock"))
 const TaskListBlock = lazy(() => import("../blocks/TaskListBlock"))
-const ReadingPathBlock = lazy(() => import("../blocks/ReadingPathBlock"))
-const GapAnalysisBlock = lazy(() => import("../blocks/GapAnalysisBlock"))
-const CuratorReportBlock = lazy(() => import("../blocks/CuratorReportBlock"))
 const SettingsBlock = lazy(() => import("../blocks/SettingsBlock"))
-const HistoryBlock = lazy(() => import("../blocks/HistoryBlock"))
 const PageStatsBlock = lazy(() => import("../blocks/PageStatsBlock"))
 const ExportBlock = lazy(() => import("../blocks/ExportBlock"))
 const BatchCaptureBlock = lazy(() => import("../blocks/BatchCaptureBlock"))
@@ -33,12 +29,8 @@ const BLOCK_MAP: Record<
   "search-results": SearchResultsBlock,
   help: HelpBlock,
   "note-detail": NoteDetailBlock,
-  "task-list": TaskListBlock,
-  "reading-path": ReadingPathBlock,
-  "gap-analysis": GapAnalysisBlock,
-  "curator-report": CuratorReportBlock,
-  settings: SettingsBlock,
-  history: HistoryBlock,
+  "task-list": TaskListBlock,    settings: SettingsBlock,
+  
   "page-stats": PageStatsBlock,
   export: ExportBlock,
   batch: BatchCaptureBlock,

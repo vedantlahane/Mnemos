@@ -1,8 +1,6 @@
 import { useState } from "react"
 import { useAppContext } from "../hooks/useAppContext"
 import ExcalidrawCanvas from "./ExcalidrawCanvas"
-import { VisualContextBadge } from "../components/canvas/VisualContextBadge"
-import { RegionPanel } from "../components/canvas/RegionPanel"
 import { Monitor, BookOpen } from "lucide-react"
 
 export default function CanvasOverlay() {
@@ -46,9 +44,7 @@ export default function CanvasOverlay() {
 
       {viewMode === "canvas" && (
         <>
-          <RegionPanel pageId={current.pageId} />
-          <VisualContextBadge />
-        </>
+                            </>
       )}
 
       <div className="flex-1 relative">

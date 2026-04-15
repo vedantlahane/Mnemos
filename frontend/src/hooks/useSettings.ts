@@ -53,7 +53,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
     // Sync to backend (non-blocking)
     try {
-      await api.updateSettings(partial)
+      await api.updateSettings({
+        ...partial,
+        theme: partial.theme === "glass" ? "dark" : partial.theme,
+      })
     } catch {
       console.warn("Failed to sync settings to backend")
     }

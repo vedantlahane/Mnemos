@@ -1,66 +1,11 @@
 /**
- * Canvas Operations Protocol — client-side handler.
- * Receives SSE events from backend, applies them to Excalidraw.
+ * Canvas SSE bridge for Mnemos v2.0.
+ * Parses text/event-stream payloads from POST /api/pages/:id/chat.
  */
 
-export type OpType =
-  | "create_note"
-  | "create_text"
-  | "create_diagram"
-  | "create_sticky"
-  | "update_element"
-  | "move_element"
-  | "delete_element"
-  | "group_elements"
-  | "create_edge_line"
-  | "set_background"
-  | "set_theme"
-  | "pan_to"
-  | "zoom_to"
-  | "stream_start"
-  | "stream_chunk"
-  | "stream_end"
-  | "arrange_region"
-  | "batch"
-  | "info"
-  | "error"
-  | "done"
+import type { CanvasOp, Viewport } from "../types"
 
-export interface CanvasOp {
-  op: OpType
-  element_id?: string
-  x?: number
-  y?: number
-  width?: number
-  height?: number
-  text?: string
-  color?: string
-  theme?: string
-  zoom?: number
-  style?: string
-  note?: Record<string, unknown>
-  note_id?: string
-  elements?: Record<string, unknown>[]
-  connections?: Record<string, unknown>[]
-  operations?: CanvasOp[]
-  topology?: Record<string, unknown>
-  message?: string
-  metadata?: Record<string, unknown>
-  timestamp?: number
-}
-
-export interface SSEEvent {
-  event: string
-  data: Record<string, unknown>
-}
-
-export interface Viewport {
-  x: number
-  y: number
-  width: number
-  height: number
-  zoom: number
-}
+export type { CanvasOp, Viewport }
 
 export interface StreamRequest {
   message: string
@@ -71,57 +16,123 @@ export interface StreamRequest {
 }
 
 export interface StreamCallbacks {
-  onIntent?: (
-    intent: string,
-    topic: string,
-    metadata: Record<string, unknown>
-  ) => void
+  onIntent?: (intent: string, topic: string, metadata: Record<string, unknown>) => void
   onChat?: (content: string) => void
   onCanvasOp?: (op: CanvasOp) => void
-  onSources?: (
-    sources: Array<{ id: string; title: string; similarity: number }>
-  ) => void
+  onSources?: (sources: Array<{ id: string; title: string; similarity: number }>) => void
   onFollowUps?: (followUps: string[]) => void
   onError?: (message: string) => void
   onDone?: () => void
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api"
+const RAW_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
+const BASE_URL = RAW_BASE.replace(/\/$/, "").replace(/\/api$/, "")
+const API = `${BASE_URL}/api`
 
-function normalizeApiBase(base: string): string {
-  return base.endsWith("/") ? base.slice(0, -1) : base
-}
-
-function getAuthHeader(): Record<string, string> | null {
-  const token =
-    localStorage.getItem("mnemos-token") ||
-    localStorage.getItem("access_token")
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem("mnemos-token") || localStorage.getItem("access_token")
   if (token && token !== "auth-disabled") {
     return { Authorization: `Bearer ${token}` }
   }
-  return null
+  return {}
 }
 
-/**
- * Stream canvas operations from the backend via SSE.
- * Returns an AbortController so the caller can cancel.
- */
+function parseIntentMessage(message: string): { intent: string; topic: string } | null {
+  // Expected examples: "Intent: compose, Topic: neural networks"
+  const intentMatch = message.match(/Intent:\s*([a-z_\-]+)/i)
+  if (!intentMatch) {
+    return null
+  }
+  const topicMatch = message.match(/Topic:\s*(.+)$/i)
+  return {
+    intent: intentMatch[1].toLowerCase(),
+    topic: topicMatch ? topicMatch[1].trim() : "",
+  }
+}
+
+function dispatchOp(op: CanvasOp, callbacks: StreamCallbacks): void {
+  if (op.op === "done") {
+    callbacks.onDone?.()
+    return
+  }
+
+  if (op.op === "error") {
+    callbacks.onError?.(op.message || "Canvas stream error")
+    return
+  }
+
+  if (op.op === "info") {
+    const metadata = (op.metadata || {}) as Record<string, unknown>
+
+    const intentFromMetadata = typeof metadata.intent === "string" ? metadata.intent : undefined
+    const topicFromMetadata = typeof metadata.topic === "string" ? metadata.topic : ""
+    if (intentFromMetadata) {
+      callbacks.onIntent?.(intentFromMetadata, topicFromMetadata, metadata)
+    } else if (typeof op.message === "string") {
+      const parsed = parseIntentMessage(op.message)
+      if (parsed) {
+        callbacks.onIntent?.(parsed.intent, parsed.topic, metadata)
+      }
+    }
+
+    if (Array.isArray(metadata.sources)) {
+      callbacks.onSources?.(
+        metadata.sources
+          .filter((item): item is { id: string; title: string; similarity: number } => {
+            return (
+              !!item &&
+              typeof item === "object" &&
+              typeof (item as Record<string, unknown>).id === "string" &&
+              typeof (item as Record<string, unknown>).title === "string"
+            )
+          })
+          .map((item) => ({
+            id: item.id,
+            title: item.title,
+            similarity: typeof item.similarity === "number" ? item.similarity : 0,
+          })),
+      )
+    }
+
+    if (Array.isArray(metadata.follow_ups)) {
+      callbacks.onFollowUps?.(
+        metadata.follow_ups
+          .filter((item): item is string => typeof item === "string")
+          .slice(0, 8),
+      )
+    }
+
+    // Chat response/info text should be surfaced in the assistant stream.
+    const hasExplicitChatType = metadata.type === "chat_response"
+    const hasSources = Array.isArray(metadata.sources)
+    const hasSearchResults = Array.isArray(metadata.results)
+    const hasNavigateTarget = typeof metadata.navigate_to_page === "string"
+    if ((hasExplicitChatType || hasSources || hasSearchResults || hasNavigateTarget) && op.message) {
+      callbacks.onChat?.(op.message)
+    }
+
+    // Also forward info op to canvas layer for navigation/status handlers.
+    callbacks.onCanvasOp?.(op)
+    return
+  }
+
+  callbacks.onCanvasOp?.(op)
+}
+
 export function streamCanvasOps(
   pageId: string,
   request: StreamRequest,
   callbacks: StreamCallbacks,
-  apiBase: string = API_BASE
 ): AbortController {
   const controller = new AbortController()
-  const baseUrl = normalizeApiBase(apiBase)
 
-  const run = async () => {
+  void (async () => {
     try {
-      const response = await fetch(`${baseUrl}/canvas/${pageId}/stream`, {
+      const response = await fetch(`${API}/pages/${pageId}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(getAuthHeader() || {}),
+          ...getAuthHeaders(),
         },
         body: JSON.stringify(request),
         signal: controller.signal,
@@ -135,113 +146,59 @@ export function streamCanvasOps(
 
       const reader = response.body?.getReader()
       if (!reader) {
-        callbacks.onError?.("No response body")
+        callbacks.onError?.("No response body from canvas stream")
         callbacks.onDone?.()
         return
       }
 
       const decoder = new TextDecoder()
       let buffer = ""
-      let currentEvent = ""
-      let currentDataLines: string[] = []
-
-      const flushEvent = () => {
-        if (!currentEvent) return
-
-        const payload = currentDataLines.join("\n")
-        if (!payload) {
-          currentEvent = ""
-          currentDataLines = []
-          return
-        }
-
-        try {
-          const parsed = JSON.parse(payload)
-          dispatchEvent(currentEvent, parsed, callbacks)
-        } catch {
-          console.warn("Failed to parse SSE data:", payload)
-        }
-
-        currentEvent = ""
-        currentDataLines = []
-      }
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          break
+        }
 
         buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
+        const events = buffer.split("\n\n")
+        buffer = events.pop() || ""
 
-        for (const line of lines) {
-          const normalized = line.endsWith("\r") ? line.slice(0, -1) : line
+        for (const event of events) {
+          const lines = event.split("\n")
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith("data:")) {
+              continue
+            }
+            const payload = trimmed.slice(5).trim()
+            if (!payload) {
+              continue
+            }
 
-          if (!normalized) {
-            flushEvent()
-            continue
-          }
-
-          if (normalized.startsWith("event: ")) {
-            currentEvent = normalized.slice(7).trim()
-          } else if (normalized.startsWith("data: ")) {
-            currentDataLines.push(normalized.slice(6))
+            try {
+              const op = JSON.parse(payload) as CanvasOp
+              dispatchOp(op, callbacks)
+              if (op.op === "done") {
+                return
+              }
+            } catch {
+              // Ignore malformed chunks and continue stream processing.
+            }
           }
         }
       }
 
-      // Flush terminal event
-      if (currentEvent && currentDataLines.length > 0) {
-        flushEvent()
+      callbacks.onDone?.()
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        callbacks.onDone?.()
+        return
       }
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name !== "AbortError") {
-        callbacks.onError?.(e.message || "Stream failed")
-      }
+      callbacks.onError?.(error instanceof Error ? error.message : "Canvas stream failed")
+      callbacks.onDone?.()
     }
+  })()
 
-    callbacks.onDone?.()
-  }
-
-  run()
   return controller
-}
-
-function dispatchEvent(
-  event: string,
-  data: Record<string, unknown>,
-  callbacks: StreamCallbacks
-) {
-  switch (event) {
-    case "intent":
-      callbacks.onIntent?.(
-        data.intent as string,
-        data.topic as string,
-        (data.metadata as Record<string, unknown>) || {}
-      )
-      break
-    case "chat":
-      callbacks.onChat?.(data.content as string)
-      break
-    case "canvas_op":
-      callbacks.onCanvasOp?.(data as unknown as CanvasOp)
-      break
-    case "sources":
-      callbacks.onSources?.(
-        (data.sources as Array<{
-          id: string
-          title: string
-          similarity: number
-        }>) || []
-      )
-      break
-    case "follow_ups":
-      callbacks.onFollowUps?.((data.follow_ups as string[]) || [])
-      break
-    case "error":
-      callbacks.onError?.((data.message as string) || "Unknown error")
-      break
-    case "done":
-      break
-  }
 }

@@ -1,8 +1,8 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api, notes, pages, ai } from "../api/client"
+import { notes, pages } from "../api/client"
 import { AsyncBlock } from "../components/AsyncBlock"
 import { useStream } from "../hooks/useStream"
-import type { Note, BlockItem, NoteDetailData, Page } from "../types"
+import type { EnrichedNote, BlockItem, NoteDetailData, Page } from "../types"
 import {
   FileText, ExternalLink, Tag, CheckSquare, Link,
   Clock, RefreshCw, ArrowRight, Trash2,
@@ -37,11 +37,11 @@ export default function NoteDetailBlock({ item }: { item: BlockItem }) {
   )
 }
 
-function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => void }) {
+function NoteDetailContent({ note, onRefetch }: { note: EnrichedNote; onRefetch: () => void }) {
   const { addSystemMessage, addBlock } = useStream()
   const [retrying, setRetrying] = useState(false)
   const [moving, setMoving] = useState(false)
-  const [pages, setPages] = useState<Page[]>([])
+  const [availablePages, setAvailablePages] = useState<Page[]>([])
   const [showMoveMenu, setShowMoveMenu] = useState(false)
 
   const statusColors: Record<string, "success" | "warning" | "info" | "error"> = {
@@ -54,7 +54,7 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
   async function handleRetry() {
     setRetrying(true)
     try {
-      await ai.retryStuck(note.id)
+      await notes.retry(note.id)
       addSystemMessage(`Retrying processing for "${note.title || "Untitled"}"â€¦`)
       setTimeout(onRefetch, 5000)
     } catch (err) {
@@ -75,10 +75,10 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
 
   async function handleShowMove() {
     setShowMoveMenu(!showMoveMenu)
-    if (pages.length === 0) {
+    if (availablePages.length === 0) {
       try {
         const resp = await pages.list()
-        setPages(resp.pages.filter((p) => p.id !== note.page_id))
+        setAvailablePages(resp.pages.filter((p) => p.id !== note.page_id))
       } catch { /* ignore */ }
     }
   }
@@ -180,13 +180,13 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
       )}
 
       {/* Related notes */}
-      {note.related_note_ids.length > 0 && (
+      {(note.related_note_ids || []).length > 0 && (
         <div className="mb-4">
           <div className="text-[10px] uppercase tracking-widest text-[var(--glass-text-muted)] font-semibold mb-2">
-            Related Notes ({note.related_note_ids.length})
+            Related Notes ({(note.related_note_ids || []).length})
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {note.related_note_ids.map((rid) => (
+            {(note.related_note_ids || []).map((rid) => (
               <button
                 key={rid}
                 onClick={() => addBlock("note-detail", undefined, { noteIds: [rid] })}
@@ -232,10 +232,10 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
       {/* Move dropdown */}
       {showMoveMenu && (
         <div className="mt-2 glass-surface-2 rounded-xl p-2 max-h-[160px] overflow-y-auto">
-          {pages.length === 0 ? (
+          {availablePages.length === 0 ? (
             <div className="text-[11px] text-[var(--glass-text-muted)] p-2">No other pages.</div>
           ) : (
-            pages.map((p) => (
+            availablePages.map((p) => (
               <button
                 key={p.id}
                 onClick={() => handleMove(p.id, p.name)}
@@ -273,9 +273,9 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
             Bridge note
           </div>
         )}
-        {note.centrality > 0 && (
+        {(note.centrality || 0) > 0 && (
           <div className="text-[var(--glass-text-muted)]">
-            Centrality: {(note.centrality * 100).toFixed(0)}%
+            Centrality: {((note.centrality || 0) * 100).toFixed(0)}%
           </div>
         )}
       </div>
