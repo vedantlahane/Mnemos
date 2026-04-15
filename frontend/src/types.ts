@@ -117,12 +117,67 @@ export interface Page {
   color: string
   is_archived: boolean
   canvas_data: Record<string, unknown>
+  notebook_data?: Record<string, unknown>
   viewport: { x: number; y: number; zoom: number }
   note_count: number
   last_activity: string
   created_at: string
   updated_at: string
   user_id?: string | null
+  layout_mode?: "canvas" | "notebook" | "hybrid"
+  flow_scroll_mode?: "infinite-vertical" | "paged"
+  content_width?: number
+}
+
+export interface PageDocument {
+  id: string
+  page_id: string
+  user_id?: string | null
+  default_font: string
+  content_width: number
+  line_height: number
+  left_padding: number
+  right_padding: number
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface PageBlock {
+  id: string
+  page_id: string
+  document_id?: string | null
+  parent_block_id?: string | null
+  order_key: number
+  depth: number
+  block_type: string
+  text_content?: string | null
+  attrs: Record<string, unknown>
+  line_start?: number | null
+  line_end?: number | null
+  char_start?: number | null
+  char_end?: number | null
+  layout_bbox: Record<string, unknown>
+  inline_allow_wrap: boolean
+  excalidraw_anchor_mode: string
+  excalidraw_wrap_mode: string
+  source_note_id?: string | null
+  source_page_id?: string | null
+  provenance: Record<string, unknown>
+  metadata: Record<string, unknown>
+  is_deleted: boolean
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PageDocumentBundle {
+  page: Page
+  document: PageDocument | null
+  blocks: PageBlock[]
+  references: Array<Record<string, unknown>>
+  embeds: Array<Record<string, unknown>>
 }
 
 // ─── Edges ───────────────────────────────────────────
@@ -176,6 +231,22 @@ export interface CanvasElement {
   height: number | null
   style: Record<string, unknown>
   created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CanvasBinding {
+  id: string
+  page_id: string
+  block_id: string
+  element_id: string
+  anchor_mode: string
+  wrap_mode: string
+  anchor_line?: number | null
+  offset_x: number
+  offset_y: number
+  z_index: number
+  metadata: Record<string, unknown>
   created_at: string
   updated_at: string
 }

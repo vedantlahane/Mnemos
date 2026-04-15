@@ -338,4 +338,41 @@
   .excalidraw .layer-ui__wrapper > div:has(svg[height="200"]) {
     display: none !important;
   }
+
+  /* ─── Notebook Mode Overrides ─── */
+
+  /* In notebook mode, hide horizontal scrollbar and constrain toolbar */
+  .notebook-mode .excalidraw {
+    overflow-x: hidden !important;
+  }
+
+  /* Make the toolbar more compact in notebook mode */
+  .notebook-mode .excalidraw .Island {
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+  }
+  .notebook-mode .excalidraw .Island:hover {
+    opacity: 1;
+  }
+
+  /* Hide zoom controls in notebook (vertical scroll only) */
+  .notebook-mode .excalidraw .zoom-actions {
+    display: none !important;
+  }
+
+  /* Column guide line (subtle center indicator) */
+  .notebook-mode::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 720px;
+    max-width: 90vw;
+    border-left: 1px dashed rgba(255, 255, 255, 0.03);
+    border-right: 1px dashed rgba(255, 255, 255, 0.03);
+    pointer-events: none;
+    z-index: 1;
+  }
 }

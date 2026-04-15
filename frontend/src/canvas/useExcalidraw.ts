@@ -63,6 +63,12 @@ function getCustomData(el: ExcalidrawEl): Record<string, unknown> {
   return (el.customData as Record<string, unknown>) || {}
 }
 
+function isNotebookProjectionCustomData(custom: Record<string, unknown> | undefined): boolean {
+  if (!custom) return false
+  if (custom.notebookProjection === true) return true
+  return String(custom.type || "").startsWith("notebook-projection")
+}
+
 function getGridPos(index: number, note: Note): { x: number; y: number } {
   if (typeof note.canvas_x === "number" && typeof note.canvas_y === "number") {
     return { x: note.canvas_x, y: note.canvas_y }
@@ -213,14 +219,17 @@ function buildNotePositionMap(
   return map
 }
 
-export function useExcalidraw(pageId: string | undefined) {
+export function useExcalidraw(
+  pageId: string | undefined,
+  storageMode: "canvas" | "notebook" = "canvas"
+) {
   const excalidrawRef = useRef<ExcalidrawAPI | null>(null)
   const [loading, setLoading] = useState(true)
   const [initialScene, setInitialScene] = useState<CanvasScene | null>(null)
   const [error, setError] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isSaving = useRef(false)
-  const currentPageId = useRef<string | undefined>(undefined)
+  const currentSceneKey = useRef<string | undefined>(undefined)
   const pendingSave = useRef(false)
   const lastQueuedFingerprint = useRef("")
   const lastSavedFingerprint = useRef("")
@@ -236,9 +245,12 @@ export function useExcalidraw(pageId: string | undefined) {
   // ─── Load ──────────────────────────────────────
   const loadScene = useCallback(async () => {
     if (!pageId) {
+      currentSceneKey.current = undefined
       setLoading(false)
       return
     }
+
+    const sceneKey = `${pageId}:${storageMode}`
 
     saveSessionRef.current += 1
 
@@ -254,11 +266,11 @@ export function useExcalidraw(pageId: string | undefined) {
 
     setLoading(true)
     setError(null)
-    currentPageId.current = pageId
+    currentSceneKey.current = sceneKey
 
     try {
-      const canvasResp = await api.getPageCanvas(pageId)
-      if (currentPageId.current !== pageId) return
+      const canvasResp = await api.getPageCanvas(pageId, storageMode)
+      if (currentSceneKey.current !== sceneKey) return
 
       // Parse stored scene
       const storedCanvas = canvasResp.canvas_data || canvasResp.page?.canvas_data || {}
@@ -460,16 +472,16 @@ export function useExcalidraw(pageId: string | undefined) {
       setInitialScene(scene)
     } catch (err) {
       console.error("Canvas load error:", err)
-      if (currentPageId.current === pageId) {
+      if (currentSceneKey.current === sceneKey) {
         setError("Failed to load canvas")
         setInitialScene({ ...EMPTY_SCENE, elements: [] })
       }
     } finally {
-      if (currentPageId.current === pageId) {
+      if (currentSceneKey.current === sceneKey) {
         setLoading(false)
       }
     }
-  }, [pageId])
+  }, [pageId, storageMode])
 
   // ─── Reset & Load ──────────────────────────────
   useEffect(() => {
@@ -494,7 +506,15 @@ export function useExcalidraw(pageId: string | undefined) {
     ) => {
       if (!pageId) return
 
-      const fingerprint = buildSaveFingerprint(elements, appState, files)
+      const persistentElements = elements.filter((el) => {
+        const custom =
+          el.customData && typeof el.customData === "object"
+            ? (el.customData as Record<string, unknown>)
+            : undefined
+        return !isNotebookProjectionCustomData(custom)
+      })
+
+      const fingerprint = buildSaveFingerprint(persistentElements, appState, files)
       if (
         fingerprint === lastSavedFingerprint.current ||
         fingerprint === lastQueuedFingerprint.current
@@ -502,7 +522,13 @@ export function useExcalidraw(pageId: string | undefined) {
         return
       }
 
-      pendingPayload.current = { elements, appState, files, fingerprint, sessionId: saveSessionRef.current }
+      pendingPayload.current = {
+        elements: persistentElements,
+        appState,
+        files,
+        fingerprint,
+        sessionId: saveSessionRef.current,
+      }
       lastQueuedFingerprint.current = fingerprint
 
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -545,6 +571,10 @@ export function useExcalidraw(pageId: string | undefined) {
               .map((el) => normalizeElementShape(el))
               .filter((el): el is ExcalidrawEl => !!el)
 
+            const persistedElements = safeElements.filter(
+              (el) => !isNotebookProjectionCustomData(getCustomData(el))
+            )
+
             const zoomValue =
               payload.appState.zoom && typeof payload.appState.zoom === "object"
                 ? (payload.appState.zoom as { value: number }).value
@@ -582,7 +612,7 @@ export function useExcalidraw(pageId: string | undefined) {
 
             await api.savePageCanvas(pageId, {
               canvas_data: {
-                elements: safeElements,
+                elements: persistedElements,
                 appState: persistentAppState,
                 files: payload.files || {},
               },
@@ -591,7 +621,7 @@ export function useExcalidraw(pageId: string | undefined) {
                 y: (payload.appState.scrollY as number) || 0,
                 zoom: zoomValue,
               },
-            })
+            }, storageMode)
 
             lastSavedFingerprint.current = payload.fingerprint
           } catch (err) {
@@ -610,7 +640,7 @@ export function useExcalidraw(pageId: string | undefined) {
         await flushPendingSave()
       }, 2500)
     },
-    [pageId]
+    [pageId, storageMode]
   )
 
   // ─── Add elements to live scene ────────────────

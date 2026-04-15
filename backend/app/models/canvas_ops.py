@@ -1,21 +1,14 @@
 # === FILE: backend/app/models/canvas_ops.py ===
-"""
-Canvas Operations Protocol.
-
-Every backend action that touches the canvas is expressed as a CanvasOp.
-The frontend receives these over SSE and applies them to Excalidraw.
-"""
 
 from __future__ import annotations
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 from pydantic import BaseModel, Field
 import uuid
 import time
 
 
 class OpType(str, Enum):
-    # Element CRUD
     CREATE_NOTE = "create_note"
     CREATE_TEXT = "create_text"
     CREATE_DIAGRAM = "create_diagram"
@@ -25,23 +18,15 @@ class OpType(str, Enum):
     DELETE_ELEMENT = "delete_element"
     GROUP_ELEMENTS = "group_elements"
     CREATE_EDGE_LINE = "create_edge_line"
-
-    # Canvas state
     SET_BACKGROUND = "set_background"
     SET_THEME = "set_theme"
     PAN_TO = "pan_to"
     ZOOM_TO = "zoom_to"
-
-    # Streaming text
     STREAM_START = "stream_start"
     STREAM_CHUNK = "stream_chunk"
     STREAM_END = "stream_end"
-
-    # Batch / arrange
     ARRANGE_CLUSTER = "arrange_cluster"
     BATCH = "batch"
-
-    # Meta
     INFO = "info"
     ERROR = "error"
     DONE = "done"
@@ -68,11 +53,6 @@ class CanvasOp(BaseModel):
     message: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
     timestamp: int = Field(default_factory=lambda: int(time.time() * 1000))
-
-
-class SSEEvent(BaseModel):
-    event: str  # "intent", "chat", "canvas_op", "sources", "follow_ups", "error", "done"
-    data: dict
 
 
 class Viewport(BaseModel):
@@ -136,7 +116,7 @@ class Rect(BaseModel):
 class Placement(BaseModel):
     x: float
     y: float
-    cluster_id: Optional[str] = None
+    region_id: Optional[str] = None
     strategy: str = "auto"
     reason: str = ""
 

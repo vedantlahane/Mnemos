@@ -1,12 +1,8 @@
 # === FILE: backend/app/services/composition.py ===
-"""
-Composition service — generates content for canvas placement.
-Handles "write about X", "explain Y", etc.
-Uses notes + optional web context, streams output.
-"""
 
 from __future__ import annotations
 import logging
+import textwrap
 from typing import AsyncIterator, Optional
 
 from app.db.supabase import db
@@ -20,136 +16,99 @@ from langchain_core.messages import SystemMessage, HumanMessage
 logger = logging.getLogger("mnemos.compose")
 
 COMPOSE_SYSTEM = """You are a knowledge composition assistant for a visual canvas.
-
 Rules:
 - Write clear, well-structured content about the requested topic.
 - Use the user's existing notes as primary sources — cite them by title.
-- If notes are insufficient, use your general knowledge but note that explicitly.
-- Format for canvas display: use short paragraphs, bullet points, and headers.
-- Keep it concise but comprehensive (aim for 200-400 words).
-- Use markdown-style formatting: **bold** for emphasis, - for lists.
-- Do NOT use code fences unless the user asked for code.
-- Do NOT add meta-commentary like "Here's what I found" — just write the content directly."""
-
-COMPOSE_WITH_WEB_SYSTEM = """You are a knowledge composition assistant for a visual canvas.
-
-Rules:
-- Combine the user's notes with additional context to write comprehensive content.
-- Always cite which notes you drew from.
-- When using knowledge beyond the notes, mark it clearly.
+- If notes are insufficient, use general knowledge but note that explicitly.
 - Format for canvas display: short paragraphs, bullet points, headers.
-- Keep it concise but comprehensive (200-500 words).
-- Use markdown-style formatting: **bold** for emphasis, - for lists."""
+- Keep it concise but comprehensive (200-400 words).
+- Use **bold** for emphasis, - for lists.
+- Do NOT add meta-commentary — just write the content directly."""
 
 
-async def compose_content(
-    topic: str,
-    page_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    max_notes: int = 8,
-) -> str:
-    """Generate composed content (non-streaming). Returns full text."""
-    notes_context = await _gather_context(topic, page_id, user_id, max_notes)
+def _chunk_preserving_format(text: str, chunk_size: int = 120) -> list[str]:
+    if not text:
+        return []
+    chunks, start = [], 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        if end < len(text):
+            nl = text.rfind("\n", start, end)
+            if nl > start:
+                end = nl + 1
+            else:
+                sp = text.rfind(" ", start, end)
+                if sp > start + max(8, chunk_size // 3):
+                    end = sp + 1
+        chunks.append(text[start:end])
+        start = end
+    return chunks
 
+
+async def compose_content(topic: str, page_id: str = None, user_id: str = None) -> str:
+    context = await _gather_context(topic, page_id, user_id)
     prompt = f"Topic: {topic}\n\n"
-    if notes_context:
-        prompt += f"Relevant notes from the knowledge base:\n{notes_context}\n\n"
-        prompt += "Write comprehensive content about this topic using these notes as primary source."
+    if context:
+        prompt += f"Relevant notes:\n{context}\n\nWrite using these notes as primary source."
     else:
-        prompt += "No existing notes found on this topic. Write comprehensive content using your general knowledge. Clearly indicate this is general knowledge, not from the user's notes."
-
-    primary_model, _ = await llm._runtime_models(user_id=user_id)
-
+        prompt += "No existing notes found. Write using general knowledge. State this clearly."
+    primary, _ = await llm._runtime_models(user_id)
     try:
         from app.llm.google_provider import google_chat_call
-        return await google_chat_call(COMPOSE_SYSTEM, [{"role": "user", "content": prompt}], model=primary_model)
+        return await google_chat_call(COMPOSE_SYSTEM, [{"role": "user", "content": prompt}], model=primary)
     except Exception:
         from app.llm.groq_provider import groq_chat_call
         return await groq_chat_call(COMPOSE_SYSTEM, [{"role": "user", "content": prompt}])
 
 
-async def stream_compose(
-    topic: str,
-    page_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    max_notes: int = 8,
-) -> AsyncIterator[str]:
-    """Stream composed content chunk by chunk."""
-    notes_context = await _gather_context(topic, page_id, user_id, max_notes)
-
+async def stream_compose(topic: str, page_id: str = None, user_id: str = None) -> AsyncIterator[str]:
+    context = await _gather_context(topic, page_id, user_id)
     prompt = f"Topic: {topic}\n\n"
-    if notes_context:
-        prompt += f"Relevant notes from the knowledge base:\n{notes_context}\n\n"
-        prompt += "Write comprehensive content about this topic using these notes as primary source."
+    if context:
+        prompt += f"Relevant notes:\n{context}\n\nWrite using these notes as primary source."
     else:
-        prompt += "No existing notes found. Write comprehensive content using your general knowledge. Note this clearly."
-
-    primary_model, fast_model = await llm._runtime_models(user_id=user_id)
-
+        prompt += "No existing notes found. Write using general knowledge."
+    primary, _ = await llm._runtime_models(user_id)
     try:
-        llm_instance = _get_streaming_llm(primary_model)
-        messages = [
-            SystemMessage(content=COMPOSE_SYSTEM),
-            HumanMessage(content=prompt),
-        ]
-        async for chunk in llm_instance.astream(messages):
+        llm_inst = _streaming_llm(primary)
+        messages = [SystemMessage(content=COMPOSE_SYSTEM), HumanMessage(content=prompt)]
+        async for chunk in llm_inst.astream(messages):
             text = chunk.content if hasattr(chunk, "content") else str(chunk)
             if text:
                 yield text
     except Exception as e:
-        logger.warning(f"Streaming compose failed: {e}, falling back to non-stream")
-        full_text = await compose_content(topic, page_id, user_id, max_notes)
-        # Simulate streaming
-        words = full_text.split()
-        for i in range(0, len(words), 3):
-            yield " ".join(words[i:i+3]) + " "
+        logger.warning(f"Stream failed: {e}, falling back")
+        full = await compose_content(topic, page_id, user_id)
+        for chunk in _chunk_preserving_format(full):
+            yield chunk
 
 
-async def _gather_context(
-    topic: str,
-    page_id: Optional[str],
-    user_id: Optional[str],
-    max_notes: int,
-) -> str:
-    """Gather relevant notes as context."""
+async def _gather_context(topic: str, page_id: str | None, user_id: str | None, max_notes: int = 8) -> str:
     try:
-        query_emb = await embeddings.generate_query(topic)
-
+        emb = await embeddings.generate_query(topic)
         if page_id:
-            relevant = await db.vector_search_in_page(query_emb, page_id, limit=max_notes, threshold=0.5)
+            relevant = await db.vector_search_in_page(emb, page_id, limit=max_notes, threshold=0.5)
             if len(relevant) < 2:
-                global_results = await db.vector_search(query_emb, limit=max_notes, threshold=0.55)
+                extra = await db.vector_search(emb, limit=max_notes, threshold=0.55)
                 seen = {r["id"] for r in relevant}
-                for r in global_results:
-                    if r["id"] not in seen:
-                        relevant.append(r)
+                relevant.extend(r for r in extra if r["id"] not in seen)
         else:
-            relevant = await db.vector_search(query_emb, limit=max_notes, threshold=0.55)
-
+            relevant = await db.vector_search(emb, limit=max_notes, threshold=0.55)
         if user_id:
             relevant = [r for r in relevant if r.get("user_id") == user_id]
-
         if not relevant:
             return ""
-
-        parts = []
-        for n in relevant[:max_notes]:
-            title = n.get("title", "Untitled")
-            summary = n.get("summary") or n.get("raw_text", "")[:300]
-            tags = ", ".join(n.get("tags") or [])
-            parts.append(f"[{title}]: {summary}\nTags: {tags}")
-
-        return "\n\n".join(parts)
-
+        return "\n\n".join(
+            f"[{n.get('title', 'Untitled')}]: {n.get('summary') or n.get('raw_text', '')[:300]}\nTags: {', '.join(n.get('tags') or [])}"
+            for n in relevant[:max_notes]
+        )
     except Exception as e:
-        logger.warning(f"Context gathering failed: {e}")
+        logger.warning(f"Context gather failed: {e}")
         return ""
 
 
-def _get_streaming_llm(model: str):
-    """Get a streaming-capable LLM instance."""
+def _streaming_llm(model: str):
     m = (model or "").lower()
-    if any(tok in m for tok in ["llama", "mixtral", "qwen", "deepseek", "gemma"]):
-        if settings.groq_api_key:
-            return get_groq_llm(model=model, temperature=0.3)
+    if any(t in m for t in ["llama", "mixtral", "qwen", "deepseek", "gemma"]) and settings.groq_api_key:
+        return get_groq_llm(model=model, temperature=0.3)
     return get_google_llm(model=model if "gemini" in m else None, temperature=0.3)

@@ -1,58 +1,56 @@
 backend/
-├── main.py
-├── requirements.txt
-├── .env.example
-├── migrations.sql
-└── app/
-    ├── __init__.py
-    ├── config.py
-    ├── auth/
-    │   ├── __init__.py
-    │   ├── jwt_handler.py
-    │   ├── google_oauth.py
-    │   └── dependencies.py
-    ├── llm/
-    │   ├── __init__.py
-    │   ├── prompts.py
-    │   ├── google_provider.py
-    │   ├── groq_provider.py
-    │   └── router.py
-    ├── agents/
-    │   ├── __init__.py
-    │   ├── state.py
-    │   ├── note_processor.py
-    │   ├── canvas_architect.py
-    │   └── analyst.py
-    ├── routes/
-    │   ├── __init__.py
-    │   ├── auth.py
-    │   ├── capture.py
-    │   ├── notes.py
-    │   ├── search.py
-    │   ├── chat.py
-    │   ├── context.py
-    │   ├── pages.py
-    │   ├── edges.py
-    │   ├── clusters.py
-    │   ├── canvas.py
-    │   ├── stats.py
-    │   ├── history.py
-    │   ├── curator.py
-    │   ├── ai_endpoints.py
-    │   ├── settings_routes.py
-    │   └── workspace.py
-    ├── services/
-    │   ├── __init__.py
-    │   ├── embeddings.py
-    │   ├── processor.py
-    │   ├── retry.py
-    │   ├── page_router.py
-    │   ├── cartographer.py
-    │   ├── curator.py
-    │   └── excalidraw_scene.py
-    ├── db/
-    │   ├── __init__.py
-    │   └── supabase.py
-    └── models/
-        ├── __init__.py
-        └── schemas.py
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── config.py
+│   ├── auth/
+│   │   ├── __init__.py
+│   │   └── dependencies.py
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── visual.py
+│   │   ├── canvas_ops.py
+│   │   └── schemas.py
+│   ├── db/
+│   │   ├── __init__.py
+│   │   └── supabase.py
+│   ├── llm/
+│   │   ├── __init__.py
+│   │   ├── router.py
+│   │   ├── google_provider.py
+│   │   └── groq_provider.py
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── scene_manager.py
+│   │   ├── visual_analyzer.py
+│   │   ├── spatial_planner.py
+│   │   ├── element_layout.py
+│   │   ├── text_layout.py
+│   │   ├── embeddings.py
+│   │   ├── composition.py
+│   │   ├── page_router.py
+│   │   ├── processor.py
+│   │   ├── curator.py
+│   │   ├── cache.py
+│   │   └── intent_classifier.py
+│   ├── agents/
+│   │   ├── __init__.py
+│   │   ├── state.py
+│   │   └── note_processor.py
+│   └── routes/
+│       ├── __init__.py
+│       ├── pages.py
+│       ├── pages_scene.py
+│       ├── pages_canvas.py
+│       ├── pages_document.py
+│       ├── notes.py
+│       ├── capture.py
+│       ├── chat.py
+│       ├── canvas_chat.py
+│       ├── graph.py
+│       ├── search.py
+│       ├── workspace.py
+│       ├── ai.py
+│       └── settings.py
+└── migrations/
+    └── 001_schema_redesign.sql

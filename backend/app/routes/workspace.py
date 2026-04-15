@@ -1,4 +1,5 @@
 # === FILE: backend/app/routes/workspace.py ===
+"""Workspace overview and cross-cutting routes."""
 
 from fastapi import APIRouter, Depends
 from app.db.supabase import db
@@ -11,34 +12,43 @@ router = APIRouter()
 @router.get("/workspace/overview")
 async def workspace_overview(user_id: str = Depends(get_optional_user_id)):
     async def _fetch():
-        stats = await db.get_global_stats(user_id=user_id)
-        pages = await db.list_pages(include_archived=False, user_id=user_id)
-        recent_notes_result = await db.list_notes(page=1, limit=5, user_id=user_id)
+        pages = await db.list_pages(user_id=user_id)
+        total_notes = await db.count_notes(user_id=user_id)
         tags = await db.get_all_tags_with_counts(user_id=user_id)
+
+        page_summaries = []
+        for page in pages[:20]:
+            count = await db.count_notes(page_id=page["id"], user_id=user_id)
+            page_summaries.append({
+                "id": page["id"], "name": page["name"],
+                "icon": page.get("icon", "📄"), "color": page.get("color", "#6366f1"),
+                "note_count": count, "layout_mode": page.get("layout_mode", "canvas"),
+                "is_archived": page.get("is_archived", False),
+                "updated_at": page.get("updated_at"),
+            })
+
         return {
-            "stats": stats,
-            "pages": pages[:20],
-            "recent_notes": recent_notes_result.get("notes", []),
-            "top_tags": tags[:15],
+            "pages": page_summaries,
+            "total_notes": total_notes,
+            "total_pages": len(pages),
+            "top_tags": tags[:20],
         }
 
-    # Try cache first
-    result = await cache_svc.get_overview_cached(_fetch)
-    if result:
-        return result
-    return await _fetch()
+    return await cache_svc.get_overview_cached(fetcher=_fetch)
 
 
-@router.get("/workspace/export")
-async def export_workspace(user_id: str = Depends(get_optional_user_id)):
-    pages = await db.list_pages(include_archived=True, user_id=user_id)
-    all_notes_result = await db.list_notes(page=1, limit=10000, user_id=user_id)
+@router.get("/workspace/stats")
+async def workspace_stats(user_id: str = Depends(get_optional_user_id)):
+    total_notes = await db.count_notes(user_id=user_id)
+    pages = await db.list_pages(user_id=user_id)
     edges = await db.get_all_edges(user_id=user_id)
-    tags = await db.get_all_tags_with_counts(user_id=user_id)
+    stuck = await db.get_stuck_notes()
+    cache_info = await cache_svc.cache_stats()
+
     return {
-        "pages": pages,
-        "notes": all_notes_result.get("notes", []),
-        "edges": edges,
-        "tags": tags,
-        "exported_at": __import__("datetime").datetime.utcnow().isoformat(),
+        "notes": total_notes,
+        "pages": len(pages),
+        "edges": len(edges),
+        "stuck_notes": len(stuck),
+        "cache": cache_info,
     }

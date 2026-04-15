@@ -1,216 +1,142 @@
-/**
- * Canvas Context — reads the current Excalidraw visual state
- * and provides intelligent defaults for new elements.
- *
- * This is the brain behind "make text white on dark backgrounds"
- * and "place things where there's room".
- */
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types"
 
-export interface CanvasContext {
-  /** Current background color of the canvas */
-  backgroundColor: string
-  /** Whether the canvas is in dark mode */
-  isDark: boolean
-  /** Current viewport: center in scene coords */
-  viewportCenter: { x: number; y: number }
-  /** Zoom level */
-  zoom: number
-  /** Visible viewport bounds in scene coords */
-  viewportBounds: { minX: number; minY: number; maxX: number; maxY: number }
-  /** Bounding boxes of all existing non-deleted elements */
-  occupiedRects: Array<{ x: number; y: number; w: number; h: number }>
-  /** Raw appState for anything else */
-  appState: Record<string, unknown>
-}
+export function readCanvasContext(api: ExcalidrawImperativeAPI) {
+  const elements = api.getSceneElements() as readonly Record<string, unknown>[]
+  const appState = api.getAppState()
 
-/**
- * Compute luminance of a hex or CSS color (0..1)
- * @returns 0 for black, 1 for white
- */
-export function luminance(color: string): number {
-  // Handle common named colors
-  const named: Record<string, string> = {
-    white: "#ffffff",
-    black: "#000000",
-    transparent: "#000000",
+  const scrollX = Number(appState.scrollX || 0)
+  const scrollY = Number(appState.scrollY || 0)
+  const zoom = typeof appState.zoom === "object" && appState.zoom !== null
+    ? Number((appState.zoom as any).value || 1)
+    : Number(appState.zoom || 1)
+
+  const width = Number(appState.width || window.innerWidth)
+  const height = Number(appState.height || window.innerHeight)
+
+  const viewportCenter = {
+    x: -scrollX + width / (2 * zoom),
+    y: -scrollY + height / (2 * zoom),
   }
-  const hex = named[color.toLowerCase()] ?? color
-
-  // Parse hex (#RGB, #RGBA, #RRGGBB, #RRGGBBAA)
-  let r = 0, g = 0, b = 0
-  const h = hex.replace("#", "")
-
-  if (h.length >= 6) {
-    r = parseInt(h.slice(0, 2), 16) / 255
-    g = parseInt(h.slice(2, 4), 16) / 255
-    b = parseInt(h.slice(4, 6), 16) / 255
-  } else if (h.length >= 3) {
-    r = parseInt(h[0] + h[0], 16) / 255
-    g = parseInt(h[1] + h[1], 16) / 255
-    b = parseInt(h[2] + h[2], 16) / 255
-  } else {
-    // Try rgba() format
-    const m = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
-    if (m) {
-      r = parseInt(m[1]) / 255
-      g = parseInt(m[2]) / 255
-      b = parseInt(m[3]) / 255
-    }
-  }
-
-  // Relative luminance (ITU-R BT.709)
-  const srgb = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
-  return 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(b)
-}
-
-/**
- * Pick the best text color for a given background
- */
-export function contrastTextColor(background: string): string {
-  const L = luminance(background)
-  // Dark background → white text; Light background → dark text
-  return L < 0.4 ? "#ffffff" : "#1e1e1e"
-}
-
-/**
- * Pick a contrasting accent color for the current theme
- */
-export function contrastAccentColor(background: string): string {
-  const L = luminance(background)
-  // Dark bg → indigo-300 ; Light bg → indigo-600
-  return L < 0.4 ? "#a5b4fc" : "#4f46e5"
-}
-
-/**
- * Pick a subtle/muted text color for the current theme
- */
-export function contrastMutedColor(background: string): string {
-  const L = luminance(background)
-  return L < 0.4 ? "#9ca3af" : "#6b7280"
-}
-
-/**
- * Read the full canvas context from the Excalidraw API
- */
-export function readCanvasContext(excalidrawAPI: any): CanvasContext {
-  const appState = excalidrawAPI.getAppState()
-  const elements = excalidrawAPI.getSceneElements() as any[]
-
-  const bg = (appState.viewBackgroundColor as string) || "#0e0e1a"
-  const isDark = luminance(bg) < 0.4
-
-  // Viewport center in scene coordinates
-  const zoom = (appState.zoom?.value as number) ?? 1
-  const scrollX = (appState.scrollX as number) ?? 0
-  const scrollY = (appState.scrollY as number) ?? 0
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-
-  const centerX = (-scrollX + vw / 2) / zoom
-  const centerY = (-scrollY + vh / 2) / zoom
 
   const viewportBounds = {
-    minX: -scrollX / zoom,
-    minY: -scrollY / zoom,
-    maxX: (-scrollX + vw) / zoom,
-    maxY: (-scrollY + vh) / zoom,
+    minX: -scrollX,
+    minY: -scrollY,
+    maxX: -scrollX + width / zoom,
+    maxY: -scrollY + height / zoom,
   }
 
-  // Collect bounding boxes of non-deleted elements
   const occupiedRects = elements
-    .filter((el: any) => !el.isDeleted && el.width > 0 && el.height > 0)
-    .map((el: any) => ({
-      x: el.x as number,
-      y: el.y as number,
-      w: el.width as number,
-      h: el.height as number,
+    .filter((el) => !el.isDeleted)
+    .map((el) => ({
+      x: Number(el.x),
+      y: Number(el.y),
+      w: Number(el.width),
+      h: Number(el.height),
     }))
 
+  const backgroundColor = typeof appState.viewBackgroundColor === "string" 
+    ? appState.viewBackgroundColor 
+    : "#0e0e1a"
+
   return {
-    backgroundColor: bg,
-    isDark,
-    viewportCenter: { x: centerX, y: centerY },
-    zoom,
+    elements,
+    viewportCenter,
     viewportBounds,
     occupiedRects,
-    appState: appState as Record<string, unknown>,
+    zoom,
+    backgroundColor,
   }
 }
 
-/**
- * Find an unoccupied position near the viewport center.
- * Uses a spiral scan to find the first non-colliding location.
- */
+export function collides(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  occupied: Array<{ x: number; y: number; w: number; h: number }>,
+  padding = 40
+) {
+  for (const rect of occupied) {
+    if (
+      x < rect.x + rect.w + padding &&
+      x + w + padding > rect.x &&
+      y < rect.y + rect.h + padding &&
+      y + h + padding > rect.y
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 export function findOpenPosition(
-  ctx: CanvasContext,
+  ctx: ReturnType<typeof readCanvasContext>,
   width: number,
   height: number,
-  padding = 30
-): { x: number; y: number } {
-  const { viewportCenter, occupiedRects } = ctx
+  padding = 40
+) {
+  let r = 0
+  let angle = 0
+  const cx = ctx.viewportCenter.x - width / 2
+  const cy = ctx.viewportCenter.y - height / 2
 
-  function collides(x: number, y: number): boolean {
-    for (const r of occupiedRects) {
-      if (
-        x < r.x + r.w + padding &&
-        x + width + padding > r.x &&
-        y < r.y + r.h + padding &&
-        y + height + padding > r.y
-      ) {
-        return true
-      }
+  while (r < 5000) {
+    const x = cx + r * Math.cos(angle)
+    const y = cy + r * Math.sin(angle)
+    if (!collides(x, y, width, height, ctx.occupiedRects, padding)) {
+      return { x, y }
     }
-    return false
-  }
-
-  // Try center first
-  const cx = viewportCenter.x - width / 2
-  const cy = viewportCenter.y - height / 2
-  if (!collides(cx, cy)) return { x: cx, y: cy }
-
-  // Spiral outward from center
-  const stepX = width + padding
-  const stepY = height + padding
-
-  for (let ring = 1; ring <= 8; ring++) {
-    for (let dx = -ring; dx <= ring; dx++) {
-      for (let dy = -ring; dy <= ring; dy++) {
-        if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue // Only check perimeter of ring
-        const testX = cx + dx * stepX
-        const testY = cy + dy * stepY
-        if (!collides(testX, testY)) return { x: testX, y: testY }
-      }
+    angle += Math.PI / 4
+    if (angle >= Math.PI * 2) {
+      angle = 0
+      r += 100
     }
   }
-
-  // Fallback: place below all existing elements
-  let maxY = viewportCenter.y
-  for (const r of occupiedRects) {
-    maxY = Math.max(maxY, r.y + r.h)
-  }
-  return { x: cx, y: maxY + padding }
+  return { x: cx, y: cy }
 }
 
-/**
- * Find a position for stacking multiple items vertically
- * (e.g. when adding a multi-block AI response)
- */
 export function findStackPosition(
-  ctx: CanvasContext,
+  ctx: ReturnType<typeof readCanvasContext>,
   items: Array<{ width: number; height: number }>,
-  gap = 20
+  gap = 30
 ): Array<{ x: number; y: number }> {
-  // Total height needed
-  const totalHeight = items.reduce((sum, item) => sum + item.height + gap, -gap)
+  if (items.length === 0) return []
+  
+  const totalHeight = items.reduce((sum, item) => sum + item.height + gap, 0) - gap
   const maxWidth = Math.max(...items.map((i) => i.width))
-
-  // Find open area for the stack
-  const origin = findOpenPosition(ctx, maxWidth, totalHeight, 40)
-
-  let currentY = origin.y
-  return items.map((item) => {
-    const pos = { x: origin.x, y: currentY }
+  
+  const startPos = findOpenPosition(ctx, maxWidth, totalHeight)
+  const positions: Array<{ x: number; y: number }> = []
+  
+  let currentY = startPos.y
+  for (const item of items) {
+    positions.push({ x: startPos.x, y: currentY })
     currentY += item.height + gap
-    return pos
+  }
+  
+  return positions
+}
+
+export function hexToRgb(hex: string) {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return result
+    ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      }
+    : { r: 0, g: 0, b: 0 }
+}
+
+export function luminance(hex: string) {
+  const rgb = hexToRgb(hex)
+  const a = [rgb.r, rgb.g, rgb.b].map((v) => {
+    v /= 255
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
   })
+  return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722
+}
+
+export function contrastTextColor(hex: string) {
+  return luminance(hex) > 0.4 ? "#111827" : "#f3f4f6"
 }

@@ -1,205 +1,244 @@
 # === FILE: backend/app/llm/router.py ===
 """
-LLM Router — dual provider with automatic failover.
-Fast tasks → Groq primary | Complex tasks → Gemini primary
+LLM Router — selects provider and handles structured calls.
+All LLM interactions go through here.
 """
 
+from __future__ import annotations
+import json
+import re
+import logging
+from typing import Optional
+
 from app.config import settings
-from app.llm.google_provider import google_json_call, google_chat_call
-from app.llm.groq_provider import groq_json_call, groq_chat_call
-from app.llm import prompts
 from app.models.schemas import ProcessedCapture, EdgeClassification
 from app.db.supabase import db
-import logging
 
-logger = logging.getLogger("mnemos.llm_router")
-
-
-def _has_groq() -> bool:
-    return bool(settings.groq_api_key)
+logger = logging.getLogger("mnemos.llm.router")
 
 
-def _looks_like_google_model(model: str | None) -> bool:
-    return (model or "").lower().startswith(("gemini", "models/gemini"))
+async def _runtime_models(user_id: str = None) -> tuple[str, str]:
+    """Get user's preferred models, or defaults."""
+    primary = settings.gemini_model
+    secondary = settings.groq_model
+    if user_id:
+        try:
+            user_settings = await db.get_settings(user_id)
+            if user_settings:
+                primary = user_settings.get("model") or primary
+                secondary = user_settings.get("groq_model") or secondary
+        except Exception:
+            pass
+    return primary, secondary
 
 
-def _looks_like_groq_model(model: str | None) -> bool:
+def _is_groq_model(model: str) -> bool:
     m = (model or "").lower()
     return any(t in m for t in ["llama", "mixtral", "qwen", "deepseek", "gemma"])
 
 
-async def _runtime_models(user_id: str | None = None) -> tuple[str, str]:
-    primary = settings.gemini_model
-    fast = settings.groq_model
+async def chat(system: str, messages: list[dict], user_id: str = None) -> str:
+    """General chat — tries primary, falls back to secondary."""
+    primary, secondary = await _runtime_models(user_id)
     try:
-        stored = await db.get_settings(user_id=user_id)
-        if isinstance(stored, dict):
-            if isinstance(stored.get("model"), str) and stored["model"].strip():
-                primary = stored["model"].strip()
-            if isinstance(stored.get("groq_model"), str) and stored["groq_model"].strip():
-                fast = stored["groq_model"].strip()
-    except Exception:
-        pass
-    return primary, fast
-
-
-# ── Fast tasks → Groq primary ──
-
-async def process_capture(text: str, user_id: str | None = None) -> ProcessedCapture:
-    prompt = prompts.PROCESS_PROMPT.format(text=text[:3000])
-    _, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _has_groq():
-            result = await groq_json_call(prompt, model=fast_model)
+        if _is_groq_model(primary) and settings.groq_api_key:
+            from app.llm.groq_provider import groq_chat_call
+            return await groq_chat_call(system, messages, model=primary)
         else:
-            result = await google_json_call(prompt)
+            from app.llm.google_provider import google_chat_call
+            return await google_chat_call(system, messages, model=primary)
     except Exception as e:
-        logger.warning(f"Primary LLM failed for process_capture: {e}")
-        result = await google_json_call(prompt)
-    return ProcessedCapture.model_validate(result)
-
-
-async def classify_edge(
-    title_a: str, content_a: str, title_b: str, content_b: str, user_id: str | None = None
-) -> EdgeClassification:
-    prompt = prompts.EDGE_CLASSIFICATION_PROMPT.format(
-        title_a=title_a, content_a=content_a[:1000],
-        title_b=title_b, content_b=content_b[:1000],
-    )
-    _, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _has_groq():
-            result = await groq_json_call(prompt, model=fast_model)
-        else:
-            result = await google_json_call(prompt)
-    except Exception as e:
-        logger.warning(f"Primary LLM failed for classify_edge: {e}")
-        result = await google_json_call(prompt)
-    return EdgeClassification.model_validate(result)
-
-
-async def route_to_page(
-    title: str, tags: list, content: str, source_url: str,
-    pages_info: str, user_id: str | None = None,
-) -> dict:
-    prompt = prompts.PAGE_ROUTING_PROMPT.format(
-        title=title or "Untitled",
-        tags=", ".join(tags) if tags else "none",
-        content=content[:1500],
-        source_url=source_url or "none",
-        pages_info=pages_info,
-    )
-    _, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _has_groq():
-            return await groq_json_call(prompt, model=fast_model)
-        return await google_json_call(prompt)
-    except Exception as e:
-        logger.warning(f"Primary LLM failed for route_to_page: {e}")
-        return await google_json_call(prompt)
-
-
-async def name_cluster(notes_info: str, user_id: str | None = None) -> dict:
-    prompt = prompts.CLUSTER_NAMING_PROMPT.format(notes_info=notes_info)
-    _, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _has_groq():
-            return await groq_json_call(prompt, model=fast_model)
-        return await google_json_call(prompt)
-    except Exception as e:
-        logger.warning(f"Primary LLM failed for name_cluster: {e}")
-        return await google_json_call(prompt)
-
-
-# ── Complex tasks → Google primary ──
-
-async def chat(
-    question: str, context: str, history: list,
-    page_context: str = None, user_id: str | None = None,
-) -> str:
-    system = prompts.CHAT_SYSTEM
-    if page_context:
-        system += f"\n\nUser is viewing the '{page_context}' page. Prioritize notes from this page."
-
-    messages = []
-    for msg in (history or [])[-10:]:
-        messages.append({"role": msg.get("role", "user"), "content": msg["content"]})
-    messages.append({
-        "role": "user",
-        "content": f"Context from notes:\n{context}\n\nQuestion: {question}",
-    })
-
-    primary_model, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _looks_like_groq_model(primary_model) and _has_groq():
-            return await groq_chat_call(system, messages, model=primary_model)
-        return await google_chat_call(system, messages, model=primary_model if _looks_like_google_model(primary_model) else None)
-    except Exception as e:
-        logger.warning(f"Primary chat failed: {e}")
-        if _has_groq():
-            return await groq_chat_call(system, messages, model=fast_model)
-        raise
-
-
-async def generate_follow_ups(question: str, answer: str, user_id: str | None = None) -> list[str]:
-    prompt = prompts.FOLLOW_UP_PROMPT.format(question=question, answer=answer[:1500])
-    primary_model, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _looks_like_groq_model(primary_model) and _has_groq():
-            result = await groq_json_call(prompt, model=primary_model)
-        else:
-            result = await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
-        return result if isinstance(result, list) else []
-    except Exception:
+        logger.warning(f"Primary LLM ({primary}) failed: {e}, trying secondary")
         try:
-            if _has_groq():
-                result = await groq_json_call(prompt, model=fast_model)
-                return result if isinstance(result, list) else []
+            if _is_groq_model(secondary) and settings.groq_api_key:
+                from app.llm.groq_provider import groq_chat_call
+                return await groq_chat_call(system, messages, model=secondary)
+            else:
+                from app.llm.google_provider import google_chat_call
+                return await google_chat_call(system, messages, model=secondary)
+        except Exception as e2:
+            logger.error(f"Both LLMs failed: primary={e}, secondary={e2}")
+            raise
+
+
+async def process_capture(raw_text: str, user_id: str = None) -> ProcessedCapture:
+    """Extract structured data from raw captured text."""
+    system = """You are a note processor. Extract structured information from raw text.
+Return valid JSON with exactly these fields:
+{
+  "title": "short descriptive title (max 80 chars)",
+  "summary": "2-3 sentence summary of key points",
+  "tags": ["lowercase", "relevant", "tags"],
+  "tasks": ["any action items or todos found"],
+  "entities": ["people", "places", "concepts", "technologies mentioned"],
+  "content_type": "note|code|url|thought|question|clip"
+}"""
+
+    prompt = f"Process this text:\n\n{raw_text[:4000]}"
+
+    primary, secondary = await _runtime_models(user_id)
+    response = None
+
+    try:
+        from app.llm.google_provider import google_structured_call
+        response = await google_structured_call(system, prompt, response_schema=True, model=primary)
+    except Exception as e:
+        logger.warning(f"Structured call failed: {e}")
+        try:
+            response = await chat(system, [{"role": "user", "content": prompt}], user_id=user_id)
         except Exception:
+            return ProcessedCapture(
+                title=raw_text[:60], summary=raw_text[:280],
+                tags=[], tasks=[], entities=[], content_type="note",
+            )
+
+    return _parse_processed_capture(response, raw_text)
+
+
+async def classify_edge(title_a: str, content_a: str, title_b: str, content_b: str,
+                        user_id: str = None) -> EdgeClassification:
+    """Classify the relationship between two notes."""
+    system = """Classify the relationship between two notes.
+Return JSON: {"edge_type": "related|depends_on|extends|contradicts|summarizes|example_of", "label": "brief description", "confidence": 0.0-1.0}"""
+
+    prompt = f"""Note A: "{title_a}"
+{content_a[:500]}
+
+Note B: "{title_b}"
+{content_b[:500]}
+
+What is the relationship from A to B?"""
+
+    try:
+        response = await chat(system, [{"role": "user", "content": prompt}], user_id=user_id)
+        data = _extract_json(response)
+        return EdgeClassification(
+            edge_type=data.get("edge_type", "related"),
+            label=data.get("label"),
+            confidence=float(data.get("confidence", 0.5)),
+        )
+    except Exception:
+        return EdgeClassification(edge_type="related", label=None, confidence=0.3)
+
+
+async def route_to_page(title: str, tags: list[str], content: str,
+                        source_url: str, pages_info: str, user_id: str = None) -> dict:
+    """Decide which page a note belongs to."""
+    system = """You are a page router. Given a note and existing pages, decide which page it belongs to.
+Return JSON: {"page": "PageName or NEW:NewPageName", "confidence": 0.0-1.0, "reason": "why"}"""
+
+    prompt = f"""Note title: {title}
+Tags: {', '.join(tags)}
+Content preview: {content[:300]}
+Source: {source_url or 'manual'}
+
+Existing pages:
+{pages_info}
+
+Which page should this note go to? If none fit well, suggest NEW:PageName."""
+
+    try:
+        response = await chat(system, [{"role": "user", "content": prompt}], user_id=user_id)
+        return _extract_json(response)
+    except Exception:
+        return {"page": "Uncategorized", "confidence": 0.0, "reason": "LLM failed"}
+
+
+async def generate_diagram(topic: str, user_id: str = None) -> dict:
+    """Generate diagram topology from topic description."""
+    system = """You are a diagram generator. Create a visual diagram topology.
+Return JSON:
+{
+  "layout_type": "flow|mindmap|list|comparison|timeline",
+  "elements": [
+    {"id": "unique_id", "label": "text", "type": "box", "style": "default|accent|muted|warning|success", "width": 200, "height": 60}
+  ],
+  "connections": [
+    {"from": "id1", "to": "id2", "label": "optional", "style": "solid|dashed|dotted"}
+  ]
+}
+Create 4-8 elements. Use meaningful IDs. Keep labels concise."""
+
+    prompt = f"Create a diagram about: {topic}"
+
+    try:
+        from app.llm.google_provider import google_structured_call
+        response = await google_structured_call(system, prompt, response_schema=True)
+        topology = _extract_json(response)
+        # Validate minimum structure
+        if not topology.get("elements"):
+            topology["elements"] = [{"id": "node1", "label": topic, "type": "box", "style": "accent", "width": 200, "height": 60}]
+        if not topology.get("layout_type"):
+            topology["layout_type"] = "flow"
+        return topology
+    except Exception as e:
+        logger.error(f"Diagram generation failed: {e}")
+        return {
+            "layout_type": "flow",
+            "elements": [
+                {"id": "node1", "label": topic, "type": "box", "style": "accent", "width": 200, "height": 60},
+                {"id": "node2", "label": "Details", "type": "box", "style": "default", "width": 200, "height": 60},
+            ],
+            "connections": [{"from": "node1", "to": "node2", "style": "solid"}],
+        }
+
+
+# ── JSON parsing helpers ──
+
+def _extract_json(text: str) -> dict:
+    """Extract JSON from LLM response, handling markdown code blocks."""
+    if not text:
+        return {}
+    # Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Try extracting from code blocks
+    code_block = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if code_block:
+        try:
+            return json.loads(code_block.group(1).strip())
+        except json.JSONDecodeError:
             pass
-        return []
+    # Try finding JSON object
+    brace_match = re.search(r"\{.*\}", text, re.DOTALL)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    logger.warning(f"Could not extract JSON from: {text[:200]}")
+    return {}
 
 
-async def analyze_gaps(topic: str, notes_info: str, user_id: str | None = None) -> dict:
-    prompt = prompts.GAP_ANALYSIS_PROMPT.format(topic=topic, notes_info=notes_info)
-    primary_model, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _looks_like_groq_model(primary_model) and _has_groq():
-            return await groq_json_call(prompt, model=primary_model)
-        return await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
-    except Exception as e:
-        logger.warning(f"Gap analysis primary failed: {e}")
-        if _has_groq():
-            return await groq_json_call(prompt, model=fast_model)
-        raise
+def _parse_processed_capture(response: str, raw_text: str) -> ProcessedCapture:
+    """Parse LLM response into ProcessedCapture, with fallbacks."""
+    data = _extract_json(response) if isinstance(response, str) else (response or {})
 
+    title = str(data.get("title", ""))[:100] or raw_text[:60]
+    summary = str(data.get("summary", ""))[:500] or raw_text[:280]
+    tags = data.get("tags", [])
+    if isinstance(tags, list):
+        tags = [str(t).lower().strip() for t in tags if t][:12]
+    else:
+        tags = []
+    tasks = data.get("tasks", [])
+    if isinstance(tasks, list):
+        tasks = [str(t).strip() for t in tasks if t][:12]
+    else:
+        tasks = []
+    entities = data.get("entities", [])
+    if isinstance(entities, list):
+        entities = [str(e).strip() for e in entities if e][:12]
+    else:
+        entities = []
 
-async def generate_reading_path(topic: str, notes_info: str, user_id: str | None = None) -> list:
-    prompt = prompts.READING_PATH_PROMPT.format(topic=topic, notes_info=notes_info)
-    primary_model, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _looks_like_groq_model(primary_model) and _has_groq():
-            result = await groq_json_call(prompt, model=primary_model)
-        else:
-            result = await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
-        return result if isinstance(result, list) else []
-    except Exception as e:
-        logger.warning(f"Reading path primary failed: {e}")
-        if _has_groq():
-            result = await groq_json_call(prompt, model=fast_model)
-            return result if isinstance(result, list) else []
-        raise
+    content_type = str(data.get("content_type", "note"))
+    if content_type not in ("note", "code", "url", "thought", "question", "clip"):
+        content_type = "note"
 
-
-async def generate_page_summary(page_name: str, notes_info: str, user_id: str | None = None) -> dict:
-    prompt = prompts.PAGE_SUMMARY_PROMPT.format(page_name=page_name, notes_info=notes_info)
-    primary_model, fast_model = await _runtime_models(user_id=user_id)
-    try:
-        if _looks_like_groq_model(primary_model) and _has_groq():
-            return await groq_json_call(prompt, model=primary_model)
-        return await google_json_call(prompt, model=primary_model if _looks_like_google_model(primary_model) else None)
-    except Exception as e:
-        logger.warning(f"Page summary primary failed: {e}")
-        if _has_groq():
-            return await groq_json_call(prompt, model=fast_model)
-        raise
+    return ProcessedCapture(
+        title=title, summary=summary, tags=tags,
+        tasks=tasks, entities=entities, content_type=content_type,
+    )

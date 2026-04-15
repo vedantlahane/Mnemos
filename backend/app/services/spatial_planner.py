@@ -1,7 +1,7 @@
 # === FILE: backend/app/services/spatial_planner.py ===
 """
-Algorithmic spatial placement for the infinite canvas.
-No LLM calls — pure geometry + semantic proximity.
+Spatial planner — pure geometry + semantic proximity.
+No LLM calls. Uses visual context for smarter decisions.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from typing import Optional
 import numpy as np
 
 from app.models.canvas_ops import Rect, Viewport, Placement
+from app.models.visual import VisualContext, LayoutPattern
 from app.config import settings
 from app.db.supabase import db
 
@@ -24,9 +25,6 @@ GAP = settings.min_element_gap
 
 
 class SpatialPlanner:
-    """Deterministic, algorithmic canvas placement engine."""
-
-    # ── Public API ──
 
     async def find_placement(
         self,
@@ -36,14 +34,32 @@ class SpatialPlanner:
         viewport: Optional[Viewport] = None,
         near_topic: Optional[str] = None,
         strategy: str = "auto",
+        visual_context: Optional[VisualContext] = None,
     ) -> Placement:
         occupied = await self._get_occupied(page_id)
 
-        if strategy == "auto":
-            strategy = self._pick_strategy(note, viewport, near_topic, occupied)
+        # Load visual context if not provided
+        if not visual_context:
+            try:
+                ctx_data = await db.get_visual_context(page_id)
+                if ctx_data:
+                    visual_context = VisualContext(page_id=page_id, **{
+                        k: v for k, v in ctx_data.items()
+                        if k in VisualContext.model_fields and k != "page_id"
+                    })
+            except Exception:
+                pass
 
-        if strategy == "cluster" and note:
-            result = await self._place_near_cluster(page_id, note, size, occupied)
+        if strategy == "auto":
+            strategy = self._pick_strategy(note, viewport, near_topic, occupied, visual_context)
+
+        if strategy == "pattern_aware" and visual_context:
+            result = self._place_by_pattern(visual_context, size, occupied)
+            if result:
+                return result
+
+        if strategy == "region" and note:
+            result = await self._place_near_region(page_id, note, size, occupied)
             if result:
                 return result
 
@@ -59,241 +75,206 @@ class SpatialPlanner:
 
         return self._place_sequential(size, occupied)
 
-    async def compute_cluster_layout(
-        self, page_id: str, note_ids: list[str], anchor: tuple[float, float] | None = None
-    ) -> list[dict]:
-        """Tight grid layout for a set of notes."""
-        if not note_ids:
-            return []
-        notes = []
-        for nid in note_ids:
-            n = await db.get_note(nid)
-            if n:
-                notes.append(n)
-        if not notes:
-            return []
-
-        if anchor is None:
-            xs = [n.get("canvas_x", 0) for n in notes if n.get("canvas_x") is not None]
-            ys = [n.get("canvas_y", 0) for n in notes if n.get("canvas_y") is not None]
-            if xs and ys:
-                anchor = (float(np.mean(xs)), float(np.mean(ys)))
-            else:
-                anchor = (400.0, 400.0)
-
-        cols = max(1, int(math.ceil(math.sqrt(len(notes)))))
-        positions = []
-        for i, note in enumerate(notes):
-            col = i % cols
-            row = i // cols
-            x = anchor[0] + col * SX
-            y = anchor[1] + row * SY
-            positions.append({
-                "note_id": note["id"],
-                "x": x,
-                "y": y,
-            })
-        return positions
-
     async def compute_full_layout(self, page_id: str) -> list[dict]:
-        """
-        Full page layout using embedding proximity.
-        Groups similar notes together, arranges clusters in a grid-of-grids.
-        Falls back to simple grid if <3 notes or no embeddings.
-        """
         notes = await db.get_notes_with_embeddings(page_id)
         all_notes = await db.get_notes_for_page(page_id)
-
-        # Notes without embeddings get grid fallback
         embedded_ids = {n["id"] for n in notes}
         unembedded = [n for n in all_notes if n["id"] not in embedded_ids]
 
         if len(notes) < 3:
             return self._grid_layout(all_notes)
 
-        # Cluster by embedding similarity
         clusters = self._cluster_by_embedding(notes)
-
         positions = []
-        cluster_anchor_x = 100.0
-        cluster_anchor_y = 100.0
-        max_row_height = 0.0
-        clusters_per_row = max(1, int(math.ceil(math.sqrt(len(clusters)))))
+        anchor_x = 100.0
+        anchor_y = 100.0
+        max_row_h = 0.0
+        cols_per_row = max(1, int(math.ceil(math.sqrt(len(clusters)))))
 
         for ci, cluster_notes in enumerate(clusters):
             cols = max(1, int(math.ceil(math.sqrt(len(cluster_notes)))))
             for ni, note in enumerate(cluster_notes):
                 col = ni % cols
                 row = ni // cols
-                x = cluster_anchor_x + col * SX
-                y = cluster_anchor_y + row * SY
-                positions.append({"note_id": note["id"], "x": x, "y": y})
-                max_row_height = max(max_row_height, (row + 1) * SY)
+                positions.append({"note_id": note["id"], "x": anchor_x + col * SX, "y": anchor_y + row * SY})
+                max_row_h = max(max_row_h, (row + 1) * SY)
+            anchor_x += min(len(cluster_notes), cols) * SX + settings.cluster_padding * 2
+            if (ci + 1) % cols_per_row == 0:
+                anchor_x = 100.0
+                anchor_y += max_row_h + settings.cluster_padding * 2
+                max_row_h = 0.0
 
-            cluster_width = min(len(cluster_notes), cols) * SX
-            cluster_anchor_x += cluster_width + settings.cluster_padding * 2
-
-            if (ci + 1) % clusters_per_row == 0:
-                cluster_anchor_x = 100.0
-                cluster_anchor_y += max_row_height + settings.cluster_padding * 2
-                max_row_height = 0.0
-
-        # Append unembedded notes at the end
         if unembedded:
-            if positions:
-                last_y = max(p["y"] for p in positions) + SY + settings.cluster_padding
-            else:
-                last_y = 100.0
+            last_y = max((p["y"] for p in positions), default=100.0) + SY + settings.cluster_padding
             for i, note in enumerate(unembedded):
-                col = i % 3
-                row = i // 3
-                positions.append({
-                    "note_id": note["id"],
-                    "x": 100.0 + col * SX,
-                    "y": last_y + row * SY,
-                })
+                positions.append({"note_id": note["id"], "x": 100.0 + (i % 3) * SX, "y": last_y + (i // 3) * SY})
 
         return positions
 
-    def get_occupied_regions(self, notes: list[dict], elements: list[dict] = None) -> list[Rect]:
-        """Build rectangles from notes and canvas elements using REAL measured bounds."""
-        from app.services.element_layout import measure_element
+    async def resolve_overlaps(self, page_id: str) -> list[dict]:
+        registry = await db.get_element_registry(page_id)
+        positioned = [e for e in registry if e.get("cached_x") is not None and e.get("cached_y") is not None]
+        if len(positioned) < 2:
+            return []
 
-        rects: list[Rect] = []
+        coords = np.array([[float(e["cached_x"]), float(e["cached_y"])] for e in positioned])
+        moves = []
+        for _ in range(50):
+            moved = False
+            for i in range(len(coords)):
+                for j in range(i + 1, len(coords)):
+                    dx = coords[j, 0] - coords[i, 0]
+                    dy = coords[j, 1] - coords[i, 1]
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    if 0 < dist < GAP:
+                        push = (GAP - dist) / 2.0
+                        nx, ny = dx / dist, dy / dist
+                        coords[i, 0] -= nx * push
+                        coords[i, 1] -= ny * push
+                        coords[j, 0] += nx * push
+                        coords[j, 1] += ny * push
+                        moved = True
+            if not moved:
+                break
 
-        for n in notes:
-            cx = n.get("canvas_x")
-            cy = n.get("canvas_y")
-            if cx is not None and cy is not None:
-                # Use stored dimensions if available, otherwise default card size
-                w = float(n.get("canvas_width") or CW)
-                h = float(n.get("canvas_height") or CH)
-                rects.append(Rect(x=float(cx), y=float(cy), w=w, h=h))
-
-        for el in (elements or []):
-            has_position = any(
-                el.get(key) is not None for key in ("x", "y", "position_x", "position_y")
-            )
-            if not has_position:
-                continue
-            measured = measure_element(el)
-            rects.append(Rect(
-                x=measured.x,
-                y=measured.y,
-                w=measured.width,
-                h=measured.height,
-            ))
-
-        return rects
+        for i, entry in enumerate(positioned):
+            old_x, old_y = float(entry["cached_x"]), float(entry["cached_y"])
+            new_x, new_y = float(coords[i, 0]), float(coords[i, 1])
+            if abs(new_x - old_x) > 1 or abs(new_y - old_y) > 1:
+                moves.append({
+                    "element_id": entry.get("element_id"),
+                    "note_id": entry.get("note_id"),
+                    "x": new_x, "y": new_y,
+                })
+        return moves
 
     # ── Private ──
 
     async def _get_occupied(self, page_id: str) -> list[Rect]:
-        notes = await db.get_notes_for_page(page_id)
-        db_elements = await db.list_elements(page_id)
-
-        page = await db.get_page(page_id)
-        scene_elements = []
-        if page and isinstance(page.get("canvas_data"), dict):
-            scene_elements = page["canvas_data"].get("elements") or []
-
-        return self.get_occupied_regions(notes, [*db_elements, *scene_elements])
+        registry = await db.get_element_registry(page_id)
+        rects = []
+        for e in registry:
+            if e.get("cached_x") is not None and e.get("cached_y") is not None:
+                rects.append(Rect(
+                    x=float(e["cached_x"]), y=float(e["cached_y"]),
+                    w=float(e.get("cached_width") or CW), h=float(e.get("cached_height") or CH),
+                ))
+        return rects
 
     def _pick_strategy(
-        self,
-        note: dict | None,
-        viewport: Viewport | None,
-        near_topic: str | None,
-        occupied: list[Rect],
+        self, note: dict | None, viewport: Viewport | None,
+        near_topic: str | None, occupied: list[Rect],
+        visual_context: VisualContext | None,
     ) -> str:
+        if visual_context and visual_context.layout_pattern != LayoutPattern.FREEFORM:
+            return "pattern_aware"
         if near_topic:
-            return "cluster"
-        if note and note.get("embedding"):
+            return "region"
+        if note and note.get("id"):
             return "related"
         if viewport:
             return "viewport"
         return "sequential"
 
-    async def _place_near_cluster(
-        self, page_id: str, note: dict, size: tuple[float, float], occupied: list[Rect]
-    ) -> Placement | None:
-        """Find the cluster this note belongs to and place at its edge."""
-        if not note.get("embedding"):
+    def _place_by_pattern(self, ctx: VisualContext, size: tuple[float, float], occupied: list[Rect]) -> Placement | None:
+        """Place according to detected layout pattern."""
+        if not occupied:
             return None
 
-        note_emb = np.array(note["embedding"])
+        bounds = ctx.bounds
+        if ctx.layout_pattern == LayoutPattern.GRID:
+            # Continue the grid: find next open slot in existing grid
+            last_x = max(r.right for r in occupied)
+            last_y = max(r.bottom for r in occupied)
+            # Try continuing current row
+            candidate = Rect(x=last_x + GAP, y=occupied[-1].y if occupied else 100, w=size[0], h=size[1])
+            if not any(candidate.overlaps(o, gap=GAP) for o in occupied):
+                return Placement(x=candidate.x, y=candidate.y, strategy="pattern_grid", reason="Continuing grid layout")
+            # New row
+            return Placement(x=bounds.get("minX", 100), y=last_y + GAP, strategy="pattern_grid", reason="New grid row")
+
+        if ctx.layout_pattern == LayoutPattern.TIMELINE:
+            # Add to right end of timeline
+            max_x = max(r.right for r in occupied)
+            avg_y = sum(r.center_y for r in occupied) / len(occupied)
+            return Placement(x=max_x + GAP, y=avg_y - size[1] / 2, strategy="pattern_timeline", reason="Extended timeline")
+
+        if ctx.layout_pattern == LayoutPattern.FLOW:
+            # Add below
+            max_y = max(r.bottom for r in occupied)
+            avg_x = sum(r.center_x for r in occupied) / len(occupied)
+            return Placement(x=avg_x - size[0] / 2, y=max_y + GAP, strategy="pattern_flow", reason="Continued flow")
+
+        return None
+
+    async def _place_near_region(self, page_id: str, note: dict, size: tuple[float, float], occupied: list[Rect]) -> Placement | None:
+        embedding = await db.get_embedding(note["id"]) if note.get("id") else None
+        if not embedding:
+            return None
+
+        note_emb = np.array(embedding)
         note_norm = np.linalg.norm(note_emb)
         if note_norm == 0:
             return None
 
-        clusters = await db.list_clusters(page_id=page_id)
-        if not clusters:
+        regions = await db.list_regions(page_id)
+        if not regions:
             return None
 
-        # Find best cluster by checking member notes
-        best_cluster = None
+        best_region = None
         best_sim = -1.0
-
-        for cluster in clusters:
-            cluster_notes = await db.list_notes(page=1, limit=50, page_id=page_id)
-            members = [n for n in cluster_notes.get("notes", []) if n.get("cluster_id") == cluster["id"] and n.get("embedding")]
-            if not members:
-                continue
+        for region in regions:
+            members = await db.get_elements_in_region(region["id"])
             for m in members:
-                m_emb = np.array(m["embedding"])
-                m_norm = np.linalg.norm(m_emb)
+                if not m.get("note_id"):
+                    continue
+                m_emb = await db.get_embedding(m["note_id"])
+                if not m_emb:
+                    continue
+                m_arr = np.array(m_emb)
+                m_norm = np.linalg.norm(m_arr)
                 if m_norm == 0:
                     continue
-                sim = float(np.dot(note_emb, m_emb) / (note_norm * m_norm))
+                sim = float(np.dot(note_emb, m_arr) / (note_norm * m_norm))
                 if sim > best_sim:
                     best_sim = sim
-                    best_cluster = cluster
+                    best_region = region
 
-        if not best_cluster or best_sim < settings.similarity_threshold:
+        if not best_region or best_sim < settings.similarity_threshold:
             return None
 
-        # Get cluster bounds
-        cluster_notes_result = await db.list_notes(page=1, limit=100, page_id=page_id)
-        cluster_members = [
-            n for n in cluster_notes_result.get("notes", [])
-            if n.get("cluster_id") == best_cluster["id"]
-            and n.get("canvas_x") is not None
+        members = await db.get_elements_in_region(best_region["id"])
+        member_rects = [
+            Rect(x=float(m["cached_x"]), y=float(m["cached_y"]),
+                 w=float(m.get("cached_width") or CW), h=float(m.get("cached_height") or CH))
+            for m in members if m.get("cached_x") is not None
         ]
-        if not cluster_members:
-            cx = best_cluster.get("center_x", 400)
-            cy = best_cluster.get("center_y", 400)
-            spot = self._find_free_spot(cx, cy, size, occupied)
-            return Placement(x=spot[0], y=spot[1], cluster_id=best_cluster["id"], strategy="cluster", reason=f"New member of '{best_cluster['label']}'")
+        if not member_rects:
+            return Placement(x=400, y=400, region_id=best_region["id"], strategy="region", reason=f"Region '{best_region.get('label')}'")
 
-        cluster_rect = self._bounding_rect(cluster_members)
-        spot = self._place_at_rect_edge(cluster_rect, size, occupied)
-        return Placement(
-            x=spot[0], y=spot[1],
-            cluster_id=best_cluster["id"],
-            strategy="cluster",
-            reason=f"Placed at edge of '{best_cluster['label']}' cluster",
-        )
+        bounds = self._bounding_rect_from_rects(member_rects)
+        spot = self._place_at_rect_edge(bounds, size, occupied)
+        return Placement(x=spot[0], y=spot[1], region_id=best_region["id"], strategy="region",
+                         reason=f"At edge of '{best_region.get('label')}'")
 
-    async def _place_near_related(
-        self, page_id: str, note: dict, size: tuple[float, float], occupied: list[Rect]
-    ) -> Placement | None:
-        """Place near the most similar existing note."""
-        if not note.get("embedding"):
+    async def _place_near_related(self, page_id: str, note: dict, size: tuple[float, float], occupied: list[Rect]) -> Placement | None:
+        embedding = await db.get_embedding(note["id"]) if note.get("id") else None
+        if not embedding:
             return None
 
-        existing = await db.get_notes_with_embeddings(page_id)
-        existing = [n for n in existing if n["id"] != note.get("id") and n.get("canvas_x") is not None]
-        if not existing:
+        notes_with_emb = await db.get_notes_with_embeddings(page_id)
+        notes_with_emb = [n for n in notes_with_emb if n["id"] != note.get("id")]
+        if not notes_with_emb:
             return None
 
-        note_emb = np.array(note["embedding"])
+        note_emb = np.array(embedding)
         note_norm = np.linalg.norm(note_emb)
         if note_norm == 0:
             return None
 
         best_sim = -1.0
         best_note = None
-        for ex in existing:
+        for ex in notes_with_emb:
             ex_emb = np.array(ex["embedding"])
             ex_norm = np.linalg.norm(ex_emb)
             if ex_norm == 0:
@@ -306,90 +287,49 @@ class SpatialPlanner:
         if not best_note:
             return None
 
-        base_x = float(best_note["canvas_x"])
-        base_y = float(best_note["canvas_y"])
-        spot = self._find_free_spot(base_x + SX, base_y, size, occupied)
+        # Get position from registry
+        pos = await db.get_note_position(page_id, best_note["id"])
+        if not pos or pos.get("x") is None:
+            return None
 
-        return Placement(
-            x=spot[0], y=spot[1],
-            cluster_id=best_note.get("cluster_id"),
-            strategy="related",
-            reason=f"Near '{best_note.get('title', 'Untitled')}' ({best_sim:.0%} similar)",
-        )
+        spot = self._find_free_spot(float(pos["x"]) + SX, float(pos["y"]), size, occupied)
+        return Placement(x=spot[0], y=spot[1], strategy="related",
+                         reason=f"Near '{best_note.get('title', 'Untitled')}' ({best_sim:.0%})")
 
-    def _place_in_viewport(
-        self, viewport: Viewport, size: tuple[float, float], occupied: list[Rect]
-    ) -> Placement | None:
-        """Find free space within the user's current view."""
+    def _place_in_viewport(self, viewport: Viewport, size: tuple[float, float], occupied: list[Rect]) -> Placement | None:
         vx = viewport.x / viewport.zoom
         vy = viewport.y / viewport.zoom
         vw = viewport.width / viewport.zoom
         vh = viewport.height / viewport.zoom
-
-        # Scan grid within viewport
-        for dx_pct in [0.5, 0.3, 0.7, 0.2, 0.8, 0.1, 0.9]:
-            for dy_pct in [0.4, 0.3, 0.6, 0.2, 0.7, 0.1, 0.8]:
+        for dx_pct in [0.5, 0.3, 0.7, 0.2, 0.8]:
+            for dy_pct in [0.4, 0.3, 0.6, 0.2, 0.7]:
                 cx = vx + vw * dx_pct
                 cy = vy + vh * dy_pct
                 candidate = Rect(x=cx, y=cy, w=size[0], h=size[1])
                 if not any(candidate.overlaps(occ, gap=GAP) for occ in occupied):
-                    return Placement(
-                        x=cx, y=cy,
-                        strategy="viewport",
-                        reason="Placed in visible area",
-                    )
-
-        # Viewport full — place just outside right edge
-        return Placement(
-            x=vx + vw + GAP,
-            y=vy + vh * 0.3,
-            strategy="viewport_overflow",
-            reason="Viewport full, placed to the right",
-        )
+                    return Placement(x=cx, y=cy, strategy="viewport", reason="In visible area")
+        return Placement(x=vx + vw + GAP, y=vy + vh * 0.3, strategy="viewport_overflow", reason="Viewport full")
 
     def _place_sequential(self, size: tuple[float, float], occupied: list[Rect]) -> Placement:
-        """Place in next available grid slot after all existing elements."""
         if not occupied:
-            return Placement(x=100.0, y=100.0, strategy="sequential", reason="First element on canvas")
-
-        # Find bottom-right extent
+            return Placement(x=100.0, y=100.0, strategy="sequential", reason="First element")
         max_y = max(r.bottom for r in occupied)
-        max_x = max(r.right for r in occupied)
-
-        # Try below last row, aligned left
-        candidates = [
-            (100.0, max_y + GAP),
-            (max_x + GAP, 100.0),
-        ]
-        for cx, cy in candidates:
-            candidate = Rect(x=cx, y=cy, w=size[0], h=size[1])
-            if not any(candidate.overlaps(occ, gap=GAP) for occ in occupied):
-                return Placement(x=cx, y=cy, strategy="sequential", reason="Next available slot")
-
         return Placement(x=100.0, y=max_y + GAP, strategy="sequential", reason="Appended below")
 
-    def _find_free_spot(
-        self, start_x: float, start_y: float,
-        size: tuple[float, float], occupied: list[Rect],
-        max_attempts: int = 36,
-    ) -> tuple[float, float]:
-        """Spiral outward from start position until free spot found."""
+    def _find_free_spot(self, sx: float, sy: float, size: tuple[float, float], occupied: list[Rect], max_attempts: int = 36) -> tuple[float, float]:
         for ring in range(max_attempts):
             distance = GAP + ring * (GAP + size[0] * 0.5)
             steps = max(6, ring * 6)
             for step in range(steps):
                 angle = (2 * math.pi * step) / steps
-                cx = start_x + distance * math.cos(angle)
-                cy = start_y + distance * math.sin(angle)
+                cx = sx + distance * math.cos(angle)
+                cy = sy + distance * math.sin(angle)
                 candidate = Rect(x=cx, y=cy, w=size[0], h=size[1])
                 if not any(candidate.overlaps(occ, gap=GAP) for occ in occupied):
                     return (cx, cy)
-        return (start_x + SX, start_y)
+        return (sx + SX, sy)
 
-    def _place_at_rect_edge(
-        self, bounds: Rect, size: tuple[float, float], occupied: list[Rect]
-    ) -> tuple[float, float]:
-        """Place at the edge of a bounding rectangle (right, bottom, left, top)."""
+    def _place_at_rect_edge(self, bounds: Rect, size: tuple[float, float], occupied: list[Rect]) -> tuple[float, float]:
         candidates = [
             (bounds.right + GAP, bounds.center_y - size[1] / 2),
             (bounds.center_x - size[0] / 2, bounds.bottom + GAP),
@@ -402,43 +342,26 @@ class SpatialPlanner:
                 return (cx, cy)
         return self._find_free_spot(bounds.right + GAP, bounds.center_y, size, occupied)
 
-    def _bounding_rect(self, notes: list[dict]) -> Rect:
-        xs = [float(n["canvas_x"]) for n in notes]
-        ys = [float(n["canvas_y"]) for n in notes]
-        rights = [float(n["canvas_x"]) + float(n.get("canvas_width") or CW) for n in notes]
-        bottoms = [float(n["canvas_y"]) + float(n.get("canvas_height") or CH) for n in notes]
-        min_x = min(xs)
-        min_y = min(ys)
-        max_x = max(rights)
-        max_y = max(bottoms)
+    def _bounding_rect_from_rects(self, rects: list[Rect]) -> Rect:
+        min_x = min(r.x for r in rects)
+        min_y = min(r.y for r in rects)
+        max_x = max(r.right for r in rects)
+        max_y = max(r.bottom for r in rects)
         return Rect(x=min_x, y=min_y, w=max_x - min_x, h=max_y - min_y)
 
     def _grid_layout(self, notes: list[dict]) -> list[dict]:
-        positions = []
-        for i, note in enumerate(notes):
-            col = i % 3
-            row = i // 3
-            positions.append({
-                "note_id": note["id"],
-                "x": 100.0 + col * SX,
-                "y": 100.0 + row * SY,
-            })
-        return positions
+        return [
+            {"note_id": n["id"], "x": 100.0 + (i % 3) * SX, "y": 100.0 + (i // 3) * SY}
+            for i, n in enumerate(notes)
+        ]
 
     def _cluster_by_embedding(self, notes: list[dict], threshold: float = 0.72) -> list[list[dict]]:
-        """Simple greedy clustering by cosine similarity."""
         if not notes:
             return []
-
         assigned = [False] * len(notes)
         clusters: list[list[dict]] = []
-        embeddings = []
-        norms = []
-        for n in notes:
-            emb = np.array(n["embedding"])
-            embeddings.append(emb)
-            norms.append(np.linalg.norm(emb))
-
+        embeddings = [np.array(n["embedding"]) for n in notes]
+        norms = [np.linalg.norm(e) for e in embeddings]
         for i in range(len(notes)):
             if assigned[i] or norms[i] == 0:
                 continue
@@ -452,58 +375,10 @@ class SpatialPlanner:
                     cluster.append(notes[j])
                     assigned[j] = True
             clusters.append(cluster)
-
-        # Add any unassigned
         for i, note in enumerate(notes):
             if not assigned[i]:
                 clusters.append([note])
-
         return clusters
-
-    async def resolve_overlaps(self, page_id: str) -> list[dict]:
-        """Push overlapping elements apart. Returns list of moves."""
-        notes = await db.get_notes_for_page(page_id)
-        positioned = [n for n in notes if n.get("canvas_x") is not None and n.get("canvas_y") is not None]
-        if len(positioned) < 2:
-            return []
-
-        coords = np.array([[float(n["canvas_x"]), float(n["canvas_y"])] for n in positioned])
-        moves = []
-
-        for iteration in range(50):
-            moved = False
-            for i in range(len(coords)):
-                for j in range(i + 1, len(coords)):
-                    dx = coords[j, 0] - coords[i, 0]
-                    dy = coords[j, 1] - coords[i, 1]
-                    dist = math.sqrt(dx * dx + dy * dy)
-                    if dist < GAP and dist > 0:
-                        push = (GAP - dist) / 2.0
-                        nx = dx / dist
-                        ny = dy / dist
-                        coords[i, 0] -= nx * push
-                        coords[i, 1] -= ny * push
-                        coords[j, 0] += nx * push
-                        coords[j, 1] += ny * push
-                        moved = True
-            if not moved:
-                break
-
-        for i, note in enumerate(positioned):
-            old_x = float(note["canvas_x"])
-            old_y = float(note["canvas_y"])
-            new_x = float(coords[i, 0])
-            new_y = float(coords[i, 1])
-            if abs(new_x - old_x) > 1 or abs(new_y - old_y) > 1:
-                moves.append({
-                    "note_id": note["id"],
-                    "x": new_x,
-                    "y": new_y,
-                    "old_x": old_x,
-                    "old_y": old_y,
-                })
-
-        return moves
 
 
 spatial_planner = SpatialPlanner()

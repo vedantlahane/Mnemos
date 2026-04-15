@@ -73,6 +73,7 @@ app.add_middleware(
 
 # ── Mount all routers ──
 from app.routes import (
+    document,
     auth,
     capture,
     chat,
@@ -98,6 +99,7 @@ app.include_router(capture.router, prefix=PREFIX, tags=["Capture"])
 app.include_router(chat.router, prefix=PREFIX, tags=["Chat"])
 app.include_router(canvas_stream.router, prefix=PREFIX, tags=["Canvas Stream"])
 app.include_router(canvas.router, prefix=PREFIX, tags=["Canvas Elements"])
+app.include_router(document.router, prefix=PREFIX, tags=["Document Flow"])
 app.include_router(notes.router, prefix=PREFIX, tags=["Notes"])
 app.include_router(pages.router, prefix=PREFIX, tags=["Pages"])
 app.include_router(edges.router, prefix=PREFIX, tags=["Edges"])

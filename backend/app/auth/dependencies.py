@@ -1,32 +1,25 @@
-from fastapi import Request, HTTPException, Depends
-from typing import Optional
+# === FILE: backend/app/auth/dependencies.py ===
+
+from fastapi import Request, Depends
 from app.config import settings
-from app.auth.jwt_handler import verify_token
 
 
-async def get_current_user_id(request: Request) -> Optional[str]:
-    """Returns user_id if auth enabled and valid token, None if auth disabled.
-    Raises 401 if auth enabled but token is invalid/missing."""
+async def get_optional_user_id(request: Request) -> str | None:
+    """
+    Extract user_id from auth header if auth is enabled.
+    Returns None if auth is disabled or no valid token.
+    """
     if not settings.auth_enabled:
         return None
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        return None
 
     token = auth_header[7:]
-    payload = verify_token(token)
-    if not payload or "sub" not in payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    return payload["sub"]
-
-
-async def get_optional_user_id(request: Request) -> Optional[str]:
-    """Like get_current_user_id but never raises — returns None on failure."""
-    if not settings.auth_enabled:
-        return None
     try:
-        return await get_current_user_id(request)
-    except HTTPException:
+        import jwt
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+        return payload.get("user_id")
+    except Exception:
         return None

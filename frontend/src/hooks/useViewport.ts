@@ -52,12 +52,16 @@ export function useViewport(apiRef: MutableRefObject<ViewportAwareAPI | null>) {
     if (!api) return lastViewport.current
 
     const appState = api.getAppState()
+    const zoom = (appState.zoom as any)?.value ?? appState.zoom ?? 1
+
+    // Excalidraw stores viewport transform as scroll offsets. Convert to
+    // scene-space viewport origin expected by backend placement services.
     const viewport: Viewport = {
-      x: appState.scrollX || 0,
-      y: appState.scrollY || 0,
+      x: -((appState.scrollX || 0) as number),
+      y: -((appState.scrollY || 0) as number),
       width: appState.width || window.innerWidth,
       height: appState.height || window.innerHeight,
-      zoom: (appState.zoom as any)?.value ?? appState.zoom ?? 1,
+      zoom,
     }
 
     updateViewport(viewport)
@@ -68,8 +72,8 @@ export function useViewport(apiRef: MutableRefObject<ViewportAwareAPI | null>) {
     (scrollX: number, scrollY: number) => {
       updateViewport({
         ...lastViewport.current,
-        x: scrollX,
-        y: scrollY,
+        x: -scrollX,
+        y: -scrollY,
       })
     },
     [updateViewport]

@@ -10,13 +10,6 @@ PROCESS_PROMPT = """Analyze this text and return JSON only:
   "content_type": "note|code|url|thought|question"
 }}
 
-Content type rules:
-- "note": standard knowledge capture (articles, explanations, facts)
-- "code": programming code or technical configuration
-- "url": primarily a URL/link with optional description
-- "thought": quick idea, reflection, or personal note
-- "question": a question the user wants to explore later
-
 Text to analyze:
 {text}"""
 
@@ -110,7 +103,74 @@ CHAT_SYSTEM = """You are a personal knowledge assistant called Mnemos. ALWAYS us
 When on a canvas page, format for visual display:
 - Use short paragraphs and bullet points
 - Use **bold** for key terms
-- Keep responses focused and actionable
+- Keep responses focused and actionable"""
 
-If the user wants content written/composed, provide thorough well-formatted content.
-If the user wants a diagram, tell them to use "draw a [type] about [topic]"."""
+ORGANIZATION_PROMPT = """You are organizing a visual canvas workspace. A human note-taker would:
+- Keep related content physically close
+- Maintain visual patterns (grids stay grids, timelines stay timelines)
+- Use consistent styling within regions
+- Leave breathing room between distinct topics
+- Place new related content at the edge of existing groups
+
+Current canvas state:
+- Theme: {theme} (background: {background_color})
+- Layout pattern: {layout_pattern}
+- Reading direction: {reading_direction}
+- Density: {density}
+- Existing regions: {regions_info}
+- Dominant colors: {dominant_colors}
+
+New content to place:
+- Title: {title}
+- Tags: {tags}
+- Content type: {content_type}
+- Summary: {summary}
+
+Semantically related existing content:
+{related_info}
+
+Decide placement. Return JSON only:
+{{
+  "action": "place_near|create_region|extend_region",
+  "target_region_id": "id or null",
+  "anchor_element_id": "id of nearest element or null",
+  "direction": "right|below|above|left",
+  "match_style": true,
+  "needs_reorganization": false,
+  "style_overrides": {{}},
+  "reasoning": "why this placement"
+}}"""
+
+CANVAS_GENERATION_PROMPT = """You are a visual knowledge assistant. Generate a structured diagram layout.
+Return JSON only:
+{{
+  "title": "short title",
+  "layout_type": "flow|mindmap|list|comparison|timeline|freeform",
+  "elements": [
+    {{
+      "id": "unique_id",
+      "type": "box|text|arrow",
+      "label": "text content (max 50 chars)",
+      "style": "default|accent|muted|warning|success",
+      "width": 200,
+      "height": 60
+    }}
+  ],
+  "connections": [
+    {{
+      "from": "element_id",
+      "to": "element_id",
+      "label": "optional edge label",
+      "style": "solid|dashed|dotted"
+    }}
+  ]
+}}
+
+Rules:
+- Max 12 elements, max 15 connections
+- Vary styles for visual weight
+
+User request: {request}
+
+Context:
+{context}"""

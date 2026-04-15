@@ -1,459 +1,218 @@
-/**
- * Diagram Renderer — converts a structured topology from the LLM
- * into Excalidraw elements (boxes, text, arrows).
- *
- * Topology shape:
- * {
- *   title: string,
- *   layout_type: "flow" | "mindmap" | "list" | "comparison" | "timeline" | "freeform",
- *   elements: [{ id, type, label, style, width?, height? }],
- *   connections: [{ from, to, label?, style? }]
- * }
- */
-
 import { nanoid } from "../utils"
-import { contrastMutedColor } from "./canvasContext"
-import type { CanvasContext } from "./canvasContext"
-import { layoutText } from "./canvasAI"
+import { createNoteCard, createEdgeArrow, createClusterFrame, createTextBare } from "./canvasAI"
+import { readCanvasContext } from "./canvasContext"
 
-interface TopologyElement {
+interface TopologyNode {
   id: string
-  type: "box" | "text" | "arrow"
   label: string
-  style?: "default" | "accent" | "muted" | "warning" | "success"
-  width?: number
-  height?: number
+  type?: string
+  cluster?: string
+  summary?: string
 }
 
-interface TopologyConnection {
-  from: string
-  to: string
+interface TopologyEdge {
+  source: string
+  target: string
   label?: string
-  style?: "solid" | "dashed" | "dotted"
+  type?: string
 }
 
-interface Topology {
-  title: string
-  layout_type: "flow" | "mindmap" | "list" | "comparison" | "timeline" | "freeform"
-  elements: TopologyElement[]
-  connections: TopologyConnection[]
+interface TopologyCluster {
+  id: string
+  label: string
 }
 
-// ── Style palette based on canvas theme ──
+export interface DiagramTopology {
+  title?: string
+  elements: TopologyNode[]
+  connections: TopologyEdge[]
+  clusters?: TopologyCluster[]
+}
 
-function getStyleColors(
-  style: string,
-  isDark: boolean
-): { bg: string; border: string; text: string } {
-  if (isDark) {
-    switch (style) {
-      case "accent":
-        return { bg: "#312e81", border: "#818cf8", text: "#e0e7ff" }
-      case "muted":
-        return { bg: "#1f2937", border: "#4b5563", text: "#9ca3af" }
-      case "warning":
-        return { bg: "#451a03", border: "#f59e0b", text: "#fef3c7" }
-      case "success":
-        return { bg: "#052e16", border: "#22c55e", text: "#dcfce7" }
-      default:
-        return { bg: "#1e1e2e", border: "#374151", text: "#f3f4f6" }
+/**
+ * Calculates a hierarchical layered layout for nodes.
+ * Fallback to grid if the graph has complex cycles.
+ */
+function calculateLayout(nodes: TopologyNode[], edges: TopologyEdge[]) {
+  const positions = new Map<string, { x: number; y: number }>()
+  const width = 360
+  const height = 240
+  const gapX = 120
+  const gapY = 160
+
+  // 1. Identify roots (nodes with no incoming edges)
+  const incomingCount = new Map<string, number>()
+  nodes.forEach(n => incomingCount.set(n.id, 0))
+  edges.forEach(e => {
+    if (incomingCount.has(e.target)) {
+      incomingCount.set(e.target, incomingCount.get(e.target)! + 1)
     }
-  } else {
-    switch (style) {
-      case "accent":
-        return { bg: "#eef2ff", border: "#6366f1", text: "#312e81" }
-      case "muted":
-        return { bg: "#f9fafb", border: "#d1d5db", text: "#6b7280" }
-      case "warning":
-        return { bg: "#fffbeb", border: "#f59e0b", text: "#78350f" }
-      case "success":
-        return { bg: "#f0fdf4", border: "#22c55e", text: "#14532d" }
-      default:
-        return { bg: "#ffffff", border: "#e5e7eb", text: "#111827" }
-    }
-  }
-}
-
-// ── Layout algorithms ──
-
-function layoutFlow(
-  elements: TopologyElement[],
-  startX: number,
-  startY: number,
-  gap = 30
-): Map<string, { x: number; y: number; w: number; h: number }> {
-  const positions = new Map<string, { x: number; y: number; w: number; h: number }>()
-  let y = startY
-
-  for (const el of elements) {
-    const w = el.width || 220
-    const h = el.height || 60
-    positions.set(el.id, { x: startX, y, w, h })
-    y += h + gap
-  }
-
-  return positions
-}
-
-function layoutMindmap(
-  elements: TopologyElement[],
-  centerX: number,
-  centerY: number,
-  radius = 250
-): Map<string, { x: number; y: number; w: number; h: number }> {
-  const positions = new Map<string, { x: number; y: number; w: number; h: number }>()
-
-  if (elements.length === 0) return positions
-
-  // Center element
-  const center = elements[0]
-  const cw = center.width || 200
-  const ch = center.height || 60
-  positions.set(center.id, { x: centerX - cw / 2, y: centerY - ch / 2, w: cw, h: ch })
-
-  // Radial children
-  const children = elements.slice(1)
-  const angleStep = (2 * Math.PI) / Math.max(children.length, 1)
-
-  children.forEach((el, i) => {
-    const angle = -Math.PI / 2 + i * angleStep
-    const w = el.width || 180
-    const h = el.height || 50
-    const x = centerX + radius * Math.cos(angle) - w / 2
-    const y = centerY + radius * Math.sin(angle) - h / 2
-    positions.set(el.id, { x, y, w, h })
   })
 
-  return positions
-}
+  let queue = nodes.filter(n => incomingCount.get(n.id) === 0).map(n => n.id)
+  if (queue.length === 0 && nodes.length > 0) queue = [nodes[0].id] // Handle complete cycle
 
-function layoutList(
-  elements: TopologyElement[],
-  startX: number,
-  startY: number,
-  gap = 12
-): Map<string, { x: number; y: number; w: number; h: number }> {
-  const positions = new Map<string, { x: number; y: number; w: number; h: number }>()
-  let y = startY
+  const levels = new Map<string, number>()
+  queue.forEach(id => levels.set(id, 0))
+  
+  // 2. Assign levels via BFS
+  const visited = new Set<string>(queue)
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    const currentLevel = levels.get(current) || 0
 
-  for (const el of elements) {
-    const w = el.width || 400
-    const h = el.height || 40
-    positions.set(el.id, { x: startX, y, w, h })
-    y += h + gap
+    const outgoing = edges.filter(e => e.source === current)
+    for (const edge of outgoing) {
+      if (!visited.has(edge.target)) {
+        visited.add(edge.target)
+        levels.set(edge.target, currentLevel + 1)
+        queue.push(edge.target)
+      } else {
+        // Push target deeper if needed, preventing overlaps
+        const existingLevel = levels.get(edge.target) || 0
+        if (existingLevel <= currentLevel) {
+           levels.set(edge.target, currentLevel + 1)
+        }
+      }
+    }
+  }
+
+  // Handle disconnected components
+  nodes.forEach(n => {
+    if (!levels.has(n.id)) levels.set(n.id, 0)
+  })
+
+  // 3. Group by level and assign coordinates
+  const levelGroups = new Map<number, string[]>()
+  levels.forEach((lvl, id) => {
+    if (!levelGroups.has(lvl)) levelGroups.set(lvl, [])
+    levelGroups.get(lvl)!.push(id)
+  })
+
+  const maxLevel = Math.max(...Array.from(levelGroups.keys()), 0)
+  
+  let currentY = 0
+  for (let i = 0; i <= maxLevel; i++) {
+    const rowNodes = levelGroups.get(i) || []
+    const totalRowWidth = rowNodes.length * width + (rowNodes.length - 1) * gapX
+    let startX = -totalRowWidth / 2
+
+    rowNodes.forEach(id => {
+      positions.set(id, { x: startX, y: currentY })
+      startX += width + gapX
+    })
+    currentY += height + gapY
   }
 
   return positions
 }
-
-function layoutComparison(
-  elements: TopologyElement[],
-  startX: number,
-  startY: number,
-  gap = 30,
-  colGap = 60
-): Map<string, { x: number; y: number; w: number; h: number }> {
-  const positions = new Map<string, { x: number; y: number; w: number; h: number }>()
-  const mid = Math.ceil(elements.length / 2)
-  const leftCol = elements.slice(0, mid)
-  const rightCol = elements.slice(mid)
-
-  let yL = startY
-  for (const el of leftCol) {
-    const w = el.width || 200
-    const h = el.height || 60
-    positions.set(el.id, { x: startX, y: yL, w, h })
-    yL += h + gap
-  }
-
-  let yR = startY
-  for (const el of rightCol) {
-    const w = el.width || 200
-    const h = el.height || 60
-    positions.set(el.id, { x: startX + 200 + colGap, y: yR, w, h })
-    yR += h + gap
-  }
-
-  return positions
-}
-
-function layoutTimeline(
-  elements: TopologyElement[],
-  startX: number,
-  startY: number,
-  gap = 40
-): Map<string, { x: number; y: number; w: number; h: number }> {
-  const positions = new Map<string, { x: number; y: number; w: number; h: number }>()
-  let x = startX
-
-  for (const el of elements) {
-    const w = el.width || 160
-    const h = el.height || 80
-    positions.set(el.id, { x, y: startY, w, h })
-    x += w + gap
-  }
-
-  return positions
-}
-
-// ── Base element helpers ──
-
-function seed(): number {
-  return Math.floor(Math.random() * 2_000_000_000)
-}
-
-function resolveStyle(el: TopologyElement, index: number): NonNullable<TopologyElement["style"]> {
-  if (el.style) return el.style
-  // Avoid monotone diagrams when style is omitted by the LLM.
-  const cycle: Array<NonNullable<TopologyElement["style"]>> = ["accent", "default", "muted"]
-  return cycle[index % cycle.length]
-}
-
-// ── Main render function ──
 
 export function renderTopology(
-  topology: Topology,
-  ctx: CanvasContext
-): Record<string, unknown>[] {
-  const isDark = ctx.isDark
-  const appState = ctx.appState
-  const baseStrokeWidth =
-    typeof appState.currentItemStrokeWidth === "number" && appState.currentItemStrokeWidth > 0
-      ? appState.currentItemStrokeWidth
-      : 1
-  const baseStrokeStyle =
-    appState.currentItemStrokeStyle === "dashed" || appState.currentItemStrokeStyle === "dotted"
-      ? appState.currentItemStrokeStyle
-      : "solid"
-  const baseRoughness = typeof appState.currentItemRoughness === "number" ? appState.currentItemRoughness : 0
-  const baseFontFamily =
-    typeof appState.currentItemFontFamily === "number" ? appState.currentItemFontFamily : 1
-  const baseFontSize =
-    typeof appState.currentItemFontSize === "number" && appState.currentItemFontSize >= 10
-      ? appState.currentItemFontSize
-      : 14
+  topology: DiagramTopology,
+  ctx: ReturnType<typeof readCanvasContext>,
+  diagramGroupId: string = nanoid() // Unified Grouping for Notebook Mode
+) {
+  const elements: any[] = []
+  const { elements: nodes, connections, clusters } = topology
+  
+  const layout = calculateLayout(nodes, connections)
+  const nodeBounds = new Map<string, { x: number, y: number, w: number, h: number }>()
 
-  // Compute positions based on layout type
-  const boxElements = topology.elements.filter((e) => e.type !== "arrow")
-  const origin = ctx.viewportCenter
-
-  let positions: Map<string, { x: number; y: number; w: number; h: number }>
-
-  switch (topology.layout_type) {
-    case "mindmap":
-      positions = layoutMindmap(boxElements, origin.x, origin.y)
-      break
-    case "list":
-      positions = layoutList(boxElements, origin.x - 200, origin.y - 200)
-      break
-    case "comparison":
-      positions = layoutComparison(boxElements, origin.x - 230, origin.y - 200)
-      break
-    case "timeline":
-      positions = layoutTimeline(boxElements, origin.x - 400, origin.y - 40)
-      break
-    case "flow":
-    default:
-      positions = layoutFlow(boxElements, origin.x - 110, origin.y - 200)
-  }
-
-  const excalidrawElements: Record<string, unknown>[] = []
-  const groupId = nanoid()
-
-  // ── Title ──
+  // Render Title if present
+  let titleYOffset = 0
   if (topology.title) {
-    const titleColor = isDark ? "#a5b4fc" : "#4f46e5"
-    excalidrawElements.push({
-      id: nanoid(),
-      type: "text",
-      x: origin.x - 200,
-      y: (positions.values().next().value?.y ?? origin.y) - 50,
-      width: 400,
-      height: 30,
-      text: topology.title,
-      originalText: topology.title,
-      fontSize: 22,
-      fontFamily: 1,
-      textAlign: "left",
-      verticalAlign: "top",
-      containerId: null,
-      lineHeight: 1.25,
-      autoResize: true,
-      angle: 0,
-      strokeColor: titleColor,
-      backgroundColor: "transparent",
-      fillStyle: "solid",
-      strokeWidth: 1,
-      strokeStyle: "solid",
-      roughness: 0,
-      opacity: 100,
-      groupIds: [groupId],
-      frameId: null,
-      roundness: null,
-      seed: seed(),
-      version: 1,
-      versionNonce: seed(),
-      isDeleted: false,
-      boundElements: null,
-      updated: Date.now(),
-      link: null,
-      locked: false,
-      customData: { type: "diagram-title" },
+    const [titleEl] = createTextBare(topology.title, 0, -100, ctx.backgroundColor, {
+       fontSize: 32, fontFamily: 1, customDataType: "diagram-title"
     })
+    titleEl.groupIds = [diagramGroupId]
+    elements.push(titleEl)
+    titleYOffset = 60
   }
 
-  // ── Box elements ──
-  boxElements.forEach((el, index) => {
-    const pos = positions.get(el.id)
-    if (!pos) return
+  // 1. Render Nodes
+  for (const node of nodes) {
+    const pos = layout.get(node.id) || { x: 0, y: 0 }
+    // Shift nodes down if there's a title
+    const finalY = pos.y + titleYOffset
+    
+    const cardElements = createNoteCard(
+      {
+        noteId: node.id,
+        title: node.label,
+        summary: node.summary || `Type: ${node.type || 'Concept'}`,
+        tags: node.type ? [node.type] : [],
+      },
+      { x: pos.x, y: finalY },
+      ctx.backgroundColor
+    )
 
-    const style = resolveStyle(el, index)
-    const colors = getStyleColors(style, isDark)
-
-    // Background rectangle
-    excalidrawElements.push({
-      id: `diag-bg-${el.id}`,
-      type: "rectangle",
-      x: pos.x,
-      y: pos.y,
-      width: pos.w,
-      height: pos.h,
-      angle: 0,
-      strokeColor: colors.border,
-      backgroundColor: colors.bg,
-      fillStyle: "solid",
-      strokeWidth: baseStrokeWidth,
-      strokeStyle: baseStrokeStyle,
-      roughness: baseRoughness,
-      opacity: 100,
-      groupIds: [groupId],
-      frameId: null,
-      roundness: { type: 3, value: 8 },
-      seed: seed(),
-      version: 1,
-      versionNonce: seed(),
-      isDeleted: false,
-      boundElements: null,
-      updated: Date.now(),
-      link: null,
-      locked: false,
-      customData: { type: "diagram-box", elementId: el.id },
+    // Bind to diagram group
+    cardElements.forEach(el => {
+      if (!el.groupIds) el.groupIds = []
+      el.groupIds.push(diagramGroupId)
+      if (node.cluster) el.groupIds.push(`cluster-group-${node.cluster}`)
     })
 
-    // Text label
-    const textLayout = layoutText(el.label, baseFontSize, baseFontFamily, pos.w - 16, 4)
-    excalidrawElements.push({
-      id: `diag-text-${el.id}`,
-      type: "text",
-      x: pos.x + 8,
-      y: pos.y + (pos.h - textLayout.height) / 2,
-      width: textLayout.width,
-      height: textLayout.height,
-      text: textLayout.text,
-      originalText: el.label,
-      fontSize: baseFontSize,
-      fontFamily: baseFontFamily,
-      textAlign: "left",
-      verticalAlign: "top",
-      containerId: null,
-      lineHeight: 1.25,
-      autoResize: true,
-      angle: 0,
-      strokeColor: colors.text,
-      backgroundColor: "transparent",
-      fillStyle: "solid",
-      strokeWidth: 1,
-      strokeStyle: "solid",
-      roughness: baseRoughness,
-      opacity: 100,
-      groupIds: [groupId],
-      frameId: null,
-      roundness: null,
-      seed: seed(),
-      version: 1,
-      versionNonce: seed(),
-      isDeleted: false,
-      boundElements: null,
-      updated: Date.now(),
-      link: null,
-      locked: false,
-      customData: { type: "diagram-label", elementId: el.id },
-    })
-  })
+    elements.push(...cardElements)
+    nodeBounds.set(node.id, { x: pos.x, y: finalY, w: 360, h: 240 })
+  }
 
-  // ── Connections (arrows) ──
-  for (const conn of topology.connections) {
-    const fromPos = positions.get(conn.from)
-    const toPos = positions.get(conn.to)
-    if (!fromPos || !toPos) continue
+  // 2. Render Clusters
+  if (clusters && clusters.length > 0) {
+    for (const cluster of clusters) {
+      const clusterNodes = nodes.filter(n => n.cluster === cluster.id)
+      if (clusterNodes.length === 0) continue
 
-    const fromCenterX = fromPos.x + fromPos.w / 2
-    const fromCenterY = fromPos.y + fromPos.h / 2
-    const toCenterX = toPos.x + toPos.w / 2
-    const toCenterY = toPos.y + toPos.h / 2
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      clusterNodes.forEach(n => {
+        const b = nodeBounds.get(n.id)
+        if (b) {
+          minX = Math.min(minX, b.x)
+          minY = Math.min(minY, b.y)
+          maxX = Math.max(maxX, b.x + b.w)
+          maxY = Math.max(maxY, b.y + b.h)
+        }
+      })
 
-    // Connect from edge to edge (not center-to-center)
-    let startX: number, startY: number, endX: number, endY: number
-
-    // Simple: connect bottom of source to top of target (for vertical flows)
-    if (topology.layout_type === "flow" || topology.layout_type === "list") {
-      startX = fromPos.x + fromPos.w / 2
-      startY = fromPos.y + fromPos.h
-      endX = toPos.x + toPos.w / 2
-      endY = toPos.y
-    } else if (topology.layout_type === "timeline") {
-      startX = fromPos.x + fromPos.w
-      startY = fromPos.y + fromPos.h / 2
-      endX = toPos.x
-      endY = toPos.y + toPos.h / 2
-    } else {
-      // Generic: center to center
-      startX = fromCenterX
-      startY = fromCenterY
-      endX = toCenterX
-      endY = toCenterY
+      const clusterFrames = createClusterFrame(
+        cluster.label, minX, minY, maxX - minX, maxY - minY, "#6366f1", cluster.id
+      )
+      
+      clusterFrames.forEach(el => {
+        if (!el.groupIds) el.groupIds = []
+        el.groupIds.push(diagramGroupId)
+      })
+      
+      // Clusters should render behind nodes
+      elements.unshift(...clusterFrames)
     }
-
-    const dx = endX - startX
-    const dy = endY - startY
-    const arrowColor = contrastMutedColor(ctx.backgroundColor)
-    const strokeStyle = conn.style || baseStrokeStyle
-
-    excalidrawElements.push({
-      id: `diag-arrow-${nanoid()}`,
-      type: "arrow",
-      x: startX,
-      y: startY,
-      width: Math.abs(dx),
-      height: Math.abs(dy),
-      angle: 0,
-      strokeColor: arrowColor,
-      backgroundColor: "transparent",
-      fillStyle: "solid",
-      strokeWidth: Math.max(1.25, baseStrokeWidth),
-      strokeStyle,
-      roughness: baseRoughness,
-      opacity: 70,
-      groupIds: [groupId],
-      frameId: null,
-      roundness: { type: 2 },
-      seed: seed(),
-      version: 1,
-      versionNonce: seed(),
-      isDeleted: false,
-      boundElements: null,
-      updated: Date.now(),
-      link: null,
-      locked: false,
-      points: [[0, 0], [dx, dy]],
-      lastCommittedPoint: null,
-      startBinding: null,
-      endBinding: null,
-      startArrowhead: null,
-      endArrowhead: "arrow",
-      customData: { type: "diagram-arrow", from: conn.from, to: conn.to },
-    })
   }
 
-  return excalidrawElements
+  // 3. Render Edges
+  for (const conn of connections) {
+    const sourceBounds = nodeBounds.get(conn.source)
+    const targetBounds = nodeBounds.get(conn.target)
+    
+    if (!sourceBounds || !targetBounds) continue
+
+    // Basic edge routing (center to center)
+    const sx = sourceBounds.x + sourceBounds.w / 2
+    const sy = sourceBounds.y + sourceBounds.h / 2
+    const tx = targetBounds.x + targetBounds.w / 2
+    const ty = targetBounds.y + targetBounds.h / 2
+
+    const edge = createEdgeArrow(sx, sy, tx, ty, conn.type || "related", conn.label, nanoid())
+    
+    // Bind to diagram group
+    if (!edge.groupIds) edge.groupIds = []
+    edge.groupIds.push(diagramGroupId)
+    
+    // Bind edge ends to nodes
+    edge.startBinding = { elementId: `note-frame-${conn.source}`, focus: 0, gap: 15 }
+    edge.endBinding = { elementId: `note-frame-${conn.target}`, focus: 0, gap: 15 }
+
+    elements.push(edge)
+  }
+
+  return elements
 }

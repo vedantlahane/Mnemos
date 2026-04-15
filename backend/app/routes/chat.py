@@ -1,97 +1,57 @@
 # === FILE: backend/app/routes/chat.py ===
+"""Home chat — not tied to a specific canvas page."""
 
 from fastapi import APIRouter, Depends
 from app.models.schemas import ChatRequest
-from app.services import embeddings
 from app.db.supabase import db
+from app.services import embeddings
 from app.llm import router as llm
 from app.auth.dependencies import get_optional_user_id
+import logging
 
+logger = logging.getLogger("mnemos.routes.chat")
 router = APIRouter()
 
 
 @router.post("/chat")
-async def chat_with_notes(payload: ChatRequest, user_id: str = Depends(get_optional_user_id)):
-    query_embedding = await embeddings.generate_query(payload.question)
+async def home_chat(payload: ChatRequest, user_id: str = Depends(get_optional_user_id)):
+    question = payload.question.strip()
+    if not question:
+        return {"response": "What would you like to know?", "sources": []}
 
-    if payload.context_type == "page" and payload.page_id:
-        page = await db.get_page(payload.page_id, user_id=user_id)
-        if not page:
-            relevant = []
-        else:
-            relevant = await db.vector_search_in_page(
-                query_embedding, page_id=payload.page_id, limit=5, threshold=0.60,
-            )
-        if user_id:
-            relevant = [r for r in relevant if r.get("user_id") == user_id]
-        if len(relevant) < 2:
-            global_results = await db.vector_search(query_embedding, limit=5, threshold=0.65)
-            if user_id:
-                global_results = [r for r in global_results if r.get("user_id") == user_id]
-            seen = {r["id"] for r in relevant}
-            for r in global_results:
-                if r["id"] not in seen:
-                    relevant.append(r)
-    else:
-        relevant = await db.vector_search(query_embedding, limit=5, threshold=0.65)
-        if user_id:
-            relevant = [r for r in relevant if r.get("user_id") == user_id]
-
-    if not relevant:
-        return {
-            "answer": "I couldn't find any related notes. Try capturing some notes on this topic, or ask me to 'write about [topic]' to generate content.",
-            "sources": [],
-            "follow_ups": ["What topics have I captured?", "Show my recent notes"],
-        }
-
-    # Graph expansion
-    expanded_ids = {r["id"] for r in relevant}
-    extra_notes = []
-    for r in relevant[:3]:
-        try:
-            edges = await db.get_edges_for_note(r["id"])
-            for edge in edges[:2]:
-                neighbor_id = edge["target_id"] if edge["source_id"] == r["id"] else edge["source_id"]
-                if neighbor_id not in expanded_ids:
-                    neighbor = await db.get_note(neighbor_id, user_id=user_id)
-                    if neighbor:
-                        extra_notes.append(neighbor)
-                        expanded_ids.add(neighbor_id)
-        except Exception:
-            pass
-
+    # Gather context from notes
     context_parts = []
-    for n in relevant:
-        context_parts.append(
-            f"Note: {n['title']}\nSummary: {n.get('summary', 'No summary')}\n"
-            f"Content: {n['raw_text'][:1000]}\nTags: {', '.join(n.get('tags', []))}"
-        )
-    for n in extra_notes[:3]:
-        context_parts.append(
-            f"Related Note: {n.get('title', 'Untitled')}\n"
-            f"Summary: {n.get('summary', 'No summary')}\nContent: {n.get('raw_text', '')[:500]}"
-        )
-    context = "\n\n---\n\n".join(context_parts)
-
-    page_context = None
-    if payload.context_type == "page" and payload.page_id:
-        try:
-            page = await db.get_page(payload.page_id, user_id=user_id)
-            if page:
-                page_context = page["name"]
-        except Exception:
-            pass
-
-    answer = await llm.chat(
-        question=payload.question, context=context,
-        history=payload.history, page_context=page_context, user_id=user_id,
-    )
-
-    follow_ups = []
+    sources = []
     try:
-        follow_ups = await llm.generate_follow_ups(payload.question, answer, user_id=user_id)
-    except Exception:
-        pass
+        emb = await embeddings.generate_query(question)
+        relevant = await db.vector_search(emb, limit=8, threshold=0.55)
+        if user_id:
+            relevant = [r for r in relevant if r.get("user_id") == user_id]
+        for note in relevant:
+            context_parts.append(
+                f"[{note.get('title', 'Untitled')}]: {note.get('summary') or note.get('raw_text', '')[:300]}"
+            )
+            sources.append({
+                "id": note["id"], "title": note.get("title", "Untitled"),
+                "similarity": note.get("similarity", 0),
+            })
+    except Exception as e:
+        logger.warning(f"Context search failed: {e}")
 
-    sources = [{"id": n["id"], "title": n["title"], "similarity": n.get("similarity", 0.0)} for n in relevant]
-    return {"answer": answer, "sources": sources, "follow_ups": follow_ups}
+    context = "\n\n".join(context_parts) if context_parts else "No relevant notes found."
+
+    system_prompt = """You are Mnemos, a knowledge assistant. Answer using the user's notes as primary source.
+If the notes don't cover the question, say so and use general knowledge.
+Be concise and helpful. Cite note titles when referencing them."""
+
+    messages = [{"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}]
+    for h in payload.history[-6:]:
+        messages.insert(0, h)
+
+    try:
+        response = await llm.chat(system_prompt, messages, user_id=user_id)
+    except Exception as e:
+        logger.error(f"Chat LLM failed: {e}")
+        response = "I'm having trouble generating a response right now. Please try again."
+
+    return {"response": response, "sources": sources}

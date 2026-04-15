@@ -27,9 +27,26 @@ logger = logging.getLogger("mnemos.canvas_stream")
 
 router = APIRouter()
 
+_CLARIFY_REPLY_HINT = "Reply with: exact: <your text> or compose: <topic>."
+
 
 def _sse_line(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+def _is_followup_after_write_mode_clarification(history: list[dict] | None) -> bool:
+    if not history:
+        return False
+
+    for msg in reversed(history):
+        if not isinstance(msg, dict):
+            continue
+        if str(msg.get("role") or "").lower() != "assistant":
+            continue
+        content = str(msg.get("content") or "")
+        return _CLARIFY_REPLY_HINT in content
+
+    return False
 
 
 def _safe_measure_text(text: str, max_width: int = 400) -> dict:
@@ -72,8 +89,41 @@ async def canvas_stream(
     # Classify intent
     intent, topic, meta = classify_intent(payload.message)
 
+    # If the last assistant turn asked for exact-vs-compose mode and the user
+    # replies with plain text, default to exact placement for this follow-up.
+    raw_message = (payload.message or "").strip()
+    lowered = raw_message.lower()
+    if (
+        _is_followup_after_write_mode_clarification(payload.history)
+        and intent == Intent.QUERY
+        and raw_message
+        and not raw_message.startswith("/")
+        and not lowered.startswith("exact:")
+        and not lowered.startswith("compose:")
+    ):
+        intent = Intent.COMPOSE
+        topic = raw_message
+        meta = {"sub_intent": "literal_text", "mode": "exact", "from_followup": True}
+
     # For compose intent, use streaming composition
     if intent == Intent.COMPOSE:
+        sub_intent = str(meta.get("sub_intent") or "")
+        if sub_intent == "clarify_literal_vs_compose":
+            return StreamingResponse(
+                _stream_compose_mode_clarification(meta.get("literal_text") or topic or payload.message),
+                media_type="text/event-stream",
+            )
+
+        if sub_intent == "literal_text" or str(meta.get("mode") or "").lower() == "exact":
+            return StreamingResponse(
+                _stream_exact_text(
+                    page_id=page_id,
+                    text=topic or payload.message,
+                    viewport=payload.viewport,
+                ),
+                media_type="text/event-stream",
+            )
+
         return StreamingResponse(
             _stream_compose(
                 page_id=page_id,
@@ -144,6 +194,94 @@ async def canvas_stream(
         yield _sse_line("done", {})
 
     return StreamingResponse(brain_stream(), media_type="text/event-stream")
+
+
+async def _stream_compose_mode_clarification(literal_text: str) -> AsyncIterator[str]:
+    cleaned = (literal_text or "").strip()
+    preview = cleaned if len(cleaned) <= 120 else f"{cleaned[:117]}..."
+
+    yield _sse_line("intent", {
+        "intent": "compose",
+        "topic": cleaned,
+        "metadata": {"sub_intent": "clarify_literal_vs_compose"},
+    })
+
+    yield _sse_line("chat", {
+        "content": (
+            "I can do this in two ways. "
+            f"Exact text: \"{preview}\". "
+            "Expanded AI write-up on that topic. "
+            + _CLARIFY_REPLY_HINT
+        ),
+    })
+    yield _sse_line("done", {})
+
+
+async def _stream_exact_text(
+    page_id: str,
+    text: str,
+    viewport: Viewport | None,
+) -> AsyncIterator[str]:
+    literal = (text or "").strip()
+    if not literal:
+        yield _sse_line("error", {"message": "No text provided for exact placement."})
+        yield _sse_line("done", {})
+        return
+
+    max_width = 400
+    measurement = _safe_measure_text(literal, max_width=max_width)
+
+    try:
+        placement = await spatial_planner.find_placement(
+            page_id=page_id,
+            viewport=viewport,
+            near_topic=None,
+            size=(measurement["width"] + 24, measurement["height"] + 24),
+            strategy="auto",
+        )
+        x, y = placement.x, placement.y
+    except Exception:
+        x, y = 200.0, 200.0
+
+    element_id = make_element_id("text")
+
+    try:
+        await add_measured_text_to_canvas(
+            page_id=page_id,
+            text=literal,
+            x=x,
+            y=y,
+            max_width=max_width,
+            element_id=element_id,
+        )
+    except Exception as e:
+        logger.error(f"Failed to save exact text: {e}")
+        yield _sse_line("error", {"message": f"Could not place exact text: {str(e)[:100]}"})
+        yield _sse_line("done", {})
+        return
+
+    yield _sse_line("intent", {
+        "intent": "compose",
+        "topic": literal,
+        "metadata": {"mode": "exact"},
+    })
+
+    yield _sse_line("canvas_op", CanvasOp(
+        op=OpType.CREATE_TEXT,
+        element_id=element_id,
+        x=x,
+        y=y,
+        width=measurement["width"],
+        height=measurement["height"],
+        text=measurement.get("wrapped_text") or literal,
+        style="compose",
+        message="Placed exact text",
+    ).model_dump())
+
+    yield _sse_line("chat", {
+        "content": "Placed your exact text on canvas. Use compose: <topic> if you want an expanded AI write-up instead.",
+    })
+    yield _sse_line("done", {})
 
 
 async def _stream_compose(
@@ -221,16 +359,9 @@ async def _stream_compose(
     if full_text and len(full_text) != last_measured_length:
         latest_measurement = _safe_measure_text(full_text, max_width=max_width)
 
-    # Finalize
-    yield _sse_line("canvas_op", CanvasOp(
-        op=OpType.STREAM_END,
-        element_id=element_id,
-        text=full_text,
-        width=latest_measurement["width"],
-        height=latest_measurement["height"],
-    ).model_dump())
-
     # Save with measured dimensions (uses text_measure.mjs through layout service).
+    # IMPORTANT: Persist before emitting STREAM_END because the frontend refreshes
+    # scene on STREAM_END and should fetch the newly saved content.
     if full_text.strip():
         try:
             await add_measured_text_to_canvas(
@@ -243,6 +374,15 @@ async def _stream_compose(
             )
         except Exception as e:
             logger.error(f"Failed to save composed text: {e}")
+
+    # Finalize after persistence so refresh loads latest scene.
+    yield _sse_line("canvas_op", CanvasOp(
+        op=OpType.STREAM_END,
+        element_id=element_id,
+        text=full_text,
+        width=latest_measurement["width"],
+        height=latest_measurement["height"],
+    ).model_dump())
 
     yield _sse_line("chat", {
         "content": f"I've written about **{topic}** and placed it on your canvas.",

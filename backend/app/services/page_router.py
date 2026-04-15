@@ -1,4 +1,4 @@
-# === FILE: backend/app/services/page_router.py ===
+# === FILE: backend/app/services/page_router.py (COMPLETE) ===
 
 from app.db.supabase import db
 from app.llm import router as llm
@@ -7,15 +7,8 @@ import logging
 logger = logging.getLogger("mnemos.router")
 
 
-async def route_note(
-    text: str,
-    title: str = None,
-    tags: list[str] = None,
-    source_url: str = None,
-    page_hint: str = None,
-    user_id: str = None,
-) -> dict:
-    # If user specified a page, use it
+async def route_note(text: str, title: str = None, tags: list[str] = None,
+                     source_url: str = None, page_hint: str = None, user_id: str = None) -> dict:
     if page_hint:
         page = await db.get_page_by_name(page_hint, user_id=user_id)
         if page:
@@ -25,12 +18,11 @@ async def route_note(
 
     pages = await db.list_pages(include_archived=False, user_id=user_id)
     non_uncat = [p for p in pages if p["name"] != "Uncategorized"]
-
     if not non_uncat:
         uncat = await db.get_page_by_name("Uncategorized", user_id=user_id)
         if not uncat:
             uncat = await db.insert_page(name="Uncategorized", user_id=user_id)
-        return {"page_id": uncat["id"], "page_name": "Uncategorized", "confidence": 0.5, "reason": "No topic pages exist"}
+        return {"page_id": uncat["id"], "page_name": "Uncategorized", "confidence": 0.5, "reason": "No pages exist"}
 
     pages_info_parts = []
     for p in pages:
@@ -47,12 +39,9 @@ async def route_note(
 
     try:
         result = await llm.route_to_page(
-            title=title or "Untitled",
-            tags=tags or [],
-            content=text,
-            source_url=source_url or "",
-            pages_info=pages_info,
-            user_id=user_id,
+            title=title or "Untitled", tags=tags or [],
+            content=text, source_url=source_url or "",
+            pages_info=pages_info, user_id=user_id,
         )
     except Exception as e:
         logger.error(f"Page routing LLM failed: {e}")

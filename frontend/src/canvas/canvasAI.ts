@@ -1,5 +1,5 @@
 import { nanoid } from "../utils"
-import { prepareWithSegments, layoutWithLines } from "@chenglou/pretext"
+import { prepareWithSegments, layoutWithLines, clearCache } from "@chenglou/pretext"
 import { contrastTextColor, luminance } from "./canvasContext"
 
 // ─── Types ────────────────────────────────────────
@@ -44,6 +44,25 @@ interface BaseElement {
   customData?: Record<string, unknown>
 }
 
+/**
+ * Initializes the pretext library.
+ * Pretext relies on `canvas.measureText()`. Excalidraw loads custom fonts (like Virgil)
+ * asynchronously. We must wait for fonts to be ready, then clear Pretext's cache,
+ * otherwise it will use incorrect measurements from fallback fonts permanently.
+ */
+export async function initPretext() {
+  if (typeof document !== "undefined" && document.fonts) {
+    await document.fonts.ready;
+    if (typeof clearCache === "function") {
+      clearCache();
+    }
+  }
+}
+
+// Cache to prevent re-segmenting the same string repeatedly.
+// layout() is cheap, but prepare() does object allocation and string parsing.
+const preparedTextCache = new Map<string, any>();
+
 function seed(): number {
   return Math.floor(Math.random() * 2_000_000_000)
 }
@@ -62,7 +81,7 @@ function baseElement(
     strokeStyle: "solid",
     roughness: 0,
     opacity: 100,
-    groupIds: [],
+    groupIds: overrides.groupIds || [],
     frameId: null,
     roundness: null,
     seed: seed(),
@@ -87,14 +106,28 @@ function getFontString(fontSize: number, fontFamily: number) {
 
 export function layoutText(text: string, fontSize: number, fontFamily: number, maxWidth: number, maxLines: number) {
   const fontStr = getFontString(fontSize, fontFamily)
+  const cacheKey = `${fontStr}::${text || ""}`
+
+  let prepared = preparedTextCache.get(cacheKey)
+  if (!prepared) {
+    prepared = prepareWithSegments(text || "", fontStr)
+    preparedTextCache.set(cacheKey, prepared)
+    // Prevent unbounded memory growth
+    if (preparedTextCache.size > 2000) {
+      const firstKey = preparedTextCache.keys().next().value
+      if (firstKey !== undefined) {
+        preparedTextCache.delete(firstKey)
+      }
+    }
+  }
+
   const lineHeight = fontSize * 1.25
-  const prepared = prepareWithSegments(text || "", fontStr)
   const result = layoutWithLines(prepared, maxWidth, lineHeight)
   
   let lines = result.lines.slice(0, maxLines)
-  let outText = lines.map(l => l.text).join('\n')
+  let outText = lines.map((l: any) => l.text).join('\n')
   
-  if (result.lines.length > maxLines) {
+  if (result.lines.length > maxLines && lines.length > 0) {
       let newLastLine = lines[lines.length - 1].text;
       if (newLastLine.length > 3) newLastLine = newLastLine.slice(0, -3) + "...";
       else newLastLine += "...";
@@ -104,7 +137,7 @@ export function layoutText(text: string, fontSize: number, fontFamily: number, m
   }
   return {
       text: outText,
-      width: Math.ceil(Math.max(...lines.map(l => l.width), 30)),
+      width: Math.ceil(Math.max(...lines.map((l: any) => l.width), 30)),
       height: Math.ceil(Math.max(fontSize * 1.5, lines.length * lineHeight))
   }
 }
@@ -231,13 +264,13 @@ export function createNoteCard(
         type: "line",
         x: x - 12,
         y: y - 12,
+        groupIds: [groupId],
       }),
       width: 0,
       height: H,
       points: [[0, 0], [0, H]] as [number, number][],
       strokeColor: accentColor,
       strokeWidth: 3,
-      groupIds: [groupId],
       lastCommittedPoint: null,
       startBinding: null,
       endBinding: null,
@@ -304,9 +337,8 @@ export function createSticky(
 ): BaseElement[] {
   const groupId = nanoid()
   const dark = canvasBg ? luminance(canvasBg) < 0.4 : false
-  // On dark backgrounds, use a warmer sticky; on light, classic yellow
   const stickyColor = color ?? (dark ? "#fbbf24" : "#fef08a")
-  const textColor = "#78350f" // Brown text always readable on yellow stickies
+  const textColor = "#78350f" 
 
   return [
     rectElement(nanoid(), x, y, 180, 160, {
@@ -339,9 +371,9 @@ export function createTextBare(
     maxWidth?: number
     maxLines?: number
     customDataType?: string
+    groupIds?: string[]
   }
 ): BaseElement[] {
-  // Auto-pick text color based on background
   const textColor = canvasBg ? contrastTextColor(canvasBg) : "#ffffff"
   const fontSize = opts?.fontSize ?? 20
   const fontFamily = opts?.fontFamily ?? 1
@@ -356,6 +388,7 @@ export function createTextBare(
       color: textColor,
       maxWidth,
       maxLines,
+      groupIds: opts?.groupIds ?? [],
       customData: { type: customDataType }
     })
   ]

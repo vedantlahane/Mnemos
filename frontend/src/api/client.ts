@@ -74,11 +74,13 @@ function extractArray<T>(res: unknown, ...keys: string[]): T[] {
 // ─── Type imports ─────────────────────────────────
 import type {
   Note, Page, NoteEdge, Cluster, CanvasElement,
+  CanvasBinding,
   ChatSource, ChatMessage, ChatConversation,
   TagWithCount, WorkspaceStats, CuratorReport,
   AILayoutResult, GapAnalysisResult, ReadingStep,
   PageSummary, WorkspaceSettings,
   ModelCatalog,
+  PageDocumentBundle,
 } from "../types"
 
 // ─── Response types ───────────────────────────────
@@ -203,21 +205,57 @@ export const api = {
   updatePage: (id: string, data: Record<string, unknown>) =>
     request<Page>(`/pages/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
+  // ─── Notebook Flow ─────────────────────────────
+  getPageDocument: (id: string) =>
+    request<PageDocumentBundle>(`/pages/${id}/document`),
+
+  updatePageDocument: (id: string, data: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/pages/${id}/document`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  getPageBindings: async (id: string) => {
+    const res = await request<unknown>(`/pages/${id}/bindings`)
+    return { bindings: extractArray<CanvasBinding>(res, "bindings") }
+  },
+
+  createPageBlock: (id: string, data: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/pages/${id}/blocks`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updatePageBlock: (pageId: string, blockId: string, data: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/pages/${pageId}/blocks/${blockId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deletePageBlock: (pageId: string, blockId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/blocks/${blockId}`, {
+      method: "DELETE",
+    }),
+
   deletePage: (id: string) =>
     request<{ status: string }>(`/pages/${id}`, { method: "DELETE" }),
 
   // ─── Page Canvas (dedicated endpoints) ──────────
-  getPageCanvas: (id: string) =>
-    request<CanvasResponse>(`/pages/${id}/canvas`),
+  getPageCanvas: (id: string, viewMode: "canvas" | "notebook" = "canvas") => {
+    const url = buildUrl(`/pages/${id}/canvas`, { view_mode: viewMode })
+    return request<CanvasResponse>(url)
+  },
 
   savePageCanvas: (id: string, data: {
     canvas_data?: Record<string, unknown>
     viewport?: { x: number; y: number; zoom: number }
-  }) =>
-    request<{ status: string }>(`/pages/${id}/canvas`, {
+  }, viewMode: "canvas" | "notebook" = "canvas") => {
+    const url = buildUrl(`/pages/${id}/canvas`, { view_mode: viewMode })
+    return request<{ status: string }>(url, {
       method: "PUT",
       body: JSON.stringify(data),
-    }),
+    })
+  },
 
   // ─── Page AI ────────────────────────────────────
   aiLayout: (pageId: string) =>
