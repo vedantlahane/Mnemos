@@ -210,11 +210,13 @@ function isMissingRouteError(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 404 || error.status === 405)
 }
 
-function sceneStorageKey(pageId: string): string {
+function sceneStorageKey(pageId: string, mode: "canvas" | "notebook" = "canvas"): string {
+  if (mode === "notebook") return `${SCENE_STORAGE_PREFIX}${pageId}_notebook`
   return `${SCENE_STORAGE_PREFIX}${pageId}`
 }
 
-function viewportStorageKey(pageId: string): string {
+function viewportStorageKey(pageId: string, mode: "canvas" | "notebook" = "canvas"): string {
+  if (mode === "notebook") return `${VIEWPORT_STORAGE_PREFIX}${pageId}_notebook`
   return `${VIEWPORT_STORAGE_PREFIX}${pageId}`
 }
 
@@ -265,9 +267,9 @@ function normalizeScene(raw: unknown): Scene {
   }
 }
 
-function readLocalScene(pageId: string): Scene {
+function readLocalScene(pageId: string, mode: "canvas" | "notebook" = "canvas"): Scene {
   try {
-    const raw = localStorage.getItem(sceneStorageKey(pageId))
+    const raw = localStorage.getItem(sceneStorageKey(pageId, mode))
     if (!raw) {
       return getEmptyScene()
     }
@@ -277,17 +279,17 @@ function readLocalScene(pageId: string): Scene {
   }
 }
 
-function writeLocalScene(pageId: string, scene: Scene): void {
+function writeLocalScene(pageId: string, scene: Scene, mode: "canvas" | "notebook" = "canvas"): void {
   try {
-    localStorage.setItem(sceneStorageKey(pageId), JSON.stringify(scene))
+    localStorage.setItem(sceneStorageKey(pageId, mode), JSON.stringify(scene))
   } catch {
     // No-op on storage quota or private mode.
   }
 }
 
-function readLocalViewport(pageId: string): { scroll_x: number; scroll_y: number; zoom: number } {
+function readLocalViewport(pageId: string, mode: "canvas" | "notebook" = "canvas"): { scroll_x: number; scroll_y: number; zoom: number } {
   try {
-    const raw = localStorage.getItem(viewportStorageKey(pageId))
+    const raw = localStorage.getItem(viewportStorageKey(pageId, mode))
     if (!raw) {
       return { scroll_x: 0, scroll_y: 0, zoom: 1 }
     }
@@ -302,9 +304,9 @@ function readLocalViewport(pageId: string): { scroll_x: number; scroll_y: number
   }
 }
 
-function writeLocalViewport(pageId: string, viewport: { scroll_x: number; scroll_y: number; zoom: number }): void {
+function writeLocalViewport(pageId: string, viewport: { scroll_x: number; scroll_y: number; zoom: number }, mode: "canvas" | "notebook" = "canvas"): void {
   try {
-    localStorage.setItem(viewportStorageKey(pageId), JSON.stringify(viewport))
+    localStorage.setItem(viewportStorageKey(pageId, mode), JSON.stringify(viewport))
   } catch {
     // No-op on storage quota or private mode.
   }
@@ -439,23 +441,47 @@ export const pages = {
 }
 
 export const scene = {
-  async get(pageId: string): Promise<{
+  async get(pageId: string, mode: "canvas" | "notebook" = "canvas"): Promise<{
     scene: Scene
     viewport: { scroll_x: number; scroll_y: number; zoom: number }
   }> {
-    return {
-      scene: readLocalScene(pageId),
-      viewport: readLocalViewport(pageId),
+    try {
+      const resp = await apiFetch(`/pages/${pageId}/scene?mode=${mode}`)
+      const serverScene = (resp || {}) as Scene
+      const localScene = readLocalScene(pageId, mode)
+      const localViewport = readLocalViewport(pageId, mode)
+      if (!serverScene || !serverScene.elements || !serverScene.elements.length) {
+        return { scene: localScene, viewport: localViewport }
+      }
+      // writeLocalScene(pageId, serverScene, mode) // Optionally keep local synced
+      return {
+        scene: normalizeScene(serverScene),
+        viewport: localViewport,
+      }
+    } catch (e) {
+      return {
+        scene: readLocalScene(pageId, mode),
+        viewport: readLocalViewport(pageId, mode),
+      }
     }
   },
 
-  async save(pageId: string, data: { elements: unknown[]; appState: Record<string, unknown>; files: Record<string, unknown> }): Promise<{ status: string }> {
-    writeLocalScene(pageId, normalizeScene(data))
-    return { status: "saved_local" }
+  async save(pageId: string, data: { elements: unknown[]; appState: Record<string, unknown>; files: Record<string, unknown>; mode?: "canvas" | "notebook" }): Promise<{ status: string }> {
+    const norm = normalizeScene(data)
+    writeLocalScene(pageId, norm, data.mode || "canvas")
+    try {
+      await apiFetch(`/pages/${pageId}/scene?mode=${data.mode || "canvas"}`, {
+        method: "PUT",
+        body: JSON.stringify(norm)
+      })
+      return { status: "saved" }
+    } catch {
+      return { status: "saved_local" }
+    }
   },
 
-  async saveViewport(pageId: string, data: { scroll_x: number; scroll_y: number; zoom: number }): Promise<{ status: string }> {
-    writeLocalViewport(pageId, data)
+  async saveViewport(pageId: string, data: { scroll_x: number; scroll_y: number; zoom: number; mode?: "canvas" | "notebook" }): Promise<{ status: string }> {
+    writeLocalViewport(pageId, data, data.mode || "canvas")
     return { status: "saved_local" }
   },
 
@@ -1078,7 +1104,7 @@ export const api = {
   deletePage: pages.delete,
 
   // Scene compatibility
-  async getPageCanvas(pageId: string): Promise<{
+  async getPageCanvas(pageId: string, mode: "canvas" | "notebook" = "canvas"): Promise<{
     page: Page
     scene_data: Scene
     canvas_data: Scene
@@ -1098,7 +1124,7 @@ export const api = {
   }> {
     const [page, loadedScene, pageNotes, pageEdges, pageRegions] = await Promise.all([
       pages.get(pageId),
-      scene.get(pageId),
+      scene.get(pageId, mode),
       notes.list({ page: 1, limit: 500, page_id: pageId }).then((r) => r.notes).catch(() => []),
       graph.pageEdges(pageId).then((r) => r.edges).catch(() => []),
       canvas.listRegions(pageId).then((r) => r.regions).catch(() => []),
@@ -1122,12 +1148,13 @@ export const api = {
 
   async savePageCanvas(
     pageId: string,
-    payload: { canvas_data?: Scene; viewport?: { x?: number; y?: number; scroll_x?: number; scroll_y?: number; zoom?: number } },
+    payload: { mode?: "canvas" | "notebook"; canvas_data?: Scene; viewport?: { x?: number; y?: number; scroll_x?: number; scroll_y?: number; zoom?: number } },
   ): Promise<{ status: string }> {
     let status = "noop"
 
     if (payload.canvas_data) {
       const saveResult = await scene.save(pageId, {
+        mode: payload.mode || "canvas",
         elements: payload.canvas_data.elements,
         appState: payload.canvas_data.appState,
         files: payload.canvas_data.files,
@@ -1137,6 +1164,7 @@ export const api = {
 
     if (payload.viewport) {
       const viewportResult = await scene.saveViewport(pageId, {
+        mode: payload.mode || "canvas",
         scroll_x: typeof payload.viewport.scroll_x === "number" ? payload.viewport.scroll_x : payload.viewport.x || 0,
         scroll_y: typeof payload.viewport.scroll_y === "number" ? payload.viewport.scroll_y : payload.viewport.y || 0,
         zoom: payload.viewport.zoom || 1,

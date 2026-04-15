@@ -78,10 +78,6 @@ function PageCard({
           <div className="font-semibold text-[13px] text-white truncate">
             {page.name}
           </div>
-          <div className="text-[10px] text-[var(--glass-text-muted)]">
-            {page.note_count || 0} note
-            {(page.note_count || 0) !== 1 ? "s" : ""}
-          </div>
         </div>
       </div>
       {page.description && (

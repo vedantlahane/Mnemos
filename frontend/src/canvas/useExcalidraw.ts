@@ -230,7 +230,7 @@ export function useExcalidraw(
     currentSceneKey.current = sceneKey
 
     try {
-      const response = await api.getPageCanvas(pageId)
+      const response = await api.getPageCanvas(pageId, _storageMode)
       if (currentSceneKey.current !== sceneKey) {
         return
       }
@@ -370,7 +370,7 @@ export function useExcalidraw(
               gridSize: payload.appState.gridSize,
             }
 
-            await api.savePageCanvas(pageId, {
+            await api.savePageCanvas(pageId, { mode: _storageMode,
               canvas_data: {
                 elements: payload.elements as ExcalidrawElement[],
                 appState: persistedAppState,

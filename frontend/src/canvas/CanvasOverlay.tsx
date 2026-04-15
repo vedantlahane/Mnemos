@@ -14,7 +14,7 @@ export default function CanvasOverlay() {
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-[var(--color-void)]">
       {/* Top Header UI with Seamless Switcher */}
-      <div className="absolute top-4 left-4 z-30 flex items-center gap-2 pointer-events-auto bg-[rgba(10,10,20,0.8)] backdrop-blur-md px-2 py-1.5 rounded-xl border border-white/5 shadow-lg">
+      <div className="absolute top-4 right-4 z-30 flex items-center gap-2 pointer-events-auto bg-[rgba(10,10,20,0.8)] backdrop-blur-md px-2 py-1.5 rounded-xl border border-white/5 shadow-lg">
          <button
           onClick={() => setViewMode("canvas")}
           className={
@@ -48,7 +48,7 @@ export default function CanvasOverlay() {
       )}
 
       <div className="flex-1 relative">
-        <ExcalidrawCanvas pageId={current.pageId} viewMode={viewMode} />
+        <ExcalidrawCanvas key={viewMode} pageId={current.pageId} viewMode={viewMode} />        
       </div>
     </div>
   )

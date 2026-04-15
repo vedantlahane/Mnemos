@@ -368,11 +368,11 @@
     bottom: 0;
     left: 50%;
     transform: translateX(-50%);
-    width: 720px;
-    max-width: 90vw;
-    border-left: 1px dashed rgba(255, 255, 255, 0.03);
-    border-right: 1px dashed rgba(255, 255, 255, 0.03);
+    width: calc(var(--notebook-width, 720px) * var(--notebook-zoom, 1));
+    border-left: 2px dashed rgba(160, 160, 160, 0.4);
+    border-right: 2px dashed rgba(160, 160, 160, 0.4);
     pointer-events: none;
     z-index: 1;
+    transition: width 0s;
   }
 }

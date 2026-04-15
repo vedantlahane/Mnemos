@@ -127,6 +127,7 @@ class CanvasStreamRequest(BaseModel):
     history: list[dict] = []
     selected_element_ids: list[str] = []
     context_type: str = "page"
+    mode: str = "canvas"
 
 
 class Intent(str, Enum):

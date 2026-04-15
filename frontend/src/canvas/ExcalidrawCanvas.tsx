@@ -327,7 +327,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
       sceneApplied.current = true
       setTimeout(() => {
         suppressAutosaveRef.current = false
-        if (isNotebook) notebook.relayout(true)
+        if (isNotebook) notebook.relayout()
       }, 100)
     }, 150)
     return () => clearTimeout(timer)
@@ -342,7 +342,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
 
   useEffect(() => {
     if (isNotebook && sceneApplied.current) {
-      const timer = setTimeout(() => notebook.relayout(true), 300)
+      const timer = setTimeout(() => notebook.relayout(), 300)
       return () => clearTimeout(timer)
     }
   }, [isNotebook, notebook])
@@ -436,7 +436,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
                     noteId: note.id, title: note.title || "Untitled",
                     summary: note.summary || note.raw_text, tags: note.tags || [],
                   }, { x: pos.x, y: pos.y }, bgColor))
-                  if (isNotebook) notebook.relayout(true)
+                  if (isNotebook) notebook.relayout()
                 } catch {}
               }, 3000)
             } catch {
@@ -448,7 +448,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
             }
           }
         }
-        if (isNotebook) setTimeout(() => notebook.relayout(true), 100)
+        if (isNotebook) setTimeout(() => notebook.relayout(), 100)
         break
       }
 
@@ -526,7 +526,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
         } finally {
           suppressAutosaveRef.current = false
           flushSceneSave()
-          if (isNotebook) setTimeout(() => notebook.relayout(true), 200)
+          if (isNotebook) setTimeout(() => notebook.relayout(), 200)
         }
         break
       }
@@ -563,7 +563,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
         } finally {
           suppressAutosaveRef.current = false
           flushSceneSave()
-          if (isNotebook) setTimeout(() => notebook.relayout(true), 200)
+          if (isNotebook) setTimeout(() => notebook.relayout(), 200)
         }
         break
       }
@@ -713,14 +713,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
           <MainMenu.DefaultItems.ChangeCanvasBackground />
         </MainMenu>
       </Excalidraw>
-
-      {isNotebook && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-[var(--glass-text-muted)] bg-[rgba(0,0,0,0.4)] backdrop-blur-sm px-3 py-1 rounded-full border border-white/5">
-            Notebook Mode Active
-          </div>
-        </div>
-      )}
 
       {!hasRealContent && !emptyOverlayDismissed && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 5 }}>

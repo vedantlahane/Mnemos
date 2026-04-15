@@ -1,12 +1,11 @@
 /**
- * useNotebookMode — constrains Excalidraw into a vertical-scroll notebook.
+ * useNotebookMode — constrains Excalidraw into a notebook-like readable area. 
  *
  * When active:
- *  1. Elements are grouped and stacked vertically in a centered column
+ *  1. Elements are kept within a centered column boundary
  *  2. Horizontal scroll is locked
  *  3. Text elements are reflowed to fit column width via pretext
- *  4. New content is placed at the bottom of the column
- *  5. Window resize triggers re-layout
+ *  4. Elements are freely placed vertically
  */
 
 import { useCallback, useEffect, useRef } from "react"
@@ -179,14 +178,10 @@ function reflowTextElement(
 
   const laid = layoutText(text, fontSize, fontFamily, maxWidth, 2000)
 
-  // Skip if nothing changed
-  const curW = Math.round(el.width || 0)
-  const curH = Math.round(el.height || 0)
-  if (
-    laid.text === (el.text || "") &&
-    Math.abs(curW - laid.width) < 1 &&
-    Math.abs(curH - laid.height) < 1
-  ) {
+  // Skip if text hasn't changed its line-breaks/content
+  // We completely ignore minor width/height measurement differences
+  // to avoid infinite loops fighting Excalidraw's internal browser-native text measurer
+  if (laid.text === (el.text || "")) {
     return null
   }
 
@@ -208,18 +203,27 @@ function stackBlocks(
   column: ColumnBounds
 ): Map<string, { dx: number; dy: number }> {
   const moves = new Map<string, { dx: number; dy: number }>()
-  let cursorY = COLUMN_TOP
+
+  const leftBound = column.left + COLUMN_PAD_LEFT
+  const rightBound = column.left + column.width - COLUMN_PAD_RIGHT
 
   for (const block of blocks) {
-    // Target X: center the block in the column
-    const targetX = column.left + (column.width - block.bbox.w) / 2
-    // For wide blocks, align to column left
-    const effectiveX = block.bbox.w >= column.width * 0.9
-      ? column.left
-      : Math.max(column.left, targetX)
+    // Allow free placement within the column boundaries
+    let effectiveX = block.bbox.x
+
+    // Clamp X to ensure elements stay within the readable padding boundary
+    if (effectiveX < leftBound) {
+      effectiveX = leftBound
+    } else if (effectiveX + block.bbox.w > rightBound) {
+      effectiveX = rightBound - block.bbox.w
+    }
+
+    if (block.bbox.w >= (rightBound - leftBound)) {
+      effectiveX = leftBound
+    }
 
     const dx = effectiveX - block.bbox.x
-    const dy = cursorY - block.bbox.y
+    const dy = 0 // Free vertical placement, no more forced stacking
 
     // Only record if there's actual movement
     if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
@@ -227,8 +231,6 @@ function stackBlocks(
         moves.set(el.id, { dx, dy })
       }
     }
-
-    cursorY += block.bbox.h + BLOCK_GAP
   }
 
   return moves
@@ -251,28 +253,19 @@ export function useNotebookMode(
    */
   const getColumn = useCallback((): ColumnBounds => {
     const api = excalidrawRef.current
-    if (!api) {
-      const fallbackW = Math.min(720, window.innerWidth - 80)
-      return {
-        centerX: 0,
-        left: -fallbackW / 2,
-        maxTextWidth: fallbackW - COLUMN_PAD_LEFT - COLUMN_PAD_RIGHT,
-        width: fallbackW,
-      }
+    let vw = window.innerWidth
+
+    if (api) {
+      const appState = api.getAppState()
+      vw = (appState.width as number) || window.innerWidth
     }
 
-    const appState = api.getAppState()
-    const zoom = (appState.zoom as { value: number })?.value
-      ?? (appState.zoom as number)
-      ?? 1
-    const scrollX = (appState.scrollX as number) || 0
-    const vw = (appState.width as number) || window.innerWidth
+    // Use a fixed center at 0 so the boundaries act like fixed margins on a page.
+    const centerX = 0
 
-    // Viewport center in scene coords
-    const centerX = (-scrollX + vw / 2) / zoom
-
-    // Column width: up to 720 scene units, or 90% of viewport
-    const maxColumnScene = Math.min(720, (vw / zoom) * 0.9)
+    // Column width: fixed physical width, e.g., 1024
+    // We ignore zoom so the document width remains consistent internally
+    const maxColumnScene = Math.min(1024, vw * 0.95)
     const left = centerX - maxColumnScene / 2
 
     return {
@@ -362,42 +355,12 @@ export function useNotebookMode(
             .map((e) => `${e.id}:${e.version || 0}`)
             .join("|")
         }
-
-        // Step 4: Lock horizontal scroll — clamp to column center
-        const appState = api.getAppState()
-        const zoom = (appState.zoom as { value: number })?.value
-          ?? (appState.zoom as number)
-          ?? 1
-        const vw = (appState.width as number) || window.innerWidth
-        const desiredScrollX = vw / 2 - column.centerX * zoom
-
-        const currentScrollX = (appState.scrollX as number) || 0
-        if (Math.abs(currentScrollX - desiredScrollX) > 1) {
-          api.updateScene({
-            appState: {
-              scrollX: desiredScrollX,
-            } as unknown as Record<string, unknown>,
-          })
-        }
       } finally {
         isLayouting.current = false
       }
     },
     [enabled, excalidrawRef, getColumn]
   )
-
-  /**
-   * Called on every Excalidraw onChange — throttled via rAF.
-   */
-  const onNotebookChange = useCallback(() => {
-    if (!enabled) return
-
-    if (rafId.current != null) cancelAnimationFrame(rafId.current)
-    rafId.current = requestAnimationFrame(() => {
-      rafId.current = null
-      relayout(false)
-    })
-  }, [enabled, relayout])
 
   /**
    * Check if an element is currently being edited.
@@ -410,20 +373,79 @@ export function useNotebookMode(
     return Boolean(
       appState.editingTextElement ||
       appState.editingLinearElement ||
-      appState.editingGroupId
+      appState.editingGroupId ||
+      appState.draggingElement ||
+      appState.resizingElement ||
+      appState.multiElement ||
+      (appState.activeTool && appState.activeTool.type !== "selection")
     )
   }, [excalidrawRef])
 
   /**
-   * Safe relayout that skips if user is editing.
+   * Safe relayout that skips if user is editing elements, but enforces zoom and horizontal scroll.
    */
   const safeRelayout = useCallback(
     (force = false) => {
-      if (isEditing()) return
+      if (isEditing()) return // <--- Moved to the top to absolutely prevent conflicting with Excalidraw's editing loops
+
+      // Enforce the document viewport (zoom = 1, centered scroll)
+      const api = excalidrawRef.current
+      if (api && enabled) {
+        const column = getColumn()
+        const appState = api.getAppState()
+        
+        const desiredZoom = 1
+        const currentZoom = (appState.zoom as { value: number })?.value ?? (appState.zoom as number) ?? 1
+        const vw = (appState.width as number) || window.innerWidth
+        const desiredScrollX = vw / 2 - column.centerX * desiredZoom
+        const currentScrollX = (appState.scrollX as number) || 0
+        const needsScrollXUpdate = Math.abs(currentScrollX - desiredScrollX) > 1
+        const needsZoomUpdate = Math.abs(currentZoom - desiredZoom) > 0.01
+
+        if (needsScrollXUpdate || needsZoomUpdate) {
+          api.updateScene({
+            appState: {
+              ...(needsScrollXUpdate ? { scrollX: desiredScrollX } : {}),
+              ...(needsZoomUpdate ? { zoom: { value: desiredZoom } } : {}),
+            } as unknown as Record<string, unknown>,
+          })
+        }
+      }
+
       relayout(force)
     },
-    [relayout, isEditing]
+    [relayout, isEditing, getColumn, excalidrawRef, enabled]
   )
+
+  /**
+   * Called on every Excalidraw onChange — throttled via rAF.
+   */
+  const onNotebookChange = useCallback(() => {
+    if (!enabled) return
+
+    // Update CSS variables for visual margins immediately
+    if (excalidrawRef.current) {
+      try {
+        const appState = excalidrawRef.current.getAppState()
+        if (appState) {
+          const vw = (appState.width as number) || window.innerWidth
+          const zoom = (appState.zoom as { value: number })?.value ?? (appState.zoom as number) ?? 1
+          const maxColumnScene = Math.min(1024, vw * 0.95)
+          
+          document.documentElement.style.setProperty('--notebook-zoom', zoom.toString())
+          document.documentElement.style.setProperty('--notebook-width', `${maxColumnScene}px`)
+        }
+      } catch (e) {
+        // Ignore read errors
+      }
+    }
+
+    if (rafId.current != null) cancelAnimationFrame(rafId.current)
+    rafId.current = requestAnimationFrame(() => {
+      rafId.current = null
+      safeRelayout(false)
+    })
+  }, [enabled, safeRelayout, excalidrawRef])
 
   // Relayout on window resize
   useEffect(() => {

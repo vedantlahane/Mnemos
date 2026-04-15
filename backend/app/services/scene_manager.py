@@ -153,14 +153,14 @@ class SceneManager:
     After every save, visual context is updated.
     """
 
-    async def get_scene(self, page_id: str) -> dict:
-        scene = await db.get_scene(page_id)
+    async def get_scene(self, page_id: str, mode: str = "canvas") -> dict:
+        scene = await db.get_scene(page_id, mode)
         return normalize_scene(scene)
 
-    async def save_scene(self, page_id: str, scene: dict) -> dict:
+    async def save_scene(self, page_id: str, scene: dict, mode: str = "canvas") -> dict:
         """Save scene and trigger visual analysis + registry sync."""
         normalized = normalize_scene(scene)
-        await db.save_scene(page_id, normalized)
+        await db.save_scene(page_id, normalized, mode)
         await cache_svc.invalidate_scene(page_id)
 
         # Async visual analysis

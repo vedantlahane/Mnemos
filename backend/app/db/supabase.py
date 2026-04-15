@@ -291,7 +291,7 @@ class Database:
     # SCENES (separate from pages)
     # ═══════════════════════════════════════
 
-    async def get_scene(self, page_id: str) -> dict:
+    async def get_scene(self, page_id: str, mode: str = "canvas") -> dict:
         try:
             result = await _run(
                 lambda: client.table("page_scenes")
@@ -301,17 +301,36 @@ class Database:
                 .execute()
             )
             if result.data:
-                return result.data.get("scene_data") or {"elements": [], "appState": {}, "files": {}}
+                data = result.data.get("scene_data") or {"elements": [], "appState": {}, "files": {}}
+                if "elements" in data and "canvas" not in data:
+                    if mode == "canvas": return data
+                    return {"elements": [], "appState": {}, "files": {}}
+                return data.get(mode, {"elements": [], "appState": {}, "files": {}})
             return {"elements": [], "appState": {}, "files": {}}
         except Exception:
             return {"elements": [], "appState": {}, "files": {}}
 
-    async def save_scene(self, page_id: str, scene_data: dict) -> None:
+    async def save_scene(self, page_id: str, scene_data: dict, mode: str = "canvas") -> None:
+        result = await _run(
+            lambda: client.table("page_scenes")
+            .select("*")
+            .eq("page_id", page_id)
+            .maybe_single()
+            .execute()
+        )
+        current = result.data.get("scene_data") if result.data else None
+        if not current:
+            current = {}
+        if "elements" in current and "canvas" not in current:
+            current = {"canvas": current}
+            
+        current[mode] = scene_data
+
         await _run(
             lambda: client.table("page_scenes")
             .upsert({
                 "page_id": page_id,
-                "scene_data": scene_data,
+                "scene_data": current,
                 "version": 1,  # TODO: increment
                 "updated_at": _now(),
             })

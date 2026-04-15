@@ -132,9 +132,7 @@ export default function WelcomeBlock(_props: { item: BlockItem }) {
                   <div className="text-[12.5px] font-semibold text-white truncate">
                     {p.name}
                   </div>
-                  <div className="text-[10px] text-[var(--glass-text-muted)]">
-                    {p.note_count} note{p.note_count !== 1 ? "s" : ""}
-                  </div>
+
                 </div>
               </motion.button>
             ))}

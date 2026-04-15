@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react"
-import { useStream, useStreamStore } from "../hooks/useStream"
+import { useStream } from "../hooks/useStream"
 import { useAppContext } from "../hooks/useAppContext"
 import StreamMessage from "./StreamMessage"
 import StreamBlock from "./StreamBlock"
 import LibraryPanel from "../components/LibraryPanel"
 import { ErrorBoundary } from "../components/ErrorBoundary"
 import {
-  Loader2, Minimize2, Maximize2, MessageCircle, BookOpen, X, BarChart2, Search
+  Loader2, Minimize2, Maximize2, MessageCircle, BookOpen, X, Search
 } from "lucide-react"
 import { motion, AnimatePresence, useDragControls } from "framer-motion"
 import { useCanvasEvents } from "../hooks/useCanvasEvents"
@@ -148,23 +148,6 @@ export default function Stream() {
               title="Search Canvas"
             >
               <Search size={13} />
-            </button>
-            <button
-              onClick={() => {
-                if (current.pageId) {
-                  import("../api/client").then(({ api }) => {
-                    api.getPageStats(current.pageId!).then((stats) => {
-                      useStreamStore.getState().addSystemMessage(
-                        `📊 ${stats.note_count} notes · ${stats.edge_count} clusters`
-                      )
-                    }).catch(() => {})
-                  })
-                }
-              }}
-              className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.08)] text-[var(--glass-text-muted)] hover:text-[var(--accent-light)] transition-colors"
-              title="Page Stats"
-            >
-              <BarChart2 size={13} />
             </button>
             <button
               onClick={() => setMaximized(!maximized)}
