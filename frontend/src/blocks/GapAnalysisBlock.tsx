@@ -1,7 +1,9 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api } from "../api/client"
+import { ai, api } from "../api/client"
 import { AsyncBlock } from "../components/AsyncBlock"
-import type { BlockItem, GapAnalysisResult } from "../types"
+import type { BlockItem } from "../types"
+
+export interface GapAnalysisResult { covered: string[]; missing: string[]; suggestions: string[]; }
 import { AlertTriangle, CheckCircle, Lightbulb } from "lucide-react"
 
 export default function GapAnalysisBlock({ item }: { item: BlockItem }) {
@@ -10,10 +12,11 @@ export default function GapAnalysisBlock({ item }: { item: BlockItem }) {
   const { data, loading, error } = useAsyncData(
     async (): Promise<GapAnalysisResult> => {
       try {
-        return await api.gapAnalysis(pageId)
+        (await ai.analyzePage(pageId || "dummy")) as any
       } catch {
         // Fallback: use chat endpoint
-        const resp = await api.chat(
+        const { chat } = await import("../api/client");
+        const resp = await chat.send(
           pageId
             ? "Analyze notes on this page. What's covered, missing, and what should I read next? Return JSON: {covered:[], missing:[], suggestions:[]}"
             : "Analyze all my notes. What's covered, missing, and what should I learn? Return JSON: {covered:[], missing:[], suggestions:[]}",

@@ -19,6 +19,7 @@ const SettingsBlock = lazy(() => import("../blocks/SettingsBlock"))
 const HistoryBlock = lazy(() => import("../blocks/HistoryBlock"))
 const PageStatsBlock = lazy(() => import("../blocks/PageStatsBlock"))
 const ExportBlock = lazy(() => import("../blocks/ExportBlock"))
+const BatchCaptureBlock = lazy(() => import("../blocks/BatchCaptureBlock"))
 
 const BLOCK_MAP: Record<
   string,
@@ -40,6 +41,7 @@ const BLOCK_MAP: Record<
   history: HistoryBlock,
   "page-stats": PageStatsBlock,
   export: ExportBlock,
+  batch: BatchCaptureBlock,
 }
 
 function BlockFallback() {

@@ -1,5 +1,5 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api } from "../api/client"
+import { ai } from "../api/client"
 import { AsyncBlock } from "../components/AsyncBlock"
 import { useStream } from "../hooks/useStream"
 import type { CuratorReport, BlockItem } from "../types"
@@ -11,7 +11,7 @@ export default function CuratorReportBlock(_props: { item: BlockItem }) {
   const [applying, setApplying] = useState<string | null>(null)
 
   const { data, loading, error } = useAsyncData(
-    () => api.curatorScan(),
+    () => ai.curatorScan() as Promise<CuratorReport>,
     []
   )
 
@@ -22,13 +22,13 @@ export default function CuratorReportBlock(_props: { item: BlockItem }) {
   }) {
     setApplying(action.action_type)
     try {
-      await api.curatorApply({
+      await ai.curatorApply({
         action_type: action.action_type,
         params: action.params,
       })
-      addSystemMessage(`✓ Applied: ${action.reason}`)
+      addSystemMessage(`âœ“ Applied: ${action.reason}`)
     } catch {
-      addSystemMessage(`✗ Failed: ${action.reason}`)
+      addSystemMessage(`âœ— Failed: ${action.reason}`)
     } finally {
       setApplying(null)
     }
@@ -39,7 +39,7 @@ export default function CuratorReportBlock(_props: { item: BlockItem }) {
       data={data}
       loading={loading}
       error={error}
-      loadingMessage="Running curator scan…"
+      loadingMessage="Running curator scanâ€¦"
     >
       {(report) => <ReportContent report={report} applying={applying} onApply={applyAction} />}
     </AsyncBlock>
@@ -87,7 +87,7 @@ function ReportContent({
             >
               {report.potential_duplicates.map((d, i) => (
                 <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
-                  Similarity {Math.round(d.similarity * 100)}% — {d.reason}
+                  Similarity {Math.round(d.similarity * 100)}% â€” {d.reason}
                 </div>
               ))}
             </Section>
@@ -100,7 +100,7 @@ function ReportContent({
             >
               {report.orphan_notes.map((o, i) => (
                 <div key={i} className="text-[12px] text-[var(--glass-text-dim)] py-1">
-                  "{o.title}" — {o.suggestion}
+                  "{o.title}" â€” {o.suggestion}
                 </div>
               ))}
             </Section>
@@ -134,7 +134,7 @@ function ReportContent({
                     disabled={applying === action.action_type}
                     className="text-[11px] text-[var(--accent)] border border-[rgba(99,102,241,0.25)] px-3 py-1 rounded-lg hover:bg-[var(--accent-subtle)] transition-colors disabled:opacity-50"
                   >
-                    {applying === action.action_type ? "Applying…" : "Apply"}
+                    {applying === action.action_type ? "Applyingâ€¦" : "Apply"}
                   </button>
                 </div>
               ))}
@@ -145,7 +145,7 @@ function ReportContent({
 
       {report.auto_applied > 0 && (
         <div className="mt-4 text-[11px] text-[var(--green)]">
-          ✓ Auto-applied {report.auto_applied} safe action
+          âœ“ Auto-applied {report.auto_applied} safe action
           {report.auto_applied > 1 ? "s" : ""}
         </div>
       )}

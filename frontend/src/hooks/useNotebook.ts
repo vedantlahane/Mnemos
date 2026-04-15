@@ -1,5 +1,5 @@
 /**
- * useNotebook — manages block state, editing, persistence for the notebook editor.
+ * useNotebook Ã¢â‚¬â€ manages block state, editing, persistence for the notebook editor.
  *
  * Responsibilities:
  *  - Load PageDocumentBundle from API
@@ -10,11 +10,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { api } from "../api/client"
+import { api, documentApi, pages } from "../api/client"
 import type { PageBlock, PageDocumentBundle } from "../types"
 import { uid } from "../utils"
 
-// ── Types ──────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Types Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 export interface LocalBlock {
   /** Matches PageBlock.id, or a temp id for new blocks */
@@ -43,7 +43,7 @@ export interface NotebookState {
 
 const SAVE_DEBOUNCE_MS = 2_000
 
-// ── Conversion helpers ─────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Conversion helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 function toLocal(b: PageBlock): LocalBlock {
   return {
@@ -63,7 +63,7 @@ function midKey(a: number, b: number): number {
   return Math.round(((a + b) / 2) * 1000) / 1000
 }
 
-// ── Hook ────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Hook Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 export function useNotebook(pageId: string) {
   const [state, setState] = useState<NotebookState>({
@@ -83,7 +83,7 @@ export function useNotebook(pageId: string) {
   const isSaving = useRef(false)
   const mounted = useRef(true)
 
-  // ── Helpers ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Helpers Ã¢â€â‚¬Ã¢â€â‚¬
 
   const patch = useCallback(
     (fn: (prev: NotebookState) => Partial<NotebookState>) =>
@@ -96,7 +96,7 @@ export function useNotebook(pageId: string) {
     [state.blocks]
   )
 
-  // ── Load ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Load Ã¢â€â‚¬Ã¢â€â‚¬
 
   const load = useCallback(async () => {
     patch(() => ({ loading: true, error: null }))
@@ -105,7 +105,7 @@ export function useNotebook(pageId: string) {
     createdIds.current.clear()
 
     try {
-      const bundle: PageDocumentBundle = await api.getPageDocument(pageId)
+      const bundle: PageDocumentBundle = await documentApi.get(pageId)
       const blocks = (bundle.blocks || [])
         .filter((b) => !b.is_deleted)
         .sort((a, b) => (a.order_key || 0) - (b.order_key || 0))
@@ -152,7 +152,7 @@ export function useNotebook(pageId: string) {
       createdIds.current.add(fallback.id)
 
       try {
-        const page = await api.getPage(pageId)
+        const page = await pages.get(pageId)
         patch(() => ({
           blocks: [fallback],
           loading: false,
@@ -181,7 +181,7 @@ export function useNotebook(pageId: string) {
     }
   }, [load])
 
-  // ── Save (debounced batch) ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Save (debounced batch) Ã¢â€â‚¬Ã¢â€â‚¬
 
   const scheduleSave = useCallback(() => {
     patch(() => ({ saveStatus: "dirty" }))
@@ -207,7 +207,7 @@ export function useNotebook(pageId: string) {
           const block = allBlocks.find((b) => b.id === id)
           if (!block) continue
           try {
-            await api.createPageBlock(pageId, {
+            await documentApi.createBlock(pageId, {
               id: block.id,
               block_type: block.blockType,
               text_content: block.textContent,
@@ -217,7 +217,7 @@ export function useNotebook(pageId: string) {
           } catch {
             // If creation fails with conflict, try updating instead
             try {
-              await api.updatePageBlock(pageId, block.id, {
+              await documentApi.updateBlock(pageId, block.id, {
                 block_type: block.blockType,
                 text_content: block.textContent,
                 depth: block.depth,
@@ -233,7 +233,7 @@ export function useNotebook(pageId: string) {
           const block = state.blocks.find((b) => b.id === id)
           if (!block || block.isDeleted) continue
           try {
-            await api.updatePageBlock(pageId, id, {
+            await documentApi.updateBlock(pageId, id, {
               block_type: block.blockType,
               text_content: block.textContent,
               depth: block.depth,
@@ -245,7 +245,7 @@ export function useNotebook(pageId: string) {
         // Delete blocks
         for (const id of deletedIds.current) {
           try {
-            await api.deletePageBlock(pageId, id)
+            await documentApi.deleteBlock(pageId, id)
           } catch {}
         }
 
@@ -267,7 +267,7 @@ export function useNotebook(pageId: string) {
     }, SAVE_DEBOUNCE_MS)
   }, [pageId, state.blocks, patch])
 
-  // ── Block operations ──
+  // Ã¢â€â‚¬Ã¢â€â‚¬ Block operations Ã¢â€â‚¬Ã¢â€â‚¬
 
   const updateBlockText = useCallback(
     (blockId: string, text: string) => {
@@ -407,7 +407,7 @@ export function useNotebook(pageId: string) {
       })
 
       if (createdIds.current.has(blockId)) {
-        // Never persisted — just remove from create queue
+        // Never persisted Ã¢â‚¬â€ just remove from create queue
         createdIds.current.delete(blockId)
       } else {
         deletedIds.current.add(blockId)

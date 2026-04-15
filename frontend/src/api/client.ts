@@ -1,16 +1,10 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api"
 
-function buildUrl(path: string, params?: Record<string, string | number | boolean | undefined>): string {
-  const url = new URL(`${API_BASE}${path}`, window.location.origin)
-  if (params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
-        url.searchParams.set(key, String(value))
-      }
-    })
-  }
-  return url.toString()
-}
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8001/api"
+
+// ═══════════════════════════════════════════════════════
+// Core request infrastructure
+// ═══════════════════════════════════════════════════════
 
 function getAuthHeader(): Record<string, string> {
   const token = localStorage.getItem("mnemos-token")
@@ -25,17 +19,16 @@ async function request<T = unknown>(path: string, options?: RequestInit): Promis
   const timeoutId = setTimeout(() => controller.abort(), 30_000)
 
   try {
-    const res = await fetch(
-      path.startsWith("http") ? path : `${API_BASE}${path}`,
-      {
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeader(),
-        },
-        signal: controller.signal,
-        ...options,
-      }
-    )
+    const url = path.startsWith("http") ? path : `${API_BASE}${path}`
+    const res = await fetch(url, {
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+        ...(options?.headers as Record<string, string> || {}),
+      },
+      signal: controller.signal,
+      ...options,
+    })
     clearTimeout(timeoutId)
 
     if (!res.ok) {
@@ -60,66 +53,34 @@ async function request<T = unknown>(path: string, options?: RequestInit): Promis
   }
 }
 
-function extractArray<T>(res: unknown, ...keys: string[]): T[] {
-  if (Array.isArray(res)) return res
-  if (res && typeof res === "object") {
-    for (const key of keys) {
-      const val = (res as Record<string, unknown>)[key]
-      if (Array.isArray(val)) return val
-    }
-  }
-  return []
+function buildQuery(params?: Record<string, string | number | boolean | undefined>): string {
+  if (!params) return ""
+  const entries = Object.entries(params).filter(
+    ([, v]) => v !== undefined && v !== null && v !== ""
+  )
+  if (entries.length === 0) return ""
+  return "?" + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")
 }
 
-// ─── Type imports ─────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// Type imports
+// ═══════════════════════════════════════════════════════
+
 import type {
-  Note, Page, NoteEdge, Cluster, CanvasElement,
-  CanvasBinding,
+  Page, Note, NoteEdge, Region, VisualContext,
+  ElementRegistryEntry, SceneResponse, CanvasOp,
+  PageDocument, PageBlock, PageDocumentBundle,
   ChatSource, ChatMessage, ChatConversation,
-  TagWithCount, WorkspaceStats, CuratorReport,
-  AILayoutResult, GapAnalysisResult, ReadingStep,
-  PageSummary, WorkspaceSettings,
+  TagWithCount, WorkspaceSettings, CuratorReport,
   ModelCatalog,
-  PageDocumentBundle,
 } from "../types"
 
-// ─── Response types ───────────────────────────────
-interface CanvasResponse {
-  page: Page
-  canvas_data: Record<string, unknown>
-  notes: Note[]
-  edges: NoteEdge[]
-  elements: CanvasElement[]
-  clusters: Cluster[]
-  viewport: { x: number; y: number; zoom: number }
-}
+// ═══════════════════════════════════════════════════════
+// Auth
+// ═══════════════════════════════════════════════════════
 
-interface WorkspaceOverview {
-  stats: WorkspaceStats
-  pages: Page[]
-  recent_notes: Note[]
-  top_tags: TagWithCount[]
-}
-
-interface WorkspaceExport {
-  pages: Page[]
-  notes: Note[]
-  edges: NoteEdge[]
-  tags: TagWithCount[]
-  exported_at: string
-}
-
-interface PageStats {
-  note_count: number
-  edge_count: number
-  cluster_count: number
-  element_count: number
-  tags: TagWithCount[]
-}
-
-export const api = {
-  // ─── Auth ───────────────────────────────────────
-  authGoogle: (token: string) =>
+export const auth = {
+  google: (token: string) =>
     request<{
       access_token: string
       refresh_token: string
@@ -129,57 +90,188 @@ export const api = {
       body: JSON.stringify({ token }),
     }),
 
-  authRefresh: (refreshToken: string) =>
+  refresh: (refreshToken: string) =>
     request<{ access_token: string }>("/auth/refresh", {
       method: "POST",
       body: JSON.stringify({ refresh_token: refreshToken }),
     }),
 
-  authMe: () =>
+  me: () =>
     request<{
       auth_enabled: boolean
       user: null | { id: string; email: string; name: string; avatar_url?: string }
       google_client_id?: string
-    }>(
-      "/auth/me"
+    }>("/auth/me"),
+}
+
+// ═══════════════════════════════════════════════════════
+// Pages (lightweight metadata — NO scene data)
+// ═══════════════════════════════════════════════════════
+
+export const pages = {
+  list: (includeArchived = false) =>
+    request<{ pages: Page[] }>(`/pages${buildQuery({ include_archived: includeArchived })}`),
+
+  get: (id: string) =>
+    request<Page>(`/pages/${id}`),
+
+  create: (data: {
+    name: string
+    description?: string
+    icon?: string
+    color?: string
+    layout_mode?: "canvas" | "notebook"
+  }) =>
+    request<Page>("/pages", { method: "POST", body: JSON.stringify(data) }),
+
+  update: (id: string, data: Partial<Pick<Page, "name" | "description" | "icon" | "color" | "is_archived" | "layout_mode">>) =>
+    request<Page>(`/pages/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  delete: (id: string) =>
+    request<{ status: string }>(`/pages/${id}`, { method: "DELETE" }),
+}
+
+// ═══════════════════════════════════════════════════════
+// Scene (separated from page — large payload)
+// ═══════════════════════════════════════════════════════
+
+export const scene = {
+  /** Main canvas load — returns EVERYTHING the canvas needs in one call */
+  get: (pageId: string) =>
+    request<SceneResponse>(`/pages/${pageId}/scene`),
+
+  /** Save scene data (triggers visual analysis + registry sync server-side) */
+  save: (pageId: string, data: { elements: any[]; appState: Record<string, any>; files: Record<string, any> }) =>
+    request<{ status: string }>(`/pages/${pageId}/scene`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  /** Save viewport separately (lightweight, no visual analysis triggered) */
+  saveViewport: (pageId: string, data: { scroll_x: number; scroll_y: number; zoom: number }) =>
+    request<{ status: string }>(`/pages/${pageId}/viewport`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  /** Get AI's visual understanding of the canvas */
+  getVisualContext: (pageId: string) =>
+    request<VisualContext>(`/pages/${pageId}/visual-context`),
+
+  /** Trigger full AI layout recalculation */
+  triggerLayout: (pageId: string) =>
+    request<{ status: string; positions: number; overlaps_resolved: number }>(
+      `/pages/${pageId}/layout`,
+      { method: "POST" }
     ),
 
-  // ─── Notes ──────────────────────────────────────
-  listNotes: async (page = 1, limit = 20, tag?: string, pageId?: string) => {
-    const url = buildUrl("/notes", { page, limit, tag, page_id: pageId })
-    const res = await request<{ notes: Note[]; total: number }>(url)
-    return {
-      notes: extractArray<Note>(res, "notes"),
-      total: (res as Record<string, unknown>).total as number || 0,
-    }
-  },
+  /** Re-sync all DB notes onto the canvas scene */
+  syncNotes: (pageId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/sync-notes`, { method: "POST" }),
+}
 
-  getNote: (id: string) =>
+// ═══════════════════════════════════════════════════════
+// Canvas Elements & Regions
+// ═══════════════════════════════════════════════════════
+
+export const canvas = {
+  // ── Element Registry ──
+  listElements: (pageId: string) =>
+    request<{ elements: ElementRegistryEntry[] }>(`/pages/${pageId}/elements`),
+
+  getElement: (pageId: string, elementId: string) =>
+    request<ElementRegistryEntry>(`/pages/${pageId}/elements/${elementId}`),
+
+  deleteElement: (pageId: string, elementId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/elements/${elementId}`, { method: "DELETE" }),
+
+  // ── Regions (replace clusters) ──
+  listRegions: (pageId: string) =>
+    request<{ regions: Region[] }>(`/pages/${pageId}/regions`),
+
+  createRegion: (pageId: string, data: {
+    label: string
+    description?: string
+    color?: string
+    region_type?: Region["region_type"]
+    layout_hint?: string
+  }) =>
+    request<Region>(`/pages/${pageId}/regions`, {
+      method: "POST",
+      body: JSON.stringify({ page_id: pageId, ...data }),
+    }),
+
+  updateRegion: (pageId: string, regionId: string, data: Partial<Pick<Region, "label" | "description" | "color" | "layout_hint">>) =>
+    request<Region>(`/pages/${pageId}/regions/${regionId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  deleteRegion: (pageId: string, regionId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/regions/${regionId}`, { method: "DELETE" }),
+
+  assignToRegion: (pageId: string, regionId: string, elementId: string) =>
+    request<{ status: string }>(
+      `/pages/${pageId}/regions/${regionId}/assign/${elementId}`,
+      { method: "POST" }
+    ),
+
+  unassignFromRegion: (pageId: string, regionId: string, elementId: string) =>
+    request<{ status: string }>(
+      `/pages/${pageId}/regions/${regionId}/unassign/${elementId}`,
+      { method: "POST" }
+    ),
+}
+
+// ═══════════════════════════════════════════════════════
+// Notes (NO canvas positions — scene owns those)
+// ═══════════════════════════════════════════════════════
+
+export const notes = {
+  list: (params?: { page?: number; limit?: number; tag?: string; page_id?: string }) =>
+    request<{ notes: Note[]; total: number }>(`/notes${buildQuery(params)}`),
+
+  get: (id: string) =>
     request<Note>(`/notes/${id}`),
 
-  updateNote: (id: string, data: Record<string, unknown>) =>
+  update: (id: string, data: {
+    title?: string
+    summary?: string
+    tags?: string[]
+    tasks?: string[]
+    entities?: string[]
+    page_id?: string
+    metadata?: Record<string, unknown>
+  }) =>
     request<Note>(`/notes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
-  deleteNote: (id: string) =>
+  delete: (id: string) =>
     request<{ status: string }>(`/notes/${id}`, { method: "DELETE" }),
 
-  retryNote: (id: string) =>
-    request<{ status: string; note_id: string }>(`/notes/${id}/retry`, { method: "POST" }),
+  retry: (id: string) =>
+    request<{ status: string }>(`/notes/${id}/retry`, { method: "POST" }),
 
-  moveNote: (id: string, pageId: string) =>
-    request<{ status: string; note_id: string; page_id: string; page_name: string }>(
+  move: (id: string, pageId: string) =>
+    request<{ status: string; from_page: string | null; to_page: string }>(
       `/notes/${id}/move`,
       { method: "POST", body: JSON.stringify({ page_id: pageId }) }
     ),
 
-  // ─── Capture ────────────────────────────────────
-  capture: (data: {
+  tags: () =>
+    request<{ tags: TagWithCount[] }>("/tags"),
+}
+
+// ═══════════════════════════════════════════════════════
+// Capture
+// ═══════════════════════════════════════════════════════
+
+export const capture = {
+  single: (data: {
     text: string
     source_url?: string
-    page_title?: string
+    source_title?: string
     capture_type?: string
     page_hint?: string
-    custom_command?: string
     viewport?: { x: number; y: number; width: number; height: number; zoom: number }
   }) =>
     request<{ status: string; note_id: string }>("/capture", {
@@ -187,277 +279,347 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // ─── Pages ──────────────────────────────────────
-  listPages: async (includeArchived = false) => {
-    const url = buildUrl("/pages", { include_archived: includeArchived })
-    const res = await request<unknown>(url)
-    return { pages: extractArray<Page>(res, "pages") }
-  },
-
-  createPage: (data: {
-    name: string; description?: string; icon?: string; color?: string
-  }) =>
-    request<Page>("/pages", { method: "POST", body: JSON.stringify(data) }),
-
-  getPage: (id: string) =>
-    request<Page>(`/pages/${id}`),
-
-  updatePage: (id: string, data: Record<string, unknown>) =>
-    request<Page>(`/pages/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-
-  // ─── Notebook Flow ─────────────────────────────
-  getPageDocument: (id: string) =>
-    request<PageDocumentBundle>(`/pages/${id}/document`),
-
-  updatePageDocument: (id: string, data: Record<string, unknown>) =>
-    request<Record<string, unknown>>(`/pages/${id}/document`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
-
-  getPageBindings: async (id: string) => {
-    const res = await request<unknown>(`/pages/${id}/bindings`)
-    return { bindings: extractArray<CanvasBinding>(res, "bindings") }
-  },
-
-  createPageBlock: (id: string, data: Record<string, unknown>) =>
-    request<Record<string, unknown>>(`/pages/${id}/blocks`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
-  updatePageBlock: (pageId: string, blockId: string, data: Record<string, unknown>) =>
-    request<Record<string, unknown>>(`/pages/${pageId}/blocks/${blockId}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    }),
-
-  deletePageBlock: (pageId: string, blockId: string) =>
-    request<{ status: string }>(`/pages/${pageId}/blocks/${blockId}`, {
-      method: "DELETE",
-    }),
-
-  deletePage: (id: string) =>
-    request<{ status: string }>(`/pages/${id}`, { method: "DELETE" }),
-
-  // ─── Page Canvas (dedicated endpoints) ──────────
-  getPageCanvas: (id: string, viewMode: "canvas" | "notebook" = "canvas") => {
-    const url = buildUrl(`/pages/${id}/canvas`, { view_mode: viewMode })
-    return request<CanvasResponse>(url)
-  },
-
-  savePageCanvas: (id: string, data: {
-    canvas_data?: Record<string, unknown>
-    viewport?: { x: number; y: number; zoom: number }
-  }, viewMode: "canvas" | "notebook" = "canvas") => {
-    const url = buildUrl(`/pages/${id}/canvas`, { view_mode: viewMode })
-    return request<{ status: string }>(url, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    })
-  },
-
-  // ─── Page AI ────────────────────────────────────
-  aiLayout: (pageId: string) =>
-    request<AILayoutResult>(`/pages/${pageId}/ai-layout`, { method: "POST" }),
-
-  aiPosition: (pageId: string, noteId: string) =>
-    request<{ x: number; y: number; cluster?: string }>(
-      `/pages/${pageId}/ai-position`,
-      { method: "POST", body: JSON.stringify({ note_id: noteId }) }
+  batch: (items: Array<{
+    text: string
+    source_url?: string
+    source_title?: string
+    capture_type?: string
+    page_hint?: string
+  }>) =>
+    request<{ status: string; count: number; notes: Array<{ note_id: string; status: string }> }>(
+      "/capture/batch",
+      { method: "POST", body: JSON.stringify(items) }
     ),
+}
 
-  pageSummary: (pageId: string) =>
-    request<PageSummary>(`/pages/${pageId}/summary`, { method: "POST" }),
+// ═══════════════════════════════════════════════════════
+// Graph (edges + full graph)
+// ═══════════════════════════════════════════════════════
 
-  triggerPageLayout: (id: string) =>
-    request(`/pages/${id}/layout`, { method: "POST" }),
+export const graph = {
+  edges: () =>
+    request<{ edges: NoteEdge[] }>("/graph/edges"),
 
-  getPageStats: (pageId: string) =>
-    request<PageStats>(`/pages/${pageId}/stats`),
+  edgesForNote: (noteId: string) =>
+    request<{ edges: NoteEdge[] }>(`/graph/edges/note/${noteId}`),
 
-  // ─── Edges ──────────────────────────────────────
-  listEdges: async (pageId?: string, noteId?: string) => {
-    const url = buildUrl("/edges", { page_id: pageId, note_id: noteId })
-    const res = await request<unknown>(url)
-    return { edges: extractArray<NoteEdge>(res, "edges") }
-  },
+  edgesForPage: (pageId: string) =>
+    request<{ edges: NoteEdge[] }>(`/graph/edges/page/${pageId}`),
 
   createEdge: (data: {
-    source_id: string; target_id: string; edge_type: string
-    label?: string; strength?: number; created_by?: string
+    source_id: string
+    target_id: string
+    edge_type?: string
+    label?: string
+    strength?: number
   }) =>
-    request<NoteEdge>("/edges", { method: "POST", body: JSON.stringify(data) }),
+    request<NoteEdge>("/graph/edges", {
+      method: "POST",
+      body: JSON.stringify({ created_by: "user", ...data }),
+    }),
 
   deleteEdge: (id: string) =>
-    request<{ status: string }>(`/edges/${id}`, { method: "DELETE" }),
+    request<{ status: string }>(`/graph/edges/${id}`, { method: "DELETE" }),
 
-  // ─── Clusters ───────────────────────────────────
-  listClusters: async (pageId?: string) => {
-    const url = buildUrl("/clusters", { page_id: pageId })
-    const res = await request<unknown>(url)
-    return { clusters: extractArray<Cluster>(res, "clusters") }
-  },
+  /** Full knowledge graph: all notes as nodes + all edges */
+  full: () =>
+    request<{
+      nodes: Array<{
+        id: string; title: string; tags: string[]
+        page_id: string | null; content_type: string
+      }>
+      edges: NoteEdge[]
+    }>("/graph/full"),
+}
 
-  createCluster: (data: {
-    page_id: string; label: string; description?: string; color?: string
+// ═══════════════════════════════════════════════════════
+// Search
+// ═══════════════════════════════════════════════════════
+
+export const search = {
+  query: (q: string, opts?: { page_id?: string; limit?: number; threshold?: number }) =>
+    request<{ results: Note[]; count: number; query: string }>(
+      `/search${buildQuery({ q, ...opts })}`
+    ),
+
+  byTags: (tags: string[]) =>
+    request<{ results: Note[]; count: number; tags: string[] }>(
+      `/search/tags${buildQuery({ tags: tags.join(",") })}`
+    ),
+}
+
+// ═══════════════════════════════════════════════════════
+// Chat (home — not tied to a canvas page)
+// ═══════════════════════════════════════════════════════
+
+export const chat = {
+  home: (data: {
+    question: string
+    history?: Array<{ role: string; content: string }>
+    page_id?: string
   }) =>
-    request<Cluster>("/clusters", { method: "POST", body: JSON.stringify(data) }),
-
-  updateCluster: (id: string, data: Record<string, unknown>) =>
-    request<Cluster>(`/clusters/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-
-  deleteCluster: (id: string) =>
-    request<{ status: string }>(`/clusters/${id}`, { method: "DELETE" }),
-
-  // ─── Canvas Elements ────────────────────────────
-  listElements: async (pageId: string) => {
-    const res = await request<unknown>(`/pages/${pageId}/elements`)
-    return { elements: extractArray<CanvasElement>(res, "elements") }
-  },
-
-  createElement: (pageId: string, data: Record<string, unknown>) =>
-    request<CanvasElement>(`/pages/${pageId}/elements`, {
-      method: "POST", body: JSON.stringify(data),
+    request<{ response: string; sources: ChatSource[] }>("/chat", {
+      method: "POST",
+      body: JSON.stringify({ context_type: "home", ...data }),
     }),
+}
 
-  updateElement: (id: string, data: Record<string, unknown>) =>
-    request<CanvasElement>(`/elements/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+// ═══════════════════════════════════════════════════════
+// Canvas Chat (SSE streaming)
+// ═══════════════════════════════════════════════════════
 
-  deleteElement: (id: string) =>
-    request<{ status: string }>(`/elements/${id}`, { method: "DELETE" }),
+export function canvasChat(
+  pageId: string,
+  message: string,
+  options: {
+    viewport?: { x: number; y: number; width: number; height: number; zoom: number }
+    history?: Array<{ role: string; content: string }>
+    selectedElementIds?: string[]
+    onOp: (op: CanvasOp) => void
+    onError?: (error: Error) => void
+    onDone?: () => void
+  }
+): AbortController {
+  const controller = new AbortController()
 
-  // ─── Search ─────────────────────────────────────
-  search: async (q: string, limit = 10, pageId?: string) => {
-    const url = buildUrl("/search", { q, limit, page_id: pageId })
-    const res = await request<unknown>(url)
-    return { results: extractArray<Note>(res, "results"), query: q }
-  },
+  const body = JSON.stringify({
+    message,
+    viewport: options.viewport || null,
+    history: options.history || [],
+    selected_element_ids: options.selectedElementIds || [],
+    context_type: "page",
+  })
 
-  searchCanvas: (pageId: string, query: string) =>
+  fetch(`${API_BASE}/pages/${pageId}/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeader(),
+    },
+    body,
+    signal: controller.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(errBody.detail || `SSE error: ${res.status}`)
+      }
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const op = JSON.parse(line.slice(6)) as CanvasOp
+              if (op.op === "done") {
+                options.onDone?.()
+              } else {
+                options.onOp(op)
+              }
+            } catch {
+              // skip malformed SSE data
+            }
+          }
+        }
+      }
+      options.onDone?.()
+    })
+    .catch((err) => {
+      if (err.name !== "AbortError") {
+        options.onError?.(err)
+      }
+    })
+
+  return controller
+}
+
+// ═══════════════════════════════════════════════════════
+// Workspace
+// ═══════════════════════════════════════════════════════
+
+export const workspace = {
+  overview: () =>
     request<{
-      results: Array<{
-        type: "note" | "element"
-        id: string
-        title?: string
-        content?: string
-        element_type?: string
-        canvas_x?: number
-        canvas_y?: number
-        position_x?: number
-        position_y?: number
+      pages: Array<{
+        id: string; name: string; icon: string; color: string
+        note_count: number; layout_mode: string; is_archived: boolean; updated_at: string
       }>
-    }>("/search/canvas", {
-      method: "POST",
-      body: JSON.stringify({ page_id: pageId, query }),
-    }),
+      total_notes: number
+      total_pages: number
+      top_tags: TagWithCount[]
+    }>("/workspace/overview"),
 
-  // ─── Chat ───────────────────────────────────────
-  chat: (
-    question: string,
-    history: Array<{ role: string; content: string }>,
-    contextType = "home",
-    pageId?: string
-  ) =>
+  stats: () =>
     request<{
-      answer: string
-      sources?: ChatSource[]
-      follow_ups?: string[]
-    }>("/chat", {
+      notes: number; pages: number; edges: number
+      stuck_notes: number; cache: Record<string, unknown>
+    }>("/workspace/stats"),
+}
+
+// ═══════════════════════════════════════════════════════
+// AI
+// ═══════════════════════════════════════════════════════
+
+export const ai = {
+  curatorScan: () =>
+    request<CuratorReport>("/ai/curator/scan", { method: "POST" }),
+
+  curatorApply: (actionType: string, params: Record<string, unknown>) =>
+    request<Record<string, unknown>>("/ai/curator/apply", {
       method: "POST",
-      body: JSON.stringify({
-        question, history,
-        context_type: contextType,
-        page_id: pageId,
-      }),
+      body: JSON.stringify({ action_type: actionType, params }),
     }),
 
-  decideIntent: (
-    question: string,
-    contextType = "home",
-    pageId?: string
-  ) =>
+  analyzePage: (pageId: string) =>
     request<{
-      mode: "command" | "chat"
-      command: string
-      args: string
-      confidence: number
-      reason?: string
-    }>("/chat/intent", {
-      method: "POST",
-      body: JSON.stringify({
-        question,
-        context_type: contextType,
-        page_id: pageId,
-      }),
+      visual_context: VisualContext
+      note_count: number
+      edge_count: number
+      region_count: number
+      analysis: {
+        layout_pattern: string; density: string
+        reading_direction: string; theme: string; colors: string[]
+      }
+    }>(`/ai/analyze/page/${pageId}`, { method: "POST" }),
+
+  retryStuck: () =>
+    request<{ retrying: number }>("/ai/retry-stuck", { method: "POST" }),
+}
+
+// ═══════════════════════════════════════════════════════
+// Document (notebook mode)
+// ═══════════════════════════════════════════════════════
+
+export const documentApi = {
+  get: (pageId: string) =>
+    request<PageDocumentBundle>(`/pages/${pageId}/document`),
+
+  updateSettings: (pageId: string, data: Partial<Pick<PageDocument,
+    "default_font" | "content_width" | "line_height" | "left_padding" | "right_padding" | "metadata"
+  >>) =>
+    request<PageDocument>(`/pages/${pageId}/document`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     }),
 
-  // ─── Context (browser extension) ────────────────
-  context: (url: string, text: string) =>
-    request<{ related_notes: Note[] }>("/context", {
+  listBlocks: (pageId: string) =>
+    request<{ blocks: PageBlock[] }>(`/pages/${pageId}/blocks`),
+
+  createBlock: (pageId: string, data: {
+    block_type?: string
+    text_content?: string
+    prev_block_id?: string
+    next_block_id?: string
+    depth?: number
+    attrs?: Record<string, unknown>
+    note_id?: string
+    provenance?: Record<string, unknown>
+    created_by?: string
+  }) =>
+    request<PageBlock>(`/pages/${pageId}/blocks`, {
       method: "POST",
-      body: JSON.stringify({ url, text }),
+      body: JSON.stringify(data),
     }),
 
-  // ─── AI Analysis ────────────────────────────────
-  gapAnalysis: (pageId?: string) =>
-    request<GapAnalysisResult>("/ai/gap-analysis", {
-      method: "POST",
-      body: JSON.stringify({ page_id: pageId }),
+  updateBlock: (pageId: string, blockId: string, data: Partial<Pick<PageBlock,
+    "text_content" | "parent_block_id" | "order_key" | "depth" | "block_type" | "attrs" | "is_deleted"
+  >>) =>
+    request<PageBlock>(`/pages/${pageId}/blocks/${blockId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
     }),
 
-  readingPath: (topic?: string, pageId?: string) =>
-    request<{ steps: ReadingStep[] }>("/ai/reading-path", {
+  deleteBlock: (pageId: string, blockId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/blocks/${blockId}`, { method: "DELETE" }),
+
+  moveBlock: (pageId: string, blockId: string, data: {
+    prev_block_id?: string
+    next_block_id?: string
+  }) =>
+    request<PageBlock>(`/pages/${pageId}/blocks/${blockId}/move`, {
       method: "POST",
-      body: JSON.stringify({ topic, page_id: pageId }),
+      body: JSON.stringify(data),
     }),
 
-  generateDiagram: (requestText: string, pageId?: string) =>
-    request<{ topology: {
-      title: string
-      layout_type: string
-      app_state?: Record<string, unknown>
-      elements: Array<{
-        id: string
-        type: "box" | "text" | "arrow"
-        label: string
-        style?: string
-        width?: number
-        height?: number
-      }>
-      connections: Array<{
-        from: string
-        to: string
-        label?: string
-        style?: string
-      }>
-    } }>("/ai/generate-diagram", {
+  rebalance: (pageId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/blocks/rebalance`, { method: "POST" }),
+
+  // ── References ──
+  listReferences: (pageId: string, blockId: string) =>
+    request<{ references: Record<string, unknown>[] }>(`/pages/${pageId}/blocks/${blockId}/references`),
+
+  createReference: (pageId: string, blockId: string, data: {
+    ref_type: string; ref_id: string
+    start_offset?: number; end_offset?: number
+    label?: string; metadata?: Record<string, unknown>
+  }) =>
+    request<Record<string, unknown>>(`/pages/${pageId}/blocks/${blockId}/references`, {
       method: "POST",
-      body: JSON.stringify({ request: requestText, page_id: pageId }),
+      body: JSON.stringify(data),
     }),
 
-  // ─── Tags ───────────────────────────────────────
-  getTags: async () => {
-    const res = await request<unknown>("/tags")
-    return { tags: extractArray<TagWithCount>(res, "tags") }
-  },
+  deleteReference: (pageId: string, refId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/references/${refId}`, { method: "DELETE" }),
 
-  // ─── Stats ──────────────────────────────────────
-  getStats: () => request<WorkspaceStats>("/stats"),
+  // ── Inline Embeds ──
+  listEmbeds: (pageId: string, blockId: string) =>
+    request<{ embeds: Record<string, unknown>[] }>(`/pages/${pageId}/blocks/${blockId}/embeds`),
 
-  // ─── History ────────────────────────────────────
-  listHistory: async (limit = 20) => {
-    const url = buildUrl("/history", { limit })
-    const res = await request<unknown>(url)
-    return {
-      conversations: extractArray<ChatConversation>(res, "conversations"),
-    }
-  },
+  createEmbed: (pageId: string, blockId: string, data: {
+    embed_type: string
+    target_page_id?: string
+    target_note_id?: string
+    target_block_id?: string
+    url?: string
+    display_mode?: string
+    width?: number; height?: number
+    attrs?: Record<string, unknown>
+  }) =>
+    request<Record<string, unknown>>(`/pages/${pageId}/blocks/${blockId}/embeds`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
-  getHistory: (id: string) =>
+  deleteEmbed: (pageId: string, embedId: string) =>
+    request<{ status: string }>(`/pages/${pageId}/embeds/${embedId}`, { method: "DELETE" }),
+}
+
+// ═══════════════════════════════════════════════════════
+// Settings
+// ═══════════════════════════════════════════════════════
+
+export const settings = {
+  get: () =>
+    request<WorkspaceSettings>("/settings"),
+
+  update: (data: Partial<WorkspaceSettings>) =>
+    request<{ status: string }>("/settings", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+}
+
+// ═══════════════════════════════════════════════════════
+// Chat History
+// ═══════════════════════════════════════════════════════
+
+export const chatHistory = {
+  list: (limit = 20) =>
+    request<{ conversations: ChatConversation[] }>(`/history${buildQuery({ limit })}`),
+
+  get: (id: string) =>
     request<ChatConversation>(`/history/${id}`),
 
-  saveHistory: (data: {
+  save: (data: {
     context_type: string
     context_id?: string
     messages: ChatMessage[]
@@ -465,41 +627,158 @@ export const api = {
   }) =>
     request<ChatConversation>("/history", { method: "POST", body: JSON.stringify(data) }),
 
-  deleteHistory: (id: string) =>
+  delete: (id: string) =>
     request<{ status: string }>(`/history/${id}`, { method: "DELETE" }),
+}
 
-  // ─── Curator ────────────────────────────────────
-  curatorScan: () =>
-    request<CuratorReport>("/curator/scan", { method: "POST" }),
+// ═══════════════════════════════════════════════════════
+// Health
+// ═══════════════════════════════════════════════════════
 
-  curatorApply: (action: { action_type: string; params: Record<string, unknown> }) =>
-    request("/curator/apply", { method: "POST", body: JSON.stringify(action) }),
-
-  // ─── Settings ───────────────────────────────────
-  getSettings: () =>
-    request<WorkspaceSettings>("/settings"),
-
-  getModelCatalog: () =>
-    request<ModelCatalog>("/settings/models"),
-
-  updateSettings: (data: Partial<WorkspaceSettings>) =>
-    request<WorkspaceSettings>("/settings", {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-
-  // ─── Workspace ──────────────────────────────────
-  getOverview: () =>
-    request<WorkspaceOverview>("/workspace/overview"),
-
-  exportWorkspace: () =>
-    request<WorkspaceExport>("/workspace/export"),
-
-  // ─── Health ─────────────────────────────────────
-  health: () =>
+export const health = {
+  check: () =>
     fetch(`${API_BASE.replace("/api", "")}/health`, {
       signal: AbortSignal.timeout(5000),
     })
       .then((r) => r.json())
       .catch(() => null),
+}
+
+// ═══════════════════════════════════════════════════════
+// Legacy compatibility — single `api` export
+// Components using `api.xxx()` can migrate gradually
+// ═══════════════════════════════════════════════════════
+
+export const api = {
+  // Auth
+  authGoogle: auth.google,
+  authRefresh: auth.refresh,
+  authMe: auth.me,
+
+  // Pages
+  listPages: async (includeArchived = false) => pages.list(includeArchived),
+  createPage: pages.create,
+  getPage: pages.get,
+  updatePage: pages.update,
+  deletePage: pages.delete,
+
+  // Scene (canvas load/save)
+  getPageCanvas: scene.get,
+  savePageCanvas: (id: string, data: { canvas_data?: Record<string, unknown>; viewport?: any }) => {
+    // Translate old shape to new
+    if (data.canvas_data) {
+      const cd = data.canvas_data as any
+      return scene.save(id, {
+        elements: cd.elements || [],
+        appState: cd.appState || {},
+        files: cd.files || {},
+      })
+    }
+    if (data.viewport) {
+      return scene.saveViewport(id, {
+        scroll_x: data.viewport.x ?? data.viewport.scroll_x ?? 0,
+        scroll_y: data.viewport.y ?? data.viewport.scroll_y ?? 0,
+        zoom: data.viewport.zoom ?? 1,
+      })
+    }
+    return Promise.resolve({ status: "noop" })
+  },
+  triggerPageLayout: scene.triggerLayout,
+
+  // Notes
+  listNotes: async (page = 1, limit = 20, tag?: string, pageId?: string) =>
+    notes.list({ page, limit, tag, page_id: pageId }),
+  getNote: notes.get,
+  updateNote: (id: string, data: Record<string, unknown>) => notes.update(id, data as any),
+  deleteNote: notes.delete,
+  retryNote: notes.retry,
+  moveNote: notes.move,
+
+  // Capture
+  capture: capture.single,
+
+  // Edges
+  listEdges: async (pageId?: string, noteId?: string) => {
+    if (noteId) return graph.edgesForNote(noteId)
+    if (pageId) return graph.edgesForPage(pageId)
+    return graph.edges()
+  },
+  createEdge: graph.createEdge,
+  deleteEdge: graph.deleteEdge,
+
+  // Clusters → Regions
+  listClusters: async (pageId?: string) => {
+    if (!pageId) return { clusters: [] }
+    const res = await canvas.listRegions(pageId)
+    return { clusters: res.regions }
+  },
+  createCluster: (data: { page_id: string; label: string; description?: string; color?: string }) =>
+    canvas.createRegion(data.page_id, data),
+  updateCluster: (id: string, data: Record<string, unknown>) => {
+    const pageId = (data as any).page_id
+    if (!pageId) return Promise.reject(new Error("page_id required"))
+    return canvas.updateRegion(pageId, id, data as any)
+  },
+  deleteCluster: (_id: string) => {
+    console.warn("deleteCluster needs pageId — use canvas.deleteRegion(pageId, regionId) directly")
+    return Promise.resolve({ status: "noop" })
+  },
+
+  // Canvas Elements
+  listElements: async (pageId: string) => canvas.listElements(pageId),
+  deleteElement: (_id: string) => {
+    console.warn("deleteElement needs pageId — use canvas.deleteElement(pageId, elementId) directly")
+    return Promise.resolve({ status: "noop" })
+  },
+
+  // Search
+  search: async (q: string, limit = 10, pageId?: string) =>
+    search.query(q, { limit, page_id: pageId }),
+
+  // Chat
+  chat: async (
+    question: string,
+    history: Array<{ role: string; content: string }>,
+    _contextType = "home",
+    pageId?: string
+  ) => {
+    const res = await chat.home({ question, history, page_id: pageId })
+    return { answer: res.response, sources: res.sources, follow_ups: [] }
+  },
+
+  // Tags
+  getTags: async () => notes.tags(),
+
+  // Stats
+  getStats: workspace.stats,
+
+  // Document
+  getPageDocument: documentApi.get,
+  createPageBlock: documentApi.createBlock,
+  updatePageBlock: documentApi.updateBlock,
+  deletePageBlock: documentApi.deleteBlock,
+
+  // History
+  listHistory: async (limit = 20) => chatHistory.list(limit),
+  getHistory: chatHistory.get,
+  saveHistory: chatHistory.save,
+  deleteHistory: chatHistory.delete,
+
+  // Curator
+  curatorScan: ai.curatorScan,
+  curatorApply: (action: { action_type: string; params: Record<string, unknown> }) =>
+    ai.curatorApply(action.action_type, action.params),
+
+  // Settings
+  getSettings: settings.get,
+  updateSettings: settings.update,
+
+  // AI
+  aiLayout: scene.triggerLayout,
+
+  // Workspace
+  getOverview: workspace.overview,
+
+  // Health
+  health: health.check,
 }

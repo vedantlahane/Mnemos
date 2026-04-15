@@ -20,7 +20,7 @@ export type OpType =
   | "stream_start"
   | "stream_chunk"
   | "stream_end"
-  | "arrange_cluster"
+  | "arrange_region"
   | "batch"
   | "info"
   | "error"

@@ -1,5 +1,5 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api } from "../api/client"
+import { api, notes } from "../api/client"
 import { useStream } from "../hooks/useStream"
 import { AsyncBlock } from "../components/AsyncBlock"
 import type { Note, BlockItem, NoteGridData } from "../types"
@@ -14,7 +14,7 @@ export default function NoteGridBlock({ item }: { item: BlockItem }) {
   const { addBlock } = useStream()
 
   const { data, loading, error } = useAsyncData(
-    () => api.listNotes(1, limit, tag, pageId).then((r) => r.notes),
+    () => notes.list(1, limit, tag, pageId).then((r) => r.notes),
     [tag, pageId, limit]
   )
 
@@ -27,7 +27,7 @@ export default function NoteGridBlock({ item }: { item: BlockItem }) {
       emptyMessage={
         tag ? `No notes with tag #${tag}` : "No notes found."
       }
-      loadingMessage="Loading notes…"
+      loadingMessage="Loading notesâ€¦"
     >
       {(notes) => (
         <div>

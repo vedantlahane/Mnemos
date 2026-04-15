@@ -1,5 +1,5 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api } from "../api/client"
+import { api, workspace } from "../api/client"
 import { useAppContext } from "../hooks/useAppContext"
 import type { BlockItem, Page, WorkspaceStats } from "../types"
 import { FileText, Layers, Hash, Zap, AlertCircle, RefreshCw } from "lucide-react"
@@ -24,7 +24,7 @@ export default function WelcomeBlock(_props: { item: BlockItem }) {
     async () => {
       // Try the single overview endpoint first
       try {
-        const overview = await api.getOverview()
+        const overview = await workspace.overview()
         return {
           stats: overview.stats,
           pages: overview.pages || [],
@@ -88,7 +88,7 @@ export default function WelcomeBlock(_props: { item: BlockItem }) {
       {error && (
         <div className="flex items-center gap-2 text-[var(--amber)] text-[12px] mb-8">
           <AlertCircle size={14} />
-          <span>Backend unreachable — some features may not work</span>
+          <span>Backend unreachable â€” some features may not work</span>
         </div>
       )}
 
@@ -115,7 +115,7 @@ export default function WelcomeBlock(_props: { item: BlockItem }) {
                 onClick={() => switchTo("page", p.id, p.name)}
                 className="glass rounded-xl p-3.5 text-left glass-hover flex items-center gap-3 relative"
               >
-                <span className="text-lg">{p.icon || "📄"}</span>
+                <span className="text-lg">{p.icon || "ðŸ“„"}</span>
                 <div className="min-w-0">
                   <div className="text-[12.5px] font-semibold text-white truncate">
                     {p.name}

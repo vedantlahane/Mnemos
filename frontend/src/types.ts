@@ -1,4 +1,293 @@
-// ─── Stream (discriminated union) ────────────────────
+// === FILE: src/types.ts ===
+// Complete type definitions for Mnemos v2.0
+
+// ═══════════════════════════════════════════════════════
+// Core entities
+// ═══════════════════════════════════════════════════════
+
+export interface Page {
+  id: string
+  name: string
+  description?: string
+  icon: string
+  color: string
+  layout_mode: "canvas" | "notebook"
+  is_archived: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Note {
+  id: string
+  raw_text: string
+  title?: string
+  summary?: string
+  tags: string[]
+  tasks: string[]
+  entities: string[]
+  content_type: "note" | "code" | "url" | "thought" | "question" | "clip"
+  source_url?: string
+  source_title?: string
+  capture_type: string
+  processing_status: "pending" | "processing" | "done" | "failed"
+  page_id?: string
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+  /** Present in search results */
+  similarity?: number
+  /** Enriched client-side */
+  page_name?: string
+}
+
+// ═══════════════════════════════════════════════════════
+// Canvas & Scene
+// ═══════════════════════════════════════════════════════
+
+export interface SceneResponse {
+  page: Page
+  scene_data: {
+    elements: any[]
+    appState: Record<string, any>
+    files: Record<string, any>
+  }
+  notes: Note[]
+  edges: NoteEdge[]
+  regions: Region[]
+  visual_context: VisualContext | null
+  viewport: {
+    scroll_x: number
+    scroll_y: number
+    zoom: number
+  }
+}
+
+export interface VisualContext {
+  page_id: string
+  background_color: string
+  theme: "dark" | "light"
+  dominant_colors: string[]
+  layout_pattern: "freeform" | "grid" | "timeline" | "mindmap" | "flow" | "columns"
+  reading_direction: "left-to-right" | "top-to-bottom" | "radial" | "mixed"
+  density: "empty" | "sparse" | "moderate" | "dense"
+  bounds: { minX: number; minY: number; maxX: number; maxY: number }
+  element_count: number
+  last_analyzed?: string
+}
+
+export interface Region {
+  id: string
+  page_id: string
+  label?: string
+  description?: string
+  color?: string
+  region_type: "cluster" | "section" | "timeline-segment" | "comparison-column" | "freeform"
+  layout_hint: string
+  metadata: Record<string, unknown>
+  element_count?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ElementRegistryEntry {
+  id: string
+  page_id: string
+  element_id: string
+  element_type: string
+  content_source: string
+  note_id?: string
+  region_id?: string
+  cached_x?: number
+  cached_y?: number
+  cached_width?: number
+  cached_height?: number
+  style_snapshot: Record<string, unknown>
+}
+
+export interface CanvasOp {
+  op: string
+  element_id?: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  text?: string
+  color?: string
+  theme?: string
+  zoom?: number
+  note?: Note
+  note_id?: string
+  elements?: Record<string, unknown>[]
+  connections?: Record<string, unknown>[]
+  operations?: CanvasOp[]
+  topology?: Record<string, unknown>
+  message?: string
+  metadata?: Record<string, unknown>
+  timestamp: number
+}
+
+// ═══════════════════════════════════════════════════════
+// Graph
+// ═══════════════════════════════════════════════════════
+
+export type EdgeType =
+  | "related"
+  | "depends_on"
+  | "extends"
+  | "contradicts"
+  | "summarizes"
+  | "example_of"
+
+export interface NoteEdge {
+  id: string
+  source_id: string
+  target_id: string
+  edge_type: EdgeType
+  strength: number
+  label: string | null
+  created_by: string
+  created_at: string
+}
+
+// ═══════════════════════════════════════════════════════
+// Document / Notebook
+// ═══════════════════════════════════════════════════════
+
+export interface PageDocument {
+  page_id: string
+  user_id?: string | null
+  default_font: string
+  content_width: number
+  line_height: number
+  left_padding: number
+  right_padding: number
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface PageBlock {
+  id: string
+  page_id: string
+  parent_block_id?: string | null
+  order_key: number
+  depth: number
+  block_type: string
+  text_content?: string | null
+  attrs: Record<string, unknown>
+  provenance: Record<string, unknown>
+  metadata: Record<string, unknown>
+  note_id?: string | null
+  is_deleted: boolean
+  version: number
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PageDocumentBundle {
+  page: Page
+  document: PageDocument | null
+  blocks: PageBlock[]
+}
+
+// ═══════════════════════════════════════════════════════
+// Chat
+// ═══════════════════════════════════════════════════════
+
+export interface ChatMessage {
+  role: "user" | "assistant"
+  content: string
+  sources?: ChatSource[]
+  followUps?: string[]
+}
+
+export interface ChatSource {
+  id: string
+  title: string
+  similarity: number
+}
+
+export interface ChatConversation {
+  id: string
+  context_type: string
+  context_id: string | null
+  messages: ChatMessage[]
+  title: string | null
+  user_id?: string | null
+  created_at: string
+  updated_at: string
+}
+
+// ═══════════════════════════════════════════════════════
+// Stats & Tags
+// ═══════════════════════════════════════════════════════
+
+export interface TagWithCount {
+  name: string
+  count: number
+}
+
+// ═══════════════════════════════════════════════════════
+// Curator
+// ═══════════════════════════════════════════════════════
+
+export interface CuratorReport {
+  potential_duplicates: Array<{
+    note_a: string; note_b: string; similarity: number
+    suggestion: string; reason: string
+  }>
+  orphan_notes: Array<{
+    note_id: string; title: string; suggestion: string; reason: string
+  }>
+  stale_notes: Array<{
+    note_id: string; title: string; days_old: number
+  }>
+  region_issues: Array<{
+    region_id: string; issue: string; size?: number; suggestion: string
+  }>
+  missing_connections: Array<{
+    note_a: string; note_b: string; similarity: number
+    suggested_type: string; reason: string
+  }>
+  auto_applied: number
+  needs_confirmation: Array<{
+    action_type: string; params: Record<string, unknown>; reason: string
+  }>
+}
+
+// ═══════════════════════════════════════════════════════
+// Settings
+// ═══════════════════════════════════════════════════════
+
+export interface WorkspaceSettings {
+  theme: "glass" | "dark"
+  model: string
+  groq_model: string
+  similarity_threshold: number
+  embedding_dimensions: number
+  auto_layout: boolean
+  auto_connect: boolean
+}
+
+export interface ModelCatalog {
+  google: string[]
+  groq: string[]
+}
+
+export const DEFAULT_SETTINGS: WorkspaceSettings = {
+  theme: "glass",
+  model: "gemini-2.5-flash",
+  groq_model: "llama-3.3-70b-versatile",
+  similarity_threshold: 0.65,
+  embedding_dimensions: 768,
+  auto_layout: true,
+  auto_connect: true,
+}
+
+// ═══════════════════════════════════════════════════════
+// Stream items (for chat UI)
+// ═══════════════════════════════════════════════════════
 
 export type StreamItem = UserItem | AssistantItem | SystemItem | BlockItem
 
@@ -27,7 +316,7 @@ export interface SystemItem extends BaseStreamItem {
 export interface BlockItem extends BaseStreamItem {
   type: "block"
   blockType: BlockType
-  blockData?: BlockData
+  blockData?: Record<string, unknown>
   metadata?: StreamMetadata
   loading?: boolean
 }
@@ -41,32 +330,11 @@ export interface StreamMetadata {
   topic?: string
 }
 
-export type BlockData = Record<string, unknown>
-
 export type BlockType =
-  | "welcome"
-  | "help"
-  | "note-grid"
-  | "note-detail"
-  | "search-results"
-  | "stats"
-  | "tag-cloud"
-  | "task-list"
-  | "page-list"
-  | "page-stats"
-  | "reading-path"
-  | "gap-analysis"
-  | "curator-report"
-  | "settings"
-  | "history"
-  | "export"
-
-// ─── Block-specific data shapes ──────────────────────
-
-export interface NoteGridData extends BlockData { limit?: number }
-export interface NoteDetailData extends BlockData { note?: Note }
-
-// ─── Context ─────────────────────────────────────────
+  | "welcome" | "help" | "note-grid" | "note-detail"
+  | "search-results" | "stats" | "tag-cloud" | "task-list"
+  | "page-list" | "page-stats" | "reading-path" | "gap-analysis"
+  | "curator-report" | "settings" | "history" | "export"
 
 export type ContextType = "home" | "page" | "settings" | "history"
 
@@ -77,338 +345,40 @@ export interface AppContext {
   previousContext?: AppContext
 }
 
-// ─── Notes ───────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// Legacy aliases (remove after full migration)
+// ═══════════════════════════════════════════════════════
 
-export interface Note {
-  id: string
-  title: string | null
-  raw_text: string
-  summary: string | null
-  tags: string[]
-  tasks: string[]
-  entities: string[]
-  source_url: string | null
-  page_title: string | null
-  capture_type: string
-  processing_status: "pending" | "processing" | "done" | "failed"
-  related_note_ids: string[]
-  page_id: string | null
-  canvas_x: number | null
-  canvas_y: number | null
-  canvas_width: number
-  canvas_height: number | null
-  cluster_id: string | null
-  centrality: number
-  is_bridge: boolean
-  created_at: string
-  updated_at: string
-  similarity?: number
-  // Enriched by frontend
-  page_name?: string
+/** @deprecated Use Region instead */
+export type Cluster = Region
+
+// ═══════════════════════════════════════════════════════
+// Utilities
+// ═══════════════════════════════════════════════════════
+
+export function nanoid(size = 21): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+  let id = ""
+  const values = crypto.getRandomValues(new Uint8Array(size))
+  for (let i = 0; i < size; i++) {
+    id += chars[values[i] % chars.length]
+  }
+  return id
 }
 
-// ─── Pages ───────────────────────────────────────────
-
-export interface Page {
-  id: string
-  name: string
-  description: string | null
-  icon: string
-  color: string
-  is_archived: boolean
-  canvas_data: Record<string, unknown>
-  notebook_data?: Record<string, unknown>
-  viewport: { x: number; y: number; zoom: number }
-  note_count: number
-  last_activity: string
-  created_at: string
-  updated_at: string
-  user_id?: string | null
-  layout_mode?: "canvas" | "notebook" | "hybrid"
-  flow_scroll_mode?: "infinite-vertical" | "paged"
-  content_width?: number
+export function uid(): string {
+  return crypto.randomUUID?.() ?? nanoid(12)
 }
 
-export interface PageDocument {
-  id: string
-  page_id: string
-  user_id?: string | null
-  default_font: string
-  content_width: number
-  line_height: number
-  left_padding: number
-  right_padding: number
-  metadata: Record<string, unknown>
-  created_at: string
-  updated_at: string
+export function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
 }
 
-export interface PageBlock {
-  id: string
-  page_id: string
-  document_id?: string | null
-  parent_block_id?: string | null
-  order_key: number
-  depth: number
-  block_type: string
-  text_content?: string | null
-  attrs: Record<string, unknown>
-  line_start?: number | null
-  line_end?: number | null
-  char_start?: number | null
-  char_end?: number | null
-  layout_bbox: Record<string, unknown>
-  inline_allow_wrap: boolean
-  excalidraw_anchor_mode: string
-  excalidraw_wrap_mode: string
-  source_note_id?: string | null
-  source_page_id?: string | null
-  provenance: Record<string, unknown>
-  metadata: Record<string, unknown>
-  is_deleted: boolean
-  version: number
-  created_by: string
-  created_at: string
-  updated_at: string
+export function pluralize(count: number, singular: string, plural?: string): string {
+  return count === 1 ? singular : (plural ?? `${singular}s`)
 }
 
-export interface PageDocumentBundle {
-  page: Page
-  document: PageDocument | null
-  blocks: PageBlock[]
-  references: Array<Record<string, unknown>>
-  embeds: Array<Record<string, unknown>>
-}
-
-// ─── Edges ───────────────────────────────────────────
-
-export type EdgeType =
-  | "related"
-  | "depends_on"
-  | "extends"
-  | "contradicts"
-  | "summarizes"
-  | "example_of"
-
-export interface NoteEdge {
-  id: string
-  source_id: string
-  target_id: string
-  edge_type: EdgeType
-  strength: number
-  label: string | null
-  created_by: string
-  created_at: string
-}
-
-// ─── Clusters ────────────────────────────────────────
-
-export interface Cluster {
-  id: string
-  page_id: string
-  label: string
-  description: string | null
-  color: string
-  center_x: number | null
-  center_y: number | null
-  created_at: string
-  updated_at: string
-}
-
-// ─── Canvas Elements ─────────────────────────────────
-
-export type ElementType = "sticky" | "drawing" | "annotation" | "image"
-
-export interface CanvasElement {
-  id: string
-  page_id: string
-  element_type: ElementType
-  content: string | null
-  canvas_data: Record<string, unknown> | null
-  position_x: number
-  position_y: number
-  width: number | null
-  height: number | null
-  style: Record<string, unknown>
-  created_by: string
-  created_at: string
-  updated_at: string
-}
-
-export interface CanvasBinding {
-  id: string
-  page_id: string
-  block_id: string
-  element_id: string
-  anchor_mode: string
-  wrap_mode: string
-  anchor_line?: number | null
-  offset_x: number
-  offset_y: number
-  z_index: number
-  metadata: Record<string, unknown>
-  created_at: string
-  updated_at: string
-}
-
-// ─── Canvas State ────────────────────────────────────
-
-export interface CanvasState {
-  page: Page
-  notes: Note[]
-  edges: NoteEdge[]
-  elements: CanvasElement[]
-  clusters: Cluster[]
-  viewport: { x: number; y: number; zoom: number }
-}
-
-// ─── Chat ────────────────────────────────────────────
-
-export interface ChatMessage {
-  role: "user" | "assistant"
-  content: string
-  sources?: ChatSource[]
-  followUps?: string[]
-}
-
-export interface ChatSource {
-  id: string
-  title: string
-  similarity: number
-}
-
-// ─── Stats ───────────────────────────────────────────
-
-export interface WorkspaceStats {
-  total_notes: number
-  total_pages: number
-  total_tags: number
-  total_tasks: number
-  status_counts: Record<string, number>
-  last_capture: string | null
-}
-
-export interface PageStats {
-  note_count: number
-  edge_count: number
-  cluster_count: number
-  element_count: number
-  tags: TagWithCount[]
-}
-
-// ─── Tags ────────────────────────────────────────────
-
-export interface TagWithCount {
-  name: string
-  count: number
-}
-
-// ─── Curator ─────────────────────────────────────────
-
-export interface CuratorReport {
-  potential_duplicates: Array<{
-    note_a: string; note_b: string; similarity: number
-    suggestion: string; reason: string
-  }>
-  orphan_notes: Array<{
-    note_id: string; title: string; suggestion: string; reason: string
-  }>
-  stale_notes: Array<{
-    note_id: string; title: string; days_old: number
-  }>
-  cluster_issues: Array<{
-    cluster_id: string; issue: string; size?: number; suggestion: string
-  }>
-  missing_connections: Array<{
-    note_a: string; note_b: string; similarity: number
-    suggested_type: string; reason: string
-  }>
-  auto_applied: number
-  needs_confirmation: Array<{
-    action_type: string; params: Record<string, unknown>; reason: string
-  }>
-}
-
-// ─── AI ──────────────────────────────────────────────
-
-export interface AILayoutPosition {
-  note_id: string
-  x: number
-  y: number
-  cluster?: string
-}
-
-export interface AILayoutResult {
-  positions: AILayoutPosition[]
-  clusters: Array<{ label: string; color: string; center_x: number; center_y: number }>
-  edges: Array<{ source_id: string; target_id: string; edge_type: string }>
-}
-
-export interface GapAnalysisResult {
-  covered: string[]
-  missing: string[]
-  suggestions: string[]
-}
-
-export interface ReadingStep {
-  title: string
-  noteId?: string | null
-  reason?: string
-}
-
-export interface PageSummary {
-  summary: string
-  key_topics: string[]
-  connections: string[]
-}
-
-// ─── Commands ────────────────────────────────────────
-
-export interface Command {
-  name: string
-  aliases: string[]
-  description: string
-  context: ContextType[]
-  args?: string
-  handler: string
-}
-
-// ─── History ─────────────────────────────────────────
-
-export interface ChatConversation {
-  id: string
-  context_type: string
-  context_id: string | null
-  messages: ChatMessage[]
-  title: string | null
-  user_id?: string | null
-  created_at: string
-  updated_at: string
-}
-
-// ─── Settings ────────────────────────────────────────
-
-export interface WorkspaceSettings {
-  theme: "glass" | "dark"
-  model: string
-  groq_model: string
-  similarity_threshold: number
-  embedding_dimensions: number
-  auto_layout: boolean
-  auto_connect: boolean
-}
-
-export interface ModelCatalog {
-  google: string[]
-  groq: string[]
-}
-
-export const DEFAULT_SETTINGS: WorkspaceSettings = {
-  theme: "glass",
-  model: "gemini-2.5-flash",
-  groq_model: "llama-3.3-70b-versatile",
-  similarity_threshold: 0.65,
-  embedding_dimensions: 768,
-  auto_layout: true,
-  auto_connect: true,
+export function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text
+  return text.slice(0, maxLength - 1) + "…"
 }

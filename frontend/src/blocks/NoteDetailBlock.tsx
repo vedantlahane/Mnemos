@@ -1,5 +1,5 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api } from "../api/client"
+import { api, notes, pages, ai } from "../api/client"
 import { AsyncBlock } from "../components/AsyncBlock"
 import { useStream } from "../hooks/useStream"
 import type { Note, BlockItem, NoteDetailData, Page } from "../types"
@@ -19,7 +19,7 @@ export default function NoteDetailBlock({ item }: { item: BlockItem }) {
     async () => {
       if (prefetched) return prefetched
       if (!noteId) throw new Error("No note ID")
-      return api.getNote(noteId)
+      return notes.get(noteId)
     },
     [noteId, prefetched?.id]
   )
@@ -30,7 +30,7 @@ export default function NoteDetailBlock({ item }: { item: BlockItem }) {
       loading={loading}
       error={error}
       emptyMessage="Note not found."
-      loadingMessage="Loading note…"
+      loadingMessage="Loading noteâ€¦"
     >
       {(note) => <NoteDetailContent note={note} onRefetch={refetch} />}
     </AsyncBlock>
@@ -54,8 +54,8 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
   async function handleRetry() {
     setRetrying(true)
     try {
-      await api.retryNote(note.id)
-      addSystemMessage(`Retrying processing for "${note.title || "Untitled"}"…`)
+      await ai.retryStuck(note.id)
+      addSystemMessage(`Retrying processing for "${note.title || "Untitled"}"â€¦`)
       setTimeout(onRefetch, 5000)
     } catch (err) {
       addSystemMessage(`Retry failed: ${err instanceof Error ? err.message : "Unknown error"}`)
@@ -66,7 +66,7 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
 
   async function handleDelete() {
     try {
-      await api.deleteNote(note.id)
+      await notes.delete(note.id)
       addSystemMessage(`Deleted: "${note.title || "Untitled"}"`)
     } catch {
       addSystemMessage("Failed to delete note.")
@@ -77,7 +77,7 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
     setShowMoveMenu(!showMoveMenu)
     if (pages.length === 0) {
       try {
-        const resp = await api.listPages()
+        const resp = await pages.list()
         setPages(resp.pages.filter((p) => p.id !== note.page_id))
       } catch { /* ignore */ }
     }
@@ -86,8 +86,8 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
   async function handleMove(targetPageId: string, pageName: string) {
     setMoving(true)
     try {
-      await api.moveNote(note.id, targetPageId)
-      addSystemMessage(`Moved "${note.title || "Untitled"}" → ${pageName}`)
+      await notes.move(note.id, targetPageId)
+      addSystemMessage(`Moved "${note.title || "Untitled"}" â†’ ${pageName}`)
       setShowMoveMenu(false)
       onRefetch()
     } catch {
@@ -192,7 +192,7 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
                 onClick={() => addBlock("note-detail", undefined, { noteIds: [rid] })}
                 className="text-[10px] text-[var(--accent)] border border-[rgba(99,102,241,0.15)] px-2 py-0.5 rounded-full hover:bg-[var(--accent-subtle)] transition-colors"
               >
-                {rid.slice(0, 8)}…
+                {rid.slice(0, 8)}â€¦
               </button>
             ))}
           </div>
@@ -208,7 +208,7 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
             className="flex items-center gap-1 text-[11px] text-[var(--amber)] border border-[rgba(245,158,11,0.2)] px-3 py-1 rounded-lg hover:bg-[var(--amber-subtle)] transition-colors disabled:opacity-50"
           >
             <RefreshCw size={11} className={retrying ? "animate-spin" : ""} />
-            {retrying ? "Retrying…" : "Retry Processing"}
+            {retrying ? "Retryingâ€¦" : "Retry Processing"}
           </button>
         )}
 
@@ -242,7 +242,7 @@ function NoteDetailContent({ note, onRefetch }: { note: Note; onRefetch: () => v
                 disabled={moving}
                 className="w-full text-left px-3 py-2 rounded-lg text-[12px] text-[var(--glass-text-dim)] hover:text-white hover:bg-[rgba(255,255,255,0.05)] transition-colors flex items-center gap-2 disabled:opacity-50"
               >
-                <span>{p.icon || "📄"}</span>
+                <span>{p.icon || "ðŸ“„"}</span>
                 <span>{p.name}</span>
               </button>
             ))

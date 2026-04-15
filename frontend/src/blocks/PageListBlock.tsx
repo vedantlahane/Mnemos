@@ -1,5 +1,5 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api } from "../api/client"
+import { api, pages } from "../api/client"
 import { AsyncBlock } from "../components/AsyncBlock"
 import { useAppContext } from "../hooks/useAppContext"
 import type { Page, BlockItem } from "../types"
@@ -10,7 +10,7 @@ import { useState } from "react"
 export default function PageListBlock(_props: { item: BlockItem }) {
   const { switchTo } = useAppContext()
   const { data, loading, error, refetch } = useAsyncData(
-    () => api.listPages().then((r) => r.pages),
+    () => pages.list().then((r) => r.pages),
     []
   )
 
@@ -21,7 +21,7 @@ export default function PageListBlock(_props: { item: BlockItem }) {
       error={error}
       empty={data?.length === 0}
       emptyMessage="No pages. Use /page create <name> to create one."
-      loadingMessage="Loading pages…"
+      loadingMessage="Loading pagesâ€¦"
     >
       {(pages) => (
         <div>
@@ -39,7 +39,7 @@ export default function PageListBlock(_props: { item: BlockItem }) {
                 index={i}
                 onOpen={() => switchTo("page", page.id, page.name)}
                 onDelete={async () => {
-                  await api.deletePage(page.id)
+                  await pages.delete(page.id)
                   refetch()
                 }}
               />
@@ -73,7 +73,7 @@ function PageCard({
       onClick={onOpen}
     >
       <div className="flex items-center gap-2.5 mb-2">
-        <span className="text-lg">{page.icon || "📄"}</span>
+        <span className="text-lg">{page.icon || "ðŸ“„"}</span>
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-[13px] text-white truncate">
             {page.name}
