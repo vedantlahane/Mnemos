@@ -448,16 +448,18 @@ export const scene = {
     try {
       const resp = await apiFetch(`/pages/${pageId}/scene?mode=${mode}`)
       const serverScene = (resp || {}) as Scene
-      const localScene = readLocalScene(pageId, mode)
       const localViewport = readLocalViewport(pageId, mode)
-      if (!serverScene || !serverScene.elements || !serverScene.elements.length) {
-        return { scene: localScene, viewport: localViewport }
+      
+      // Always trust the server if it returns a successfully parsed response
+      if (serverScene && Array.isArray(serverScene.elements)) {
+        return {
+          scene: normalizeScene(serverScene),
+          viewport: localViewport,
+        }
       }
-      // writeLocalScene(pageId, serverScene, mode) // Optionally keep local synced
-      return {
-        scene: normalizeScene(serverScene),
-        viewport: localViewport,
-      }
+
+      const localScene = readLocalScene(pageId, mode)
+      return { scene: localScene, viewport: localViewport }
     } catch (e) {
       return {
         scene: readLocalScene(pageId, mode),
@@ -1142,7 +1144,7 @@ export const api = {
       regions: pageRegions,
       visual_context: visualContext,
       viewport: loadedScene.viewport,
-      elements: [],
+      elements: loadedScene.scene.elements as any,
     }
   },
 

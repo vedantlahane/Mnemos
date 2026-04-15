@@ -338,7 +338,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
     suppressAutosaveRef.current = true
     setEmptyOverlayDismissed(false)
     setHasLiveContent(false)
-  }, [pageId])
+  }, [pageId, viewMode])
 
   useEffect(() => {
     if (isNotebook && sceneApplied.current) {

@@ -377,7 +377,7 @@ export function useNotebookMode(
       appState.draggingElement ||
       appState.resizingElement ||
       appState.multiElement ||
-      (appState.activeTool && appState.activeTool.type !== "selection")
+      ((appState.activeTool as any)?.type && (appState.activeTool as any).type !== "selection")
     )
   }, [excalidrawRef])
 
