@@ -136,7 +136,16 @@ class Database:
                 .maybe_single()
                 .execute()
             )
-            return result.data["embedding"] if result.data else None
+            if result.data and "embedding" in result.data:
+                emb = result.data["embedding"]
+                if isinstance(emb, str):
+                    import json
+                    try:
+                        emb = json.loads(emb)
+                    except json.JSONDecodeError:
+                        pass
+                return emb
+            return None
         except Exception:
             return None
 
@@ -158,9 +167,18 @@ class Database:
             .in_("note_id", note_ids)
             .execute()
         )
-        emb_map = {e["note_id"]: e["embedding"] for e in (emb_result.data or [])}
+        emb_map = {}
+        for e in (emb_result.data or []):
+            emb = e["embedding"]
+            if isinstance(emb, str):
+                import json
+                try:
+                    emb = json.loads(emb)
+                except json.JSONDecodeError:
+                    pass
+            emb_map[e["note_id"]] = emb
         return [
-            {**n, "embedding": emb_map[n["id"]]}
+            {**n, "embedding": emb_map.get(n["id"])}
             for n in notes if n["id"] in emb_map
         ]
 

@@ -7,6 +7,7 @@ No LLM calls. Uses visual context for smarter decisions.
 from __future__ import annotations
 import math
 import logging
+import json
 from typing import Optional
 import numpy as np
 
@@ -77,6 +78,11 @@ class SpatialPlanner:
 
     async def compute_full_layout(self, page_id: str) -> list[dict]:
         notes = await db.get_notes_with_embeddings(page_id)
+        # Parse any string embeddings
+        for n in notes:
+            if isinstance(n.get("embedding"), str):
+                n["embedding"] = json.loads(n["embedding"])
+                
         all_notes = await db.get_notes_for_page(page_id)
         embedded_ids = {n["id"] for n in notes}
         unembedded = [n for n in all_notes if n["id"] not in embedded_ids]
@@ -212,6 +218,10 @@ class SpatialPlanner:
         if not embedding:
             return None
 
+        if isinstance(embedding, str):
+            import json
+            embedding = json.loads(embedding)
+
         note_emb = np.array(embedding)
         note_norm = np.linalg.norm(note_emb)
         if note_norm == 0:
@@ -231,6 +241,8 @@ class SpatialPlanner:
                 m_emb = await db.get_embedding(m["note_id"])
                 if not m_emb:
                     continue
+                if isinstance(m_emb, str):
+                    m_emb = json.loads(m_emb)
                 m_arr = np.array(m_emb)
                 m_norm = np.linalg.norm(m_arr)
                 if m_norm == 0:
@@ -261,6 +273,8 @@ class SpatialPlanner:
         embedding = await db.get_embedding(note["id"]) if note.get("id") else None
         if not embedding:
             return None
+        if isinstance(embedding, str):
+            embedding = json.loads(embedding)
 
         notes_with_emb = await db.get_notes_with_embeddings(page_id)
         notes_with_emb = [n for n in notes_with_emb if n["id"] != note.get("id")]
@@ -275,7 +289,10 @@ class SpatialPlanner:
         best_sim = -1.0
         best_note = None
         for ex in notes_with_emb:
-            ex_emb = np.array(ex["embedding"])
+            ex_emb = ex["embedding"]
+            if isinstance(ex_emb, str):
+                ex_emb = json.loads(ex_emb)
+            ex_emb = np.array(ex_emb)
             ex_norm = np.linalg.norm(ex_emb)
             if ex_norm == 0:
                 continue

@@ -34,6 +34,10 @@ async def capture_note(
     if len(text) > MAX_TEXT_LENGTH:
         raise HTTPException(status_code=400, detail=f"Text too long (max {MAX_TEXT_LENGTH} chars)")
 
+    metadata = {}
+    if payload.custom_command:
+        metadata["custom_command"] = payload.custom_command
+
     note = await db.insert_note(
         raw_text=text,
         source_url=payload.source_url,
@@ -41,7 +45,7 @@ async def capture_note(
         capture_type=payload.capture_type,
         processing_status="pending",
         user_id=user_id,
-        custom_command=payload.custom_command
+        metadata=metadata
     )
 
     background_tasks.add_task(
