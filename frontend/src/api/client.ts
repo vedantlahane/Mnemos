@@ -441,145 +441,121 @@ export const pages = {
 }
 
 export const scene = {
-  async get(pageId: string, mode: "canvas" | "notebook" = "canvas"): Promise<{
+  async get(pageId: string): Promise<{
     scene: Scene
-    viewport: { scroll_x: number; scroll_y: number; zoom: number }
+    version: number
   }> {
     try {
-      const resp = await apiFetch(`/pages/${pageId}/scene?mode=${mode}`)
-      const serverScene = (resp || {}) as Scene
-      const localViewport = readLocalViewport(pageId, mode)
+      const resp = await apiFetch<{ scene: Scene; version: number; page_id: string }>(`/pages/${pageId}/scene`)
+      const localViewport = readLocalViewport(pageId)
       
-      // Always trust the server if it returns a successfully parsed response
-      if (serverScene && Array.isArray(serverScene.elements)) {
+      // Trust the server response
+      if (resp && resp.scene && Array.isArray(resp.scene.elements)) {
         return {
-          scene: normalizeScene(serverScene),
-          viewport: localViewport,
+          scene: normalizeScene(resp.scene),
+          version: resp.version,
         }
       }
 
-      const localScene = readLocalScene(pageId, mode)
-      return { scene: localScene, viewport: localViewport }
+      const localScene = readLocalScene(pageId)
+      return { scene: localScene, version: 0 }
     } catch (e) {
       return {
-        scene: readLocalScene(pageId, mode),
-        viewport: readLocalViewport(pageId, mode),
+        scene: readLocalScene(pageId),
+        version: 0,
       }
     }
   },
 
-  async save(pageId: string, data: { elements: unknown[]; appState: Record<string, unknown>; files: Record<string, unknown>; mode?: "canvas" | "notebook" }): Promise<{ status: string }> {
+  async save(pageId: string, data: { elements: unknown[]; appState: Record<string, unknown>; files: Record<string, unknown> }): Promise<{ status: string; version: number }> {
     const norm = normalizeScene(data)
-    writeLocalScene(pageId, norm, data.mode || "canvas")
+    writeLocalScene(pageId, norm)
     try {
-      await apiFetch(`/pages/${pageId}/scene?mode=${data.mode || "canvas"}`, {
+      const result = await apiFetch<{ status: string; version: number }>(`/pages/${pageId}/scene`, {
         method: "PUT",
         body: JSON.stringify(norm)
       })
-      return { status: "saved" }
+      return result
     } catch {
-      return { status: "saved_local" }
+      return { status: "saved_local", version: 0 }
     }
   },
 
-  async saveViewport(pageId: string, data: { scroll_x: number; scroll_y: number; zoom: number; mode?: "canvas" | "notebook" }): Promise<{ status: string }> {
-    writeLocalViewport(pageId, data, data.mode || "canvas")
-    return { status: "saved_local" }
+  async getVersion(pageId: string): Promise<{ version: number }> {
+    return apiFetch<{ version: number; page_id: string }>(`/pages/${pageId}/scene/version`)
   },
 
-  async getVisualContext(pageId: string) {
-    return computeVisualContextFromScene(pageId, readLocalScene(pageId))
+  async rebuild(pageId: string): Promise<{ status: string; version: number; notes_placed: number }> {
+    return apiFetch(`/pages/${pageId}/scene/rebuild`, { method: "POST" })
   },
 
-  async triggerLayout(pageId: string): Promise<{ status: string; positions: unknown[]; clusters: unknown[]; edges: unknown[] }> {
+
+  async triggerLayout(pageId: string): Promise<{ status: string }> {
+    // Use canvas-chat /organize command as fallback
     try {
       for await (const _op of canvasChat.stream(pageId, {
         message: "/organize",
         history: [],
-        context_type: "page",
+        selected_element_ids: [],
       })) {
         // Consume until done.
       }
     } catch {
       // Preserve graceful fallback.
     }
-
-    return { status: "arranged_via_chat", positions: [], clusters: [], edges: [] }
-  },
-
-  async syncNotes(_pageId: string): Promise<{ status: string }> {
-    return { status: "unsupported" }
+    return { status: "arranged" }
   },
 }
 
-export const canvas = {
-  async listElements(_pageId: string): Promise<{ elements: Array<Record<string, unknown>> }> {
-    return { elements: [] }
-  },
-
-  async getElement(_pageId: string, _elementId: string): Promise<Record<string, unknown>> {
-    return {}
-  },
-
-  async deleteElement(_pageId: string, _elementId: string): Promise<{ status: string }> {
-    return { status: "unsupported" }
-  },
-
-  async listRegions(_pageId: string): Promise<{ regions: Region[] }> {
-    return { regions: [] }
-  },
-
-  async createRegion(pageId: string, data: {
-    label: string
-    description?: string
-    color?: string
-    region_type?: Region["region_type"]
-    layout_hint?: string
-  }): Promise<Region> {
-    return {
-      id: `local-region-${Date.now()}`,
-      page_id: pageId,
-      label: data.label,
-      description: data.description || null,
-      color: data.color || null,
-      region_type: data.region_type || "cluster",
-      layout_hint: data.layout_hint || "auto",
-      metadata: {},
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+export const sync = {
+  async send(pageId: string, request: {
+    base_version: number
+    changes: {
+      added?: Array<Record<string, unknown>>
+      modified?: Array<Record<string, unknown>>
+      deleted?: string[]
     }
+    full_scene?: Record<string, unknown> | null
+  }): Promise<{
+    status: "ok" | "merged" | "full_rebuild"
+    version: number
+    new_elements?: Array<Record<string, unknown>>
+    server_ops_applied?: number
+    scene?: Scene
+  }> {
+    return apiFetch(`/pages/${pageId}/sync`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    })
   },
 
-  async updateRegion(pageId: string, regionId: string, data: Partial<Pick<Region, "label" | "description" | "color" | "layout_hint">>): Promise<Region> {
-    return {
-      id: regionId,
-      page_id: pageId,
-      label: data.label || null,
-      description: data.description || null,
-      color: data.color || null,
-      region_type: "cluster",
-      layout_hint: data.layout_hint || "auto",
-      metadata: {},
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+  async getVersion(pageId: string): Promise<{ version: number }> {
+    return apiFetch(`/pages/${pageId}/sync/version`)
+  },
+
+  async getOps(pageId: string, afterVersion: number = 0): Promise<{ ops: Array<Record<string, unknown>>; count: number }> {
+    return apiFetch(`/pages/${pageId}/sync/ops?after_version=${afterVersion}`)
+  },
+}
+
+export const events = {
+  subscribe(pageId: string): EventSource {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
     }
-  },
 
-  async deleteRegion(_pageId: string, _regionId: string): Promise<{ status: string }> {
-    return { status: "unsupported" }
-  },
+    if (accessToken && accessToken !== "auth-disabled") {
+      headers.Authorization = `Bearer ${accessToken}`
+    }
 
-  async assignToRegion(_pageId: string, _regionId: string, _elementId: string): Promise<{ status: string }> {
-    return { status: "unsupported" }
-  },
-
-  async unassignFromRegion(_pageId: string, _regionId: string, _elementId: string): Promise<{ status: string }> {
-    return { status: "unsupported" }
+    // Note: EventSource doesn't support custom headers in browsers, so we rely on cookies
+    // In practice, the backend handles auth via the Authorization cookie or query param
+    return new EventSource(`${API}/pages/${pageId}/events`)
   },
 }
 
 export const notes = {
-  list(params: { page?: number; limit?: number; tag?: string; page_id?: string } = {}): Promise<{ notes: Note[]; total: number }> {
+  list(params: { page?: number; limit?: number; tag?: string; page_id?: string } = {}): Promise<{ notes: Note[]; total: number; page: number; limit: number }> {
     const query = new URLSearchParams()
     if (params.page) query.set("page", String(params.page))
     if (params.limit) query.set("limit", String(params.limit))
@@ -588,7 +564,7 @@ export const notes = {
     return apiFetch(`/notes?${query.toString()}`)
   },
 
-  get(noteId: string): Promise<Note> {
+  get(noteId: string): Promise<Note & { edges: Edge[] }> {
     return apiFetch(`/notes/${noteId}`)
   },
 
@@ -599,61 +575,194 @@ export const notes = {
     })
   },
 
-  delete(noteId: string): Promise<{ status: string }> {
+  delete(noteId: string): Promise<{ status: string; note_id: string }> {
     return apiFetch(`/notes/${noteId}`, { method: "DELETE" })
   },
 
-  retry(noteId: string): Promise<{ status: string }> {
-    return apiFetch(`/notes/${noteId}/retry`, { method: "POST" })
-  },
-
-  move(noteId: string, pageId: string): Promise<{ status: string; from_page: string; to_page: string }> {
-    const payload: NoteMoveRequest = { page_id: pageId }
+  move(noteId: string, pageId: string): Promise<{ status: string; note_id: string; page_id: string }> {
     return apiFetch(`/notes/${noteId}/move`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ page_id: pageId }),
     })
   },
 
   tags(): Promise<{ tags: TagCount[] }> {
-    return apiFetch("/tags")
+    return apiFetch("/notes/tags")
+  },
+
+  listForPage(pageId: string): Promise<{ notes: Note[]; count: number }> {
+    return apiFetch(`/pages/${pageId}/notes`)
   },
 }
 
 export const capture = {
-  async single(data: CaptureRequest): Promise<{ status: string; note_id: string }> {
-    const pageId = await resolvePageIdFromHint(data.page_hint)
-    if (!pageId) {
-      throw new Error("Capture route is unavailable and no page could be resolved for canvas-chat fallback")
-    }
-
-    return streamCaptureFallback(pageId, data)
+  async single(data: CaptureRequest): Promise<{ note_id: string; status: string; message?: string }> {
+    return apiFetch("/capture", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
   },
 
-  async batch(items: CaptureRequest[]): Promise<{ status: string; count: number; notes: Array<{ note_id: string; status: string }> }> {
-    const results: Array<{ note_id: string; status: string }> = []
-    for (const item of items) {
-      const captured = await capture.single(item)
-      results.push({ note_id: captured.note_id, status: captured.status })
-    }
-    return {
-      status: "batch_completed",
-      count: results.length,
-      notes: results,
-    }
+  async batch(items: CaptureRequest[]): Promise<{ captured: Array<{ note_id: string; status: string }>; count: number }> {
+    return apiFetch("/capture/batch", {
+      method: "POST",
+      body: JSON.stringify(items),
+    })
+  },
+
+  async context(url: string, text: string): Promise<{ note_id: string; status: string }> {
+    return apiFetch("/capture/context", {
+      method: "POST",
+      body: JSON.stringify({ url, text }),
+    })
+  },
+
+  async getStatus(noteId: string): Promise<{ note_id: string; status: string; title?: string; page_id?: string }> {
+    return apiFetch(`/capture/status/${noteId}`)
+  },
+
+  async retry(noteId: string): Promise<{ note_id: string; status: string }> {
+    return apiFetch(`/capture/retry/${noteId}`, { method: "POST" })
   },
 }
 
 export const chat = {
-  send(data: ChatRequest): Promise<ChatResponse> {
+  async send(data: ChatRequest): Promise<{ answer: string; follow_ups: string[]; sources: Array<{ title: string; id: string; similarity: number }> }> {
     return apiFetch("/chat", {
       method: "POST",
       body: JSON.stringify(data),
     })
   },
+
+  async *stream(data: ChatRequest): AsyncGenerator<{
+    type: "sources" | "chunk" | "done"
+    sources?: Array<{ title: string; id: string; similarity: number }>
+    content?: string
+    full_answer?: string
+  }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+
+    if (accessToken && accessToken !== "auth-disabled") {
+      headers.Authorization = `Bearer ${accessToken}`
+    }
+
+    const response = await fetch(`${API}/chat/stream`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(data),
+    })
+
+    if (!response.ok) {
+      const body = await parseResponseBody(response)
+      throw new ApiError(
+        response.status,
+        getErrorMessageFromBody(response.status, body, response.statusText),
+        body,
+      )
+    }
+
+    if (!response.body) {
+      throw new Error("Chat stream has no response body")
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          break
+        }
+
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split("\n\n")
+        buffer = events.pop() || ""
+
+        for (const event of events) {
+          const lines = event.split("\n")
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith("data:")) {
+              continue
+            }
+
+            const payload = trimmed.slice(5).trim()
+            if (!payload) {
+              continue
+            }
+
+            try {
+              const data = JSON.parse(payload)
+              yield data
+              if (data.type === "done") {
+                return
+              }
+            } catch {
+              // Ignore malformed SSE payloads
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  },
+
+  async getHistory(params?: { page_id?: string; limit?: number }): Promise<{ chats: ChatConversation[] }> {
+    const query = new URLSearchParams()
+    if (params?.page_id) query.set("page_id", params.page_id)
+    if (params?.limit) query.set("limit", String(params.limit))
+    return apiFetch(`/chat/history?${query.toString()}`)
+  },
+
+  async getChatById(chatId: string): Promise<ChatConversation> {
+    return apiFetch(`/chat/${chatId}`)
+  },
+
+  async deleteChat(chatId: string): Promise<{ status: string }> {
+    return apiFetch(`/chat/${chatId}`, { method: "DELETE" })
+  },
 }
 
 export const canvasChat = {
+  async send(pageId: string, data: CanvasStreamRequest): Promise<{
+    response: string
+    intent: string
+    canvas_action: {
+      type: string
+      bbox?: Record<string, unknown>
+    } | null
+  }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+
+    if (accessToken && accessToken !== "auth-disabled") {
+      headers.Authorization = `Bearer ${accessToken}`
+    }
+
+    const response = await fetch(`${API}/pages/${pageId}/canvas-chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(data),
+    })
+
+    if (!response.ok) {
+      const body = await parseResponseBody(response)
+      throw new ApiError(
+        response.status,
+        getErrorMessageFromBody(response.status, body, response.statusText),
+        body,
+      )
+    }
+
+    return (await parseResponseBody(response)) as any
+  },
+
   async *stream(pageId: string, data: CanvasStreamRequest): AsyncGenerator<CanvasOp> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -663,7 +772,7 @@ export const canvasChat = {
       headers.Authorization = `Bearer ${accessToken}`
     }
 
-    const response = await fetch(`${API}/pages/${pageId}/chat`, {
+    const response = await fetch(`${API}/pages/${pageId}/canvas-chat/stream`, {
       method: "POST",
       headers,
       body: JSON.stringify(data),
@@ -728,130 +837,52 @@ export const canvasChat = {
   },
 }
 
-export const document = {
-  get(pageId: string): Promise<{ document: PageDocument | null; blocks: PageBlock[]; page: Page }> {
-    return apiFetch(`/pages/${pageId}/document`)
-  },
-
-  updateSettings(pageId: string, data: DocumentUpdateRequest): Promise<PageDocument> {
-    return apiFetch(`/pages/${pageId}/document`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    })
-  },
-
-  listBlocks(pageId: string): Promise<{ blocks: PageBlock[] }> {
-    return apiFetch(`/pages/${pageId}/blocks`)
-  },
-
-  createBlock(pageId: string, data: BlockCreateRequest): Promise<PageBlock> {
-    return apiFetch(`/pages/${pageId}/blocks`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    })
-  },
-
-  updateBlock(pageId: string, blockId: string, data: BlockUpdateRequest): Promise<PageBlock> {
-    return apiFetch(`/pages/${pageId}/blocks/${blockId}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    })
-  },
-
-  deleteBlock(pageId: string, blockId: string): Promise<{ status: string }> {
-    return apiFetch(`/pages/${pageId}/blocks/${blockId}`, { method: "DELETE" })
-  },
-
-  moveBlock(pageId: string, blockId: string, data: BlockMoveRequest): Promise<PageBlock> {
-    return apiFetch(`/pages/${pageId}/blocks/${blockId}/move`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    })
-  },
-
-  rebalanceBlocks(pageId: string): Promise<{ status: string }> {
-    return apiFetch(`/pages/${pageId}/blocks/rebalance`, { method: "POST" })
-  },
-
-  listReferences(pageId: string, blockId: string): Promise<{ references: BlockReference[] }> {
-    return apiFetch(`/pages/${pageId}/blocks/${blockId}/references`)
-  },
-
-  createReference(pageId: string, blockId: string, data: BlockReferenceCreateRequest): Promise<BlockReference> {
-    return apiFetch(`/pages/${pageId}/blocks/${blockId}/references`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    })
-  },
-
-  deleteReference(pageId: string, refId: string): Promise<{ status: string }> {
-    return apiFetch(`/pages/${pageId}/references/${refId}`, { method: "DELETE" })
-  },
-
-  listEmbeds(pageId: string, blockId: string): Promise<{ embeds: InlineEmbed[] }> {
-    return apiFetch(`/pages/${pageId}/blocks/${blockId}/embeds`)
-  },
-
-  createEmbed(pageId: string, blockId: string, data: InlineEmbedCreateRequest): Promise<InlineEmbed> {
-    return apiFetch(`/pages/${pageId}/blocks/${blockId}/embeds`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    })
-  },
-
-  deleteEmbed(pageId: string, embedId: string): Promise<{ status: string }> {
-    return apiFetch(`/pages/${pageId}/embeds/${embedId}`, { method: "DELETE" })
-  },
-}
-
-export const documentApi = {
-  get: document.get,
-  updateSettings: document.updateSettings,
-  listBlocks: document.listBlocks,
-  createBlock: document.createBlock,
-  updateBlock: document.updateBlock,
-  deleteBlock: document.deleteBlock,
-  moveBlock: document.moveBlock,
-  rebalance: document.rebalanceBlocks,
-  listReferences: document.listReferences,
-  createReference: document.createReference,
-  deleteReference: document.deleteReference,
-  listEmbeds: document.listEmbeds,
-  createEmbed: document.createEmbed,
-  deleteEmbed: document.deleteEmbed,
-}
-
 export const graph = {
-  allEdges(): Promise<{ edges: Edge[] }> {
-    return apiFetch("/graph/edges")
+  getFullGraph(): Promise<{ nodes: Array<Record<string, unknown>>; edges: Edge[] }> {
+    return apiFetch("/graph")
   },
 
-  noteEdges(noteId: string): Promise<{ edges: Edge[] }> {
-    return apiFetch(`/graph/edges/note/${noteId}`)
-  },
-
-  pageEdges(pageId: string): Promise<{ edges: Edge[] }> {
-    return apiFetch(`/graph/edges/page/${pageId}`)
+  getPageGraph(pageId: string): Promise<{ nodes: Array<Record<string, unknown>>; edges: Edge[] }> {
+    return apiFetch(`/pages/${pageId}/graph`)
   },
 
   createEdge(data: EdgeCreateRequest): Promise<Edge> {
-    return apiFetch("/graph/edges", {
+    return apiFetch("/edges", {
       method: "POST",
       body: JSON.stringify(data),
     })
   },
 
-  deleteEdge(edgeId: string): Promise<{ status: string }> {
-    return apiFetch(`/graph/edges/${edgeId}`, { method: "DELETE" })
+  deleteEdge(edgeId: string): Promise<{ status: string; edge_id: string }> {
+    return apiFetch(`/edges/${edgeId}`, { method: "DELETE" })
   },
 
-  full(): Promise<FullGraph> {
-    return apiFetch("/graph/full")
+  getRelatedNotes(noteId: string, limit?: number): Promise<{ related: Array<Record<string, unknown>>; edges: Edge[] }> {
+    const query = new URLSearchParams()
+    if (limit) query.set("limit", String(limit))
+    return apiFetch(`/notes/${noteId}/related?${query.toString()}`)
+  },
+
+  // Compatibility methods
+  allEdges(): Promise<{ edges: Edge[] }> {
+    return this.getFullGraph().then(g => ({ edges: g.edges }))
+  },
+
+  noteEdges(noteId: string): Promise<{ edges: Edge[] }> {
+    return this.getRelatedNotes(noteId).then(r => ({ edges: r.edges }))
+  },
+
+  pageEdges(pageId: string): Promise<{ edges: Edge[] }> {
+    return this.getPageGraph(pageId).then(g => ({ edges: g.edges }))
+  },
+
+  full(): Promise<{ nodes: Array<Record<string, unknown>>; edges: Edge[] }> {
+    return this.getFullGraph()
   },
 }
 
 export const search = {
-  semantic(params: { q: string; page_id?: string; limit?: number; threshold?: number }): Promise<SearchResponse> {
+  semantic(params: { q: string; page_id?: string; limit?: number; threshold?: number }): Promise<{ query: string; results: Note[]; count: number }> {
     const qs = new URLSearchParams({ q: params.q })
     if (params.page_id) qs.set("page_id", params.page_id)
     if (params.limit) qs.set("limit", String(params.limit))
@@ -859,8 +890,11 @@ export const search = {
     return apiFetch(`/search?${qs.toString()}`)
   },
 
-  byTags(tags: string[]): Promise<TagSearchResponse> {
-    return apiFetch(`/search/tags?tags=${encodeURIComponent(tags.join(","))}`)
+  byTag(tag: string, page?: number, limit?: number): Promise<{ tag: string; notes: Note[]; total: number }> {
+    const qs = new URLSearchParams({ tag })
+    if (page) qs.set("page", String(page))
+    if (limit) qs.set("limit", String(limit))
+    return apiFetch(`/search/tags?${qs.toString()}`)
   },
 }
 
@@ -872,38 +906,178 @@ export const workspace = {
   stats(): Promise<WorkspaceStats> {
     return apiFetch("/workspace/stats")
   },
+
+  healthCheck(): Promise<{ stuck_found: number; fixed: number; status: string }> {
+    return apiFetch("/workspace/health-check", { method: "POST" })
+  },
 }
 
 export const ai = {
-  curatorScan(): Promise<CuratorScanResult> {
-    return apiFetch("/ai/curator/scan", { method: "POST" })
+  async generateDiagram(pageId: string, topic: string): Promise<{
+    status: string
+    topic: string
+    bbox: Record<string, unknown>
+    version: number
+    topology: DiagramTopology
+  }> {
+    return apiFetch(`/pages/${pageId}/ai/diagram?topic=${encodeURIComponent(topic)}`, {
+      method: "POST",
+    })
   },
 
-  curatorApply(data: CuratorApplyRequest): Promise<Record<string, unknown>> {
-    return apiFetch("/ai/curator/apply", {
+  async compose(pageId: string, topic: string): Promise<{
+    status: string
+    topic: string
+    element_id: string
+    measurement: Record<string, unknown>
+    version: number
+  }> {
+    return apiFetch(`/pages/${pageId}/ai/compose?topic=${encodeURIComponent(topic)}`, {
+      method: "POST",
+    })
+  },
+
+  async *composeStream(pageId: string, topic: string): AsyncGenerator<{
+    type: "chunk" | "placed" | "done" | "error"
+    content?: string
+    element_id?: string
+    version?: number
+  }> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    }
+
+    if (accessToken && accessToken !== "auth-disabled") {
+      headers.Authorization = `Bearer ${accessToken}`
+    }
+
+    const response = await fetch(`${API}/pages/${pageId}/ai/compose/stream?topic=${encodeURIComponent(topic)}`, {
+      method: "POST",
+      headers,
+    })
+
+    if (!response.ok) {
+      const body = await parseResponseBody(response)
+      throw new ApiError(
+        response.status,
+        getErrorMessageFromBody(response.status, body, response.statusText),
+        body,
+      )
+    }
+
+    if (!response.body) {
+      throw new Error("Compose stream has no response body")
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          break
+        }
+
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split("\n\n")
+        buffer = events.pop() || ""
+
+        for (const event of events) {
+          const lines = event.split("\n")
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith("data:")) {
+              continue
+            }
+
+            const payload = trimmed.slice(5).trim()
+            if (!payload) {
+              continue
+            }
+
+            try {
+              const data = JSON.parse(payload)
+              yield data
+              if (data.type === "done") {
+                return
+              }
+            } catch {
+              // Ignore malformed SSE payloads
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  },
+
+  async addSticky(pageId: string, content: string, color?: string): Promise<{
+    status: string
+    group_id: string
+    version: number
+  }> {
+    const query = new URLSearchParams()
+    query.set("content", content)
+    if (color) query.set("color", color)
+    return apiFetch(`/pages/${pageId}/ai/sticky?${query.toString()}`, {
+      method: "POST",
+    })
+  },
+
+  async setBackground(pageId: string, colorOrTheme: string): Promise<{
+    status: string
+    version: number
+    background: string
+    theme: string
+  }> {
+    const query = new URLSearchParams()
+    if (colorOrTheme === "light" || colorOrTheme === "dark") {
+      query.set("theme", colorOrTheme)
+    } else {
+      query.set("color", colorOrTheme)
+    }
+    return apiFetch(`/pages/${pageId}/ai/background?${query.toString()}`, {
+      method: "POST",
+    })
+  },
+
+  async curatorScan(): Promise<CuratorScanResult> {
+    return apiFetch("/ai/curator/scan", { method: "GET" })
+  },
+
+  async curatorApply(data: CuratorApplyRequest): Promise<Record<string, unknown>> {
+    return apiFetch("/ai/curator/action", {
       method: "POST",
       body: JSON.stringify(data),
     })
   },
 
-  analyzePage(pageId: string): Promise<{
-    visual_context: Record<string, unknown>
-    note_count: number
-    edge_count: number
-    region_count: number
-    analysis: {
+  async analyzePage(pageId: string): Promise<{
+    page: Page
+    scene: {
+      theme: string
+      background: string
       layout_pattern: string
       density: string
-      reading_direction: string
-      theme: string
-      colors: string[]
+      bounds: Record<string, unknown>
+      palette: string[]
+      element_count: number
     }
+    notes: {
+      count: number
+      content_types: Record<string, number>
+      tags: string[]
+    }
+    edges: {
+      count: number
+      types: Record<string, number>
+    }
+    version: number
   }> {
-    return apiFetch(`/ai/analyze/page/${pageId}`, { method: "POST" })
-  },
-
-  retryStuck(): Promise<{ retrying: number }> {
-    return apiFetch("/ai/retry-stuck", { method: "POST" })
+    return apiFetch(`/pages/${pageId}/ai/analyze`, { method: "GET" })
   },
 }
 

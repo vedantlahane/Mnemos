@@ -1,5 +1,4 @@
-# === FILE: backend/app/services/cache.py ===
-"""Redis caching — updated with scene cache support."""
+"""Redis cache — simplified."""
 
 from __future__ import annotations
 import json
@@ -16,11 +15,14 @@ async def init_redis(redis_url: str) -> bool:
         return False
     try:
         import redis.asyncio as aioredis
-        _redis = aioredis.from_url(redis_url, decode_responses=True, socket_connect_timeout=3, socket_timeout=2)
+        _redis = aioredis.from_url(
+            redis_url, decode_responses=True,
+            socket_connect_timeout=3, socket_timeout=2,
+        )
         await _redis.ping()
         return True
     except Exception as e:
-        logger.warning(f"Redis unavailable ({e})")
+        logger.warning(f"Redis unavailable: {e}")
         _redis = None
         return False
 
@@ -76,33 +78,21 @@ async def get_or_fetch(ns: str, *parts: str, fetcher, ttl: int = 300) -> Any:
     return result
 
 
-TTL_PAGE = 600
-TTL_SCENE = 120
-TTL_OVERVIEW = 300
-
-
-async def get_page_cached(page_id: str, fetcher) -> Optional[dict]:
-    return await get_or_fetch("page", page_id, fetcher=fetcher, ttl=TTL_PAGE)
-
-
 async def invalidate_page(page_id: str):
     await delete("page", page_id)
-
-
-async def get_scene_cached(page_id: str, fetcher) -> Optional[dict]:
-    return await get_or_fetch("scene", page_id, fetcher=fetcher, ttl=TTL_SCENE)
-
-
-async def invalidate_scene(page_id: str):
     await delete("scene", page_id)
-
-
-async def get_overview_cached(fetcher) -> Optional[dict]:
-    return await get_or_fetch("overview", "global", fetcher=fetcher, ttl=TTL_OVERVIEW)
 
 
 async def invalidate_overview():
     await delete("overview", "global")
+
+
+async def get_page_cached(page_id: str, fetcher) -> Optional[dict]:
+    return await get_or_fetch("page", page_id, fetcher=fetcher, ttl=600)
+
+
+async def get_overview_cached(fetcher) -> Optional[dict]:
+    return await get_or_fetch("overview", "global", fetcher=fetcher, ttl=300)
 
 
 async def cache_stats() -> dict:
@@ -110,6 +100,10 @@ async def cache_stats() -> dict:
         return {"enabled": False}
     try:
         info = await _redis.info("stats")
-        return {"enabled": True, "hits": info.get("keyspace_hits", 0), "misses": info.get("keyspace_misses", 0)}
+        return {
+            "enabled": True,
+            "hits": info.get("keyspace_hits", 0),
+            "misses": info.get("keyspace_misses", 0),
+        }
     except Exception:
         return {"enabled": True, "error": "unavailable"}

@@ -1,13 +1,13 @@
-# === FILE: backend/app/llm/groq_provider.py ===
-
 from langchain_groq import ChatGroq
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from app.config import settings
 import logging
 
 logger = logging.getLogger("mnemos.llm.groq")
 
 
-def get_groq_llm(model: str = None, temperature: float = 0.3, streaming: bool = True) -> ChatGroq:
+def get_groq_llm(model: str = None, temperature: float = 0.3,
+                  streaming: bool = True) -> ChatGroq:
     if not settings.groq_api_key:
         raise ValueError("Groq API key not configured")
     return ChatGroq(
@@ -18,13 +18,10 @@ def get_groq_llm(model: str = None, temperature: float = 0.3, streaming: bool = 
     )
 
 
-async def groq_chat_call(system: str, messages: list[dict], model: str = None) -> str:
-    """Direct Groq API call (non-streaming)."""
+async def groq_chat_call(system: str, messages: list[dict],
+                         model: str = None) -> str:
     if not settings.groq_api_key:
         raise ValueError("Groq API key not configured")
-
-    from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-
     llm = get_groq_llm(model=model, streaming=False)
     lc_messages = [SystemMessage(content=system)]
     for msg in messages:

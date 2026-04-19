@@ -1,14 +1,10 @@
 fastapi>=0.115.0
 uvicorn>=0.30.0
-supabase>=2.0.0
+supabase==2.25.1
 google-genai>=1.0.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
-umap-learn>=0.5.0
-hdbscan>=0.8.0
-scikit-learn>=1.4.0
-networkx>=3.2
 numpy>=1.26.0
 langchain>=0.3.0
 langchain-core>=0.3.0

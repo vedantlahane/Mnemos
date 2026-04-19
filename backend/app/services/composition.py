@@ -1,9 +1,8 @@
-# === FILE: backend/app/services/composition.py ===
+"""Content composition — AI writes on the canvas."""
 
 from __future__ import annotations
 import logging
-import textwrap
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator
 
 from app.db.supabase import db
 from app.services import embeddings
@@ -26,48 +25,32 @@ Rules:
 - Do NOT add meta-commentary — just write the content directly."""
 
 
-def _chunk_preserving_format(text: str, chunk_size: int = 120) -> list[str]:
-    if not text:
-        return []
-    chunks, start = [], 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        if end < len(text):
-            nl = text.rfind("\n", start, end)
-            if nl > start:
-                end = nl + 1
-            else:
-                sp = text.rfind(" ", start, end)
-                if sp > start + max(8, chunk_size // 3):
-                    end = sp + 1
-        chunks.append(text[start:end])
-        start = end
-    return chunks
-
-
-async def compose_content(topic: str, page_id: str = None, user_id: str = None) -> str:
-    context = await _gather_context(topic, page_id, user_id)
-    prompt = f"Topic: {topic}\n\n"
-    if context:
-        prompt += f"Relevant notes:\n{context}\n\nWrite using these notes as primary source."
-    else:
-        prompt += "No existing notes found. Write using general knowledge. State this clearly."
-    primary, _ = await llm._runtime_models(user_id)
-    try:
-        from app.llm.google_provider import google_chat_call
-        return await google_chat_call(COMPOSE_SYSTEM, [{"role": "user", "content": prompt}], model=primary)
-    except Exception:
-        from app.llm.groq_provider import groq_chat_call
-        return await groq_chat_call(COMPOSE_SYSTEM, [{"role": "user", "content": prompt}])
-
-
-async def stream_compose(topic: str, page_id: str = None, user_id: str = None) -> AsyncIterator[str]:
+async def compose_content(topic: str, page_id: str = None,
+                          user_id: str = None) -> str:
     context = await _gather_context(topic, page_id, user_id)
     prompt = f"Topic: {topic}\n\n"
     if context:
         prompt += f"Relevant notes:\n{context}\n\nWrite using these notes as primary source."
     else:
         prompt += "No existing notes found. Write using general knowledge."
+
+    try:
+        from app.llm.google_provider import google_chat_call
+        return await google_chat_call(COMPOSE_SYSTEM, [{"role": "user", "content": prompt}])
+    except Exception:
+        from app.llm.groq_provider import groq_chat_call
+        return await groq_chat_call(COMPOSE_SYSTEM, [{"role": "user", "content": prompt}])
+
+
+async def stream_compose(topic: str, page_id: str = None,
+                         user_id: str = None) -> AsyncIterator[str]:
+    context = await _gather_context(topic, page_id, user_id)
+    prompt = f"Topic: {topic}\n\n"
+    if context:
+        prompt += f"Relevant notes:\n{context}\n\nWrite using these notes."
+    else:
+        prompt += "No existing notes found. Write using general knowledge."
+
     primary, _ = await llm._runtime_models(user_id)
     try:
         llm_inst = _streaming_llm(primary)
@@ -79,11 +62,14 @@ async def stream_compose(topic: str, page_id: str = None, user_id: str = None) -
     except Exception as e:
         logger.warning(f"Stream failed: {e}, falling back")
         full = await compose_content(topic, page_id, user_id)
-        for chunk in _chunk_preserving_format(full):
-            yield chunk
+        # Yield in chunks
+        chunk_size = 120
+        for i in range(0, len(full), chunk_size):
+            yield full[i:i + chunk_size]
 
 
-async def _gather_context(topic: str, page_id: str | None, user_id: str | None, max_notes: int = 8) -> str:
+async def _gather_context(topic: str, page_id: str | None,
+                          user_id: str | None, max_notes: int = 8) -> str:
     try:
         emb = await embeddings.generate_query(topic)
         if page_id:
@@ -99,7 +85,7 @@ async def _gather_context(topic: str, page_id: str | None, user_id: str | None, 
         if not relevant:
             return ""
         return "\n\n".join(
-            f"[{n.get('title', 'Untitled')}]: {n.get('summary') or n.get('raw_text', '')[:300]}\nTags: {', '.join(n.get('tags') or [])}"
+            f"[{n.get('title', 'Untitled')}]: {n.get('summary') or n.get('raw_text', '')[:300]}"
             for n in relevant[:max_notes]
         )
     except Exception as e:

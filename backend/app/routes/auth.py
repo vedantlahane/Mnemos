@@ -1,5 +1,3 @@
-# === FILE: backend/app/routes/auth.py ===
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from app.config import settings
@@ -26,28 +24,18 @@ async def google_login(payload: GoogleAuthRequest):
             "refresh_token": "auth-disabled",
             "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"},
         }
-
     user_info = await verify_google_token(payload.token)
     if not user_info:
         raise HTTPException(status_code=401, detail="Invalid Google token")
-
     user = await db.upsert_user(
-        google_id=user_info["google_id"],
-        email=user_info["email"],
-        name=user_info.get("name"),
-        avatar_url=user_info.get("avatar_url"),
+        google_id=user_info["google_id"], email=user_info["email"],
+        name=user_info.get("name"), avatar_url=user_info.get("avatar_url"),
     )
-
-    access_token = create_access_token(user["id"], user["email"])
-    refresh_token = create_refresh_token(user["id"])
-
     return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "user": {
-            "id": user["id"], "email": user["email"],
-            "name": user.get("name"), "avatar_url": user.get("avatar_url"),
-        },
+        "access_token": create_access_token(user["id"], user["email"]),
+        "refresh_token": create_refresh_token(user["id"]),
+        "user": {"id": user["id"], "email": user["email"],
+                 "name": user.get("name"), "avatar_url": user.get("avatar_url")},
     }
 
 
@@ -63,29 +51,16 @@ async def refresh_token(payload: RefreshRequest):
 
 
 @router.get("/auth/me")
-async def get_current_user_info(request: Request):
+async def get_me(request: Request):
     if not settings.auth_enabled:
-        return {
-            "auth_enabled": False,
-            "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"},
-            "google_client_id": "",
-        }
-
+        return {"auth_enabled": False, "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"}}
     user = None
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        claims = verify_token(token)
+        claims = verify_token(auth_header[7:])
         if claims and claims.get("sub"):
             db_user = await db.get_user(claims["sub"])
             if db_user:
-                user = {
-                    "id": db_user["id"], "email": db_user["email"],
-                    "name": db_user.get("name"), "avatar_url": db_user.get("avatar_url"),
-                }
-
-    return {
-        "auth_enabled": True,
-        "user": user,
-        "google_client_id": settings.google_client_id,
-    }
+                user = {"id": db_user["id"], "email": db_user["email"],
+                        "name": db_user.get("name"), "avatar_url": db_user.get("avatar_url")}
+    return {"auth_enabled": True, "user": user, "google_client_id": settings.google_client_id}

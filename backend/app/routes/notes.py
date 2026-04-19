@@ -1,22 +1,40 @@
-# === FILE: backend/app/routes/notes.py ===
-
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
-from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, Query
 from app.models.schemas import NoteUpdate, NoteMoveRequest
 from app.db.supabase import db
-from app.services.processor import processor
-from app.services.spatial_planner import spatial_planner
+from app.excalidraw.scene import normalize_scene
+from app.excalidraw import scene_manager
+from app.services import operations as ops_svc
+from app.services import cache as cache_svc
+from app.services.placement import find_placement
 from app.auth.dependencies import get_optional_user_id
-import logging
 
-logger = logging.getLogger("mnemos.routes.notes")
 router = APIRouter()
 
 
 @router.get("/notes")
-async def list_notes(page: int = 1, limit: int = 20, tag: Optional[str] = None,
-                     page_id: Optional[str] = None, user_id: str = Depends(get_optional_user_id)):
-    return await db.list_notes(page=page, limit=limit, tag=tag, page_id=page_id, user_id=user_id)
+async def list_notes(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    tag: str = None,
+    page_id: str = None,
+    user_id: str = Depends(get_optional_user_id),
+):
+    result = await db.list_notes(
+        page=page, limit=limit, tag=tag,
+        page_id=page_id, user_id=user_id,
+    )
+    return {
+        "notes": result["notes"],
+        "total": result["total"],
+        "page": page,
+        "limit": limit,
+    }
+
+
+@router.get("/notes/tags")
+async def get_all_tags(user_id: str = Depends(get_optional_user_id)):
+    tags = await db.get_all_tags_with_counts(user_id=user_id)
+    return {"tags": tags}
 
 
 @router.get("/notes/{note_id}")
@@ -24,28 +42,39 @@ async def get_note(note_id: str, user_id: str = Depends(get_optional_user_id)):
     note = await db.get_note(note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    return note
+    edges = await db.get_edges_for_note(note_id)
+    return {**note, "edges": edges}
 
 
 @router.put("/notes/{note_id}")
-async def update_note(note_id: str, payload: NoteUpdate, user_id: str = Depends(get_optional_user_id)):
-    updates = payload.model_dump(exclude_none=True)
-    if not updates:
-        raise HTTPException(status_code=400, detail="No fields")
-    note = await db.update_note(note_id, user_id=user_id, **updates)
+async def update_note(note_id: str, payload: NoteUpdate,
+                      user_id: str = Depends(get_optional_user_id)):
+    note = await db.get_note(note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    # Sync to scene
+    updates = payload.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    result = await db.update_note(note_id, user_id=user_id, **updates)
+
+    # Update canvas card if note is on a page
     if note.get("page_id"):
         try:
-            from app.services.scene_manager import scene_manager
-            pos = await db.get_note_position(note["page_id"], note_id)
-            x = float(pos["x"]) if pos and pos.get("x") else 400
-            y = float(pos["y"]) if pos and pos.get("y") else 400
-            await scene_manager.upsert_note_card(note["page_id"], note, x, y)
-        except Exception as e:
-            logger.warning(f"Scene sync failed: {e}")
-    return note
+            updated_note = await db.get_note(note_id)
+            stored = await db.get_scene(note["page_id"])
+            scene = normalize_scene(stored["scene"])
+            scene = scene_manager.update_note_card_content(scene, updated_note)
+            new_version = stored["version"] + 1
+            await db.save_scene(note["page_id"], scene, new_version)
+            await ops_svc.log_and_notify(
+                note["page_id"], new_version, "update_elements",
+                actor="user", payload={"note_id": note_id},
+            )
+        except Exception:
+            pass
+
+    return result
 
 
 @router.delete("/notes/{note_id}")
@@ -53,70 +82,88 @@ async def delete_note(note_id: str, user_id: str = Depends(get_optional_user_id)
     note = await db.get_note(note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
+
+    # Remove from canvas
     if note.get("page_id"):
         try:
-            from app.services.scene_manager import scene_manager
-            await scene_manager.remove_note_card(note["page_id"], note_id)
-        except Exception as e:
-            logger.warning(f"Scene removal failed: {e}")
+            stored = await db.get_scene(note["page_id"])
+            scene = normalize_scene(stored["scene"])
+            scene, removed = scene_manager.remove_note_card(scene, note_id)
+            if removed:
+                new_version = stored["version"] + 1
+                await db.save_scene(note["page_id"], scene, new_version)
+                await ops_svc.log_and_notify(
+                    note["page_id"], new_version, "remove_note_card",
+                    actor="user", element_ids=removed,
+                    payload={"note_id": note_id},
+                )
+        except Exception:
+            pass
+
     await db.delete_note(note_id, user_id=user_id)
-    return {"status": "deleted"}
+    await cache_svc.invalidate_overview()
+    return {"status": "deleted", "note_id": note_id}
 
-
-@router.get("/tags")
-async def get_tags(user_id: str = Depends(get_optional_user_id)):
-    return {"tags": await db.get_all_tags_with_counts(user_id=user_id)}
-
-
-@router.post("/notes/{note_id}/retry")
-async def retry_processing(note_id: str, background_tasks: BackgroundTasks,
-                           user_id: str = Depends(get_optional_user_id)):
-    note = await db.get_note(note_id, user_id=user_id)
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
-    if note["processing_status"] not in ("failed", "pending"):
-        raise HTTPException(status_code=400, detail="Not retryable")
-    await db.update_note(note_id, user_id=user_id, processing_status="pending")
-    background_tasks.add_task(processor.process_note, note_id=note_id, raw_text=note["raw_text"])
-    return {"status": "retrying"}
-
-# === FILE: backend/app/routes/notes.py (CONTINUED) ===
 
 @router.post("/notes/{note_id}/move")
-async def move_note(note_id: str, payload: NoteMoveRequest, user_id: str = Depends(get_optional_user_id)):
+async def move_note(note_id: str, payload: NoteMoveRequest,
+                    user_id: str = Depends(get_optional_user_id)):
     note = await db.get_note(note_id, user_id=user_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-
-    old_page_id = note.get("page_id")
-    new_page_id = payload.page_id
-
-    # Verify target page exists
-    target_page = await db.get_page(new_page_id, user_id=user_id)
+    target_page = await db.get_page(payload.page_id, user_id=user_id)
     if not target_page:
         raise HTTPException(status_code=404, detail="Target page not found")
 
-    # Remove from old page's scene
-    if old_page_id and old_page_id != new_page_id:
+    old_page_id = note.get("page_id")
+
+    # Remove from old canvas
+    if old_page_id and old_page_id != payload.page_id:
         try:
-            from app.services.scene_manager import scene_manager
-            await scene_manager.remove_note_card(old_page_id, note_id)
-        except Exception as e:
-            logger.warning(f"Remove from old scene failed: {e}")
+            stored = await db.get_scene(old_page_id)
+            scene = normalize_scene(stored["scene"])
+            scene, removed = scene_manager.remove_note_card(scene, note_id)
+            if removed:
+                new_version = stored["version"] + 1
+                await db.save_scene(old_page_id, scene, new_version)
+                await ops_svc.log_and_notify(
+                    old_page_id, new_version, "remove_note_card",
+                    actor="user", element_ids=removed,
+                    payload={"note_id": note_id},
+                )
+        except Exception:
+            pass
 
-    # Update note's page
-    updated = await db.update_note(note_id, user_id=user_id, page_id=new_page_id)
+    # Update note
+    await db.update_note(note_id, page_id=payload.page_id)
 
-    # Place on new page's scene
+    # Place on new canvas
     try:
-        from app.services.scene_manager import scene_manager
-        from app.models.canvas_ops import Viewport
-
-        placement = await spatial_planner.find_placement(
-            page_id=new_page_id, note=updated or note, strategy="auto",
+        updated_note = await db.get_note(note_id)
+        stored = await db.get_scene(payload.page_id)
+        scene = normalize_scene(stored["scene"])
+        placement = await find_placement(
+            payload.page_id, scene, note=updated_note, strategy="auto",
         )
-        await scene_manager.upsert_note_card(new_page_id, updated or note, placement.x, placement.y)
-    except Exception as e:
-        logger.warning(f"Place on new scene failed: {e}")
+        scene, element_ids = scene_manager.upsert_note_card(
+            scene, updated_note, placement.x, placement.y,
+        )
+        new_version = stored["version"] + 1
+        await db.save_scene(payload.page_id, scene, new_version)
+        await db.update_note(note_id, canvas_x=placement.x, canvas_y=placement.y, element_ids=element_ids)
+        await ops_svc.log_and_notify(
+            payload.page_id, new_version, "add_note_card",
+            actor="user", element_ids=element_ids,
+            payload={"note_id": note_id},
+        )
+    except Exception:
+        pass
 
-    return {"status": "moved", "from_page": old_page_id, "to_page": new_page_id}
+    await cache_svc.invalidate_overview()
+    return {"status": "moved", "note_id": note_id, "page_id": payload.page_id}
+
+
+@router.get("/pages/{page_id}/notes")
+async def get_page_notes(page_id: str, user_id: str = Depends(get_optional_user_id)):
+    notes = await db.get_notes_for_page(page_id, user_id=user_id)
+    return {"notes": notes, "count": len(notes)}

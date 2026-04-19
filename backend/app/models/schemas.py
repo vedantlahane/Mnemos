@@ -1,8 +1,9 @@
-# === FILE: backend/app/models/schemas.py ===
-
-from pydantic import BaseModel, Field, model_validator
+from __future__ import annotations
+from pydantic import BaseModel, Field
 from typing import Optional
 
+
+# ── Capture ──
 
 class CaptureRequest(BaseModel):
     text: str
@@ -10,21 +11,15 @@ class CaptureRequest(BaseModel):
     source_title: Optional[str] = None
     capture_type: str = "manual"
     page_hint: Optional[str] = None
-    custom_command: Optional[str] = None
     viewport: Optional[dict] = None
-
-
-class ChatRequest(BaseModel):
-    question: str
-    history: list[dict] = []
-    context_type: str = "home"
-    page_id: Optional[str] = None
 
 
 class ContextRequest(BaseModel):
     url: str
     text: str
 
+
+# ── Notes ──
 
 class NoteUpdate(BaseModel):
     title: Optional[str] = None
@@ -49,12 +44,13 @@ class ProcessedCapture(BaseModel):
     content_type: str = "note"
 
 
+# ── Pages ──
+
 class PageCreate(BaseModel):
     name: str
     description: Optional[str] = None
     icon: str = "📄"
     color: str = "#6366f1"
-    layout_mode: str = "canvas"
 
 
 class PageUpdate(BaseModel):
@@ -63,8 +59,9 @@ class PageUpdate(BaseModel):
     icon: Optional[str] = None
     color: Optional[str] = None
     is_archived: Optional[bool] = None
-    layout_mode: Optional[str] = None
 
+
+# ── Scene / Sync ──
 
 class SceneSave(BaseModel):
     elements: list[dict] = []
@@ -72,11 +69,19 @@ class SceneSave(BaseModel):
     files: dict = Field(default_factory=dict)
 
 
+class SyncRequest(BaseModel):
+    base_version: int
+    changes: dict = Field(default_factory=dict)  # {added:[], modified:[], deleted:[]}
+    full_scene: Optional[dict] = None  # fallback for large diffs
+
+
 class ViewportSave(BaseModel):
     scroll_x: float = 0
     scroll_y: float = 0
     zoom: float = 1.0
 
+
+# ── Edges ──
 
 class EdgeCreate(BaseModel):
     source_id: str
@@ -93,111 +98,26 @@ class EdgeClassification(BaseModel):
     confidence: float
 
 
-class RegionCreate(BaseModel):
-    page_id: str
-    label: str
-    description: Optional[str] = None
-    color: str = "#6366f1"
-    region_type: str = "cluster"
-    layout_hint: str = "auto"
+# ── Chat ──
 
-
-class RegionUpdate(BaseModel):
-    label: Optional[str] = None
-    description: Optional[str] = None
-    color: Optional[str] = None
-    layout_hint: Optional[str] = None
-
-
-class PageBlockCreate(BaseModel):
-    block_type: str = "paragraph"
-    text_content: Optional[str] = None
-    parent_block_id: Optional[str] = None
-    prev_block_id: Optional[str] = None
-    next_block_id: Optional[str] = None
-    order_key: Optional[float] = None
-    depth: int = 0
-    attrs: dict = Field(default_factory=dict)
-    note_id: Optional[str] = None
-    provenance: dict = Field(default_factory=dict)
-    metadata: dict = Field(default_factory=dict)
-    created_by: str = "user"
-
-
-class PageBlockUpdate(BaseModel):
-    text_content: Optional[str] = None
-    parent_block_id: Optional[str] = None
-    order_key: Optional[float] = None
-    depth: Optional[int] = None
-    block_type: Optional[str] = None
-    attrs: Optional[dict] = None
-    provenance: Optional[dict] = None
-    metadata: Optional[dict] = None
-    is_deleted: Optional[bool] = None
-
-
-class PageBlockMove(BaseModel):
-    prev_block_id: Optional[str] = None
-    next_block_id: Optional[str] = None
-    order_key: Optional[float] = None
-
-
-class BlockReferenceCreate(BaseModel):
-    ref_type: str
-    ref_id: str
-    start_offset: int = 0
-    end_offset: Optional[int] = None
-    label: Optional[str] = None
-    metadata: dict = Field(default_factory=dict)
-
-
-class InlineEmbedCreate(BaseModel):
-    embed_type: str
-    target_page_id: Optional[str] = None
-    target_note_id: Optional[str] = None
-    target_block_id: Optional[str] = None
-    url: Optional[str] = None
-    inline_position: dict = Field(default_factory=dict)
-    display_mode: str = "inline-card"
-    width: Optional[int] = None
-    height: Optional[int] = None
-    attrs: dict = Field(default_factory=dict)
-    created_by: str = "user"
-
-    @model_validator(mode="after")
-    def _validate_single_target(self):
-        targets = [self.target_page_id, self.target_note_id, self.target_block_id, self.url]
-        count = sum(1 for t in targets if t)
-        if count != 1:
-            raise ValueError("inline embed must point to exactly one target")
-        return self
-
-
-class PageDocumentUpdate(BaseModel):
-    default_font: Optional[str] = None
-    content_width: Optional[int] = None
-    line_height: Optional[float] = None
-    left_padding: Optional[int] = None
-    right_padding: Optional[int] = None
-    metadata: Optional[dict] = None
-
-
-class ChatSave(BaseModel):
+class ChatRequest(BaseModel):
+    question: str
+    history: list[dict] = []
     context_type: str = "home"
-    context_id: Optional[str] = None
-    messages: list[dict]
-    title: Optional[str] = None
+    page_id: Optional[str] = None
 
+
+# ── Canvas Chat ──
+
+class CanvasChatRequest(BaseModel):
+    message: str
+    viewport: Optional[dict] = None
+    history: list[dict] = []
+    selected_element_ids: list[str] = []
+
+
+# ── AI ──
 
 class CuratorAction(BaseModel):
     action_type: str
     params: dict
-
-
-class PageRevisionCreate(BaseModel):
-    scene_data: dict = Field(default_factory=dict)
-    viewport: Optional[dict] = None
-    ops: list[dict] = Field(default_factory=list)
-    source: str = "manual"
-    changed_by: str = "user"
-    message: Optional[str] = None

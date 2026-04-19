@@ -1,5 +1,3 @@
-# === FILE: backend/app/config.py ===
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,27 +22,39 @@ class Settings(BaseSettings):
 
     redis_url: str = ""
 
-    page_route_confidence_threshold: float = 0.75
-
+    # LLM
     gemini_model: str = "gemini-2.5-flash"
     groq_model: str = "llama-3.3-70b-versatile"
 
+    # Embeddings
     similarity_threshold: float = 0.65
     embedding_dimensions: int = 768
 
-    default_card_width: int = 360
-    default_card_height: int = 240
-    card_spacing_x: int = 420
-    card_spacing_y: int = 350
-    min_element_gap: int = 80
-    cluster_padding: int = 60
+    # Canvas layout
+    sheet_width: int = 850
+    sheet_margin: int = 50
+    card_width: int = 360
+    card_height: int = 240
+    min_gap: int = 60
+    block_gap: int = 40
+    section_gap: int = 80
+    height_buffer: float = 1.15  # 15% safety margin on text measurement
 
+    # Page routing
+    page_route_confidence_threshold: float = 0.75
+
+    # Curator
     curator_duplicate_threshold: float = 0.92
     curator_missing_edge_threshold: float = 0.80
     curator_stale_days: int = 30
     curator_max_comparison: int = 200
 
+    # Streaming
     stream_chunk_delay: float = 0.02
+
+    # Sync
+    sync_max_version_gap: int = 50
+    ops_retention_count: int = 200
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

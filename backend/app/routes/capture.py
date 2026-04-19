@@ -1,99 +1,115 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+import asyncio
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from app.models.schemas import CaptureRequest, ContextRequest
 from app.db.supabase import db
-from app.services.processor import processor
-from app.services import embeddings
+from app.services.capture import process_note
+from app.services import cache as cache_svc
 from app.auth.dependencies import get_optional_user_id
-import logging
 
-logger = logging.getLogger("mnemos.routes.capture")
 router = APIRouter()
 
-MIN_TEXT_LENGTH = 3
-MAX_TEXT_LENGTH = 50_000
-
-CONTEXT_CONFIG = {
-    "similarity_threshold": 0.70,
-    "max_results": 3,
-    "min_text_length": 100,
-    "excluded_domains": [
-        "google.com", "google.com/search", "mail.google.com",
-        "github.com/search", "localhost", "chrome://",
-    ],
-}
 
 @router.post("/capture")
-async def capture_note(
-    payload: CaptureRequest,
-    background_tasks: BackgroundTasks,
-    user_id: str = Depends(get_optional_user_id),
-):
-    text = payload.text.strip()
-    if len(text) < MIN_TEXT_LENGTH:
-        raise HTTPException(status_code=400, detail=f"Text too short (min {MIN_TEXT_LENGTH} chars)")
-    if len(text) > MAX_TEXT_LENGTH:
-        raise HTTPException(status_code=400, detail=f"Text too long (max {MAX_TEXT_LENGTH} chars)")
-
-    metadata = {}
-    if payload.custom_command:
-        metadata["custom_command"] = payload.custom_command
-
+async def capture(payload: CaptureRequest, background: BackgroundTasks,
+                  user_id: str = Depends(get_optional_user_id)):
     note = await db.insert_note(
-        raw_text=text,
+        raw_text=payload.text,
         source_url=payload.source_url,
         source_title=payload.source_title,
         capture_type=payload.capture_type,
-        processing_status="pending",
         user_id=user_id,
-        metadata=metadata
+        processing_status="pending",
     )
 
-    background_tasks.add_task(
-        processor.process_note,
+    background.add_task(
+        process_note,
         note_id=note["id"],
-        raw_text=text,
+        raw_text=payload.text,
         page_hint=payload.page_hint,
         viewport=payload.viewport,
     )
 
-    return {"status": "saved", "note_id": note["id"]}
+    await cache_svc.invalidate_overview()
+    return {
+        "note_id": note["id"],
+        "status": "processing",
+        "message": "Note captured and processing started",
+    }
 
-@router.post("/context")
-async def check_context(payload: ContextRequest):
-    for domain in CONTEXT_CONFIG["excluded_domains"]:
-        if domain in payload.url:
-            return {"related_notes": []}
-    if len(payload.text) < CONTEXT_CONFIG["min_text_length"]:
-        return {"related_notes": []}
 
-    try:
-        page_embedding = await embeddings.generate_query(payload.text[:1000])
-        related = await db.vector_search(
-            embedding=page_embedding, 
-            limit=CONTEXT_CONFIG["max_results"],
-            threshold=CONTEXT_CONFIG["similarity_threshold"],
+@router.post("/capture/batch")
+async def capture_batch(payloads: list[CaptureRequest], background: BackgroundTasks,
+                        user_id: str = Depends(get_optional_user_id)):
+    results = []
+    for payload in payloads[:20]:  # Max 20 at once
+        note = await db.insert_note(
+            raw_text=payload.text,
+            source_url=payload.source_url,
+            source_title=payload.source_title,
+            capture_type=payload.capture_type,
+            user_id=user_id,
+            processing_status="pending",
         )
+        background.add_task(
+            process_note,
+            note_id=note["id"],
+            raw_text=payload.text,
+            page_hint=payload.page_hint,
+            viewport=payload.viewport,
+        )
+        results.append({"note_id": note["id"], "status": "processing"})
 
-        enriched = []
-        for note in related:
-            page_name = None
-            page_id = note.get("page_id")
-            if not page_id:
-                try:
-                    full_note = await db.get_note(note["id"])
-                    page_id = full_note.get("page_id") if full_note else None
-                except Exception:
-                    pass
-            if page_id:
-                try:
-                    page = await db.get_page(page_id)
-                    if page:
-                        page_name = page["name"]
-                except Exception:
-                    pass
-            enriched.append({**note, "page_id": page_id, "page_name": page_name})
+    await cache_svc.invalidate_overview()
+    return {"captured": results, "count": len(results)}
 
-        return {"related_notes": enriched}
-    except Exception as e:
-        logger.error(f"Context check failed: {e}")
-        return {"related_notes": []}
+
+@router.post("/capture/context")
+async def capture_with_context(payload: ContextRequest, background: BackgroundTasks,
+                               user_id: str = Depends(get_optional_user_id)):
+    note = await db.insert_note(
+        raw_text=payload.text,
+        source_url=payload.url,
+        capture_type="extension",
+        user_id=user_id,
+        processing_status="pending",
+    )
+
+    background.add_task(
+        process_note,
+        note_id=note["id"],
+        raw_text=payload.text,
+    )
+
+    await cache_svc.invalidate_overview()
+    return {"note_id": note["id"], "status": "processing"}
+
+
+@router.get("/capture/status/{note_id}")
+async def capture_status(note_id: str, user_id: str = Depends(get_optional_user_id)):
+    note = await db.get_note(note_id, user_id=user_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {
+        "note_id": note["id"],
+        "status": note.get("processing_status", "unknown"),
+        "title": note.get("title"),
+        "page_id": note.get("page_id"),
+    }
+
+
+@router.post("/capture/retry/{note_id}")
+async def retry_capture(note_id: str, background: BackgroundTasks,
+                        user_id: str = Depends(get_optional_user_id)):
+    note = await db.get_note(note_id, user_id=user_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if note.get("processing_status") not in ("failed", "pending"):
+        raise HTTPException(status_code=400, detail="Note is not in a retryable state")
+
+    await db.update_note(note_id, processing_status="pending")
+    background.add_task(
+        process_note,
+        note_id=note["id"],
+        raw_text=note["raw_text"],
+    )
+    return {"note_id": note_id, "status": "retrying"}
