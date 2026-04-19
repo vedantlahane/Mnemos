@@ -54,7 +54,7 @@ function NoteDetailContent({ note, onRefetch }: { note: EnrichedNote; onRefetch:
   async function handleRetry() {
     setRetrying(true)
     try {
-      await notes.retry(note.id)
+
       addSystemMessage(`Retrying processing for "${note.title || "Untitled"}"â€¦`)
       setTimeout(onRefetch, 5000)
     } catch (err) {

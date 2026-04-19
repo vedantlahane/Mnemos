@@ -694,11 +694,9 @@ export function useCommands() {
         try {
           setLoading(true)
           addSystemMessage("AI is reorganizing canvas…")
-          const result = await api.aiLayout(current.pageId)
+          await api.aiLayout(current.pageId)
           canvasDispatch({ type: "refresh" })
-          addSystemMessage(
-            `Canvas reorganized: ${result.positions.length} notes, ${result.clusters.length} clusters, ${result.edges.length} edges.`
-          )
+          addSystemMessage("Canvas reorganized.")
         } catch {
           addAssistantMessage("AI layout failed. Try dragging manually.")
         } finally {

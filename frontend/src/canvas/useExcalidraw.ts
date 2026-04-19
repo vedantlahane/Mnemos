@@ -281,9 +281,8 @@ export function useExcalidraw(
           const p = pendingPayload.current
           const zoomValue = typeof p.appState.zoom === "object" ? (p.appState.zoom as any).value || 1 : (p.appState.zoom as number) || 1
           void api.savePageCanvas(pageId, {
-            mode: _storageMode,
             canvas_data: { elements: p.elements as ExcalidrawElement[], appState: p.appState as any, files: p.files },
-            viewport: { x: (p.appState.scrollX as number) || 0, y: (p.appState.scrollY as number) || 0, zoom: zoomValue },
+            viewport: { scroll_x: (p.appState.scrollX as number) || 0, scroll_y: (p.appState.scrollY as number) || 0, zoom: zoomValue },
           })
         }
       }
@@ -379,15 +378,15 @@ export function useExcalidraw(
               gridSize: payload.appState.gridSize,
             }
 
-            await api.savePageCanvas(pageId, { mode: _storageMode,
+            await api.savePageCanvas(pageId, {
               canvas_data: {
                 elements: payload.elements as ExcalidrawElement[],
                 appState: persistedAppState,
                 files: payload.files,
               },
               viewport: {
-                x: (payload.appState.scrollX as number) || 0,
-                y: (payload.appState.scrollY as number) || 0,
+                scroll_x: (payload.appState.scrollX as number) || 0,
+                scroll_y: (payload.appState.scrollY as number) || 0,
                 zoom: zoomValue,
               },
             })

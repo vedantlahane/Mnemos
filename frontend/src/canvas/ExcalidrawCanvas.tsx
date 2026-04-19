@@ -452,9 +452,6 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
                 }
                 const diagramGroupId = nanoid();
                 const diagramElements = renderTopology(diagramResp.topology as any, ctx, diagramGroupId)
-                const bounds = elementBounds(diagramElements as any)
-                const dw = bounds.maxX - bounds.minX;
-                const dh = bounds.maxY - bounds.minY;
 
                 addElements(placeDiagramWithoutOverlap(ctx, diagramElements as any) as any)
                 addSystemMessage("Diagram added. Now composing text…")
@@ -506,7 +503,6 @@ export default function ExcalidrawCanvas({ pageId }: Props) {
             }
             const diagramGroupId = nanoid();
             const diagramElements = renderTopology(resp.topology as any, ctx, diagramGroupId)
-            const bounds = elementBounds(diagramElements as any)
 
             addElements(placeDiagramWithoutOverlap(ctx, diagramElements as any) as any)
             addSystemMessage("Diagram added securely to layout.")

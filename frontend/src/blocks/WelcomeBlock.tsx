@@ -34,7 +34,6 @@ export default function WelcomeBlock(_props: { item: BlockItem }) {
             description: null,
             icon: p.icon,
             color: p.color,
-            layout_mode: p.layout_mode,
             is_archived: p.is_archived,
             created_at: p.updated_at,
             updated_at: p.updated_at,

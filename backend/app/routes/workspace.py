@@ -51,3 +51,32 @@ async def search_by_tag(
         "notes": result["notes"],
         "total": result["total"],
     }
+
+
+@router.post("/context")
+async def find_related_notes(
+    payload: dict,
+    user_id: str = Depends(get_optional_user_id),
+):
+    """Find related notes based on webpage context (URL and text)."""
+    url = payload.get("url", "")
+    text = payload.get("text", "")
+    
+    if not text or len(text) < 3:
+        return {"related_notes": []}
+    
+    try:
+        # Generate embedding for the webpage text
+        query_emb = await embeddings.generate_query(text)
+        
+        # Search for related notes
+        results = await db.vector_search(query_emb, limit=5, threshold=0.60)
+        
+        # Filter by user if authenticated
+        if user_id:
+            results = [r for r in results if r.get("user_id") == user_id]
+        
+        return {"related_notes": results}
+    except Exception as e:
+        # Return empty results on error instead of failing
+        return {"related_notes": []}

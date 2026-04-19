@@ -1,10 +1,9 @@
 import { create } from "zustand"
 import type {
   StreamItem, BlockType, BlockData,
-  ChatSource, StreamMetadata, ChatMessage,
+  ChatSource, StreamMetadata,
 } from "../types"
 import { uid } from "../utils"
-import { api } from "../api/client"
 
 interface StreamState {
   items: StreamItem[]
@@ -160,7 +159,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     return ids
   },
 
-  saveConversation: async (contextType, contextId) => {
+  saveConversation: async () => {
     // Backend API v3 does not support saving conversations.
     // Chat messages are automatically recorded when sent through /chat or /canvas-chat endpoints.
     // This function is kept for backward compatibility but is now a no-op.
