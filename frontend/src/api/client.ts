@@ -28,7 +28,6 @@ import type {
   SettingsUpdateRequest,
   TagCount,
   UserSettings,
-  WorkspaceOverview,
   WorkspaceStats,
 } from "../types"
 
@@ -807,17 +806,8 @@ export const search = {
 }
 
 export const workspace = {
-  overview(): Promise<WorkspaceOverview> {
-    return apiFetch("/workspace/overview")
-  },
-
-  stats(): Promise<WorkspaceStats> {
-    return apiFetch("/workspace/stats")
-  },
-
-  healthCheck(): Promise<{ stuck_found: number; fixed: number; status: string }> {
-    return apiFetch("/workspace/health-check", { method: "POST" })
-  },
+  // Note: /workspace/overview and /workspace/stats endpoints don't exist in v3.
+  // Use individual endpoints instead (pages.list, notes.list, etc.)
 }
 
 export const ai = {
@@ -1308,11 +1298,21 @@ export const api = {
 
   // Stats
   getStats: async () => {
-    const [stats, tags, allNotes] = await Promise.all([
-      workspace.stats(),
+    const [tags, allNotes] = await Promise.all([
       notes.tags().catch(() => ({ tags: [] as TagCount[] })),
       getAllNotesForExport().catch(() => []),
     ])
+    // Build stats from available data
+    const stats: WorkspaceStats = {
+      notes: allNotes.length,
+      pages: 0,
+      edges: 0,
+      stuck_notes: 0,
+      cache: { enabled: false },
+      total_notes: allNotes.length,
+      total_pages: 0,
+      total_tags: tags.tags.length,
+    }
     return toWorkspaceStatsCompat(stats, tags.tags.length, allNotes)
   },
 
@@ -1465,8 +1465,7 @@ export const api = {
     return { topology }
   },
 
-  // Workspace
-  getOverview: workspace.overview,
+  // Workspace (v3 doesn't have /workspace/overview endpoint)
 
   exportWorkspace: async () => {
     const [allPages, allNotes, allEdges] = await Promise.all([

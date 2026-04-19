@@ -1,5 +1,5 @@
 import { useAsyncData } from "../hooks/useAsyncData"
-import { api, workspace } from "../api/client"
+import { api } from "../api/client"
 import { useAppContext } from "../hooks/useAppContext"
 import type { BlockItem, Page, WorkspaceStats } from "../types"
 import { FileText, Layers, Hash, Zap, AlertCircle, RefreshCw } from "lucide-react"
@@ -22,53 +22,26 @@ export default function WelcomeBlock(_props: { item: BlockItem }) {
 
   const { data, error } = useAsyncData<OverviewData>(
     async () => {
-      // Try the single overview endpoint first
-      try {
-        const overview = await workspace.overview()
-        return {
-          stats: overview.stats ?? null,
-          pages: (overview.pages || []).map((p) => ({
-            id: p.id,
-            user_id: null,
-            name: p.name,
-            description: null,
-            icon: p.icon,
-            color: p.color,
-            is_archived: p.is_archived,
-            created_at: p.updated_at,
-            updated_at: p.updated_at,
-            note_count: p.note_count,
-          })),
-          recentNotes: (overview.recent_notes || []).map((n) => ({
-            id: n.id,
-            title: n.title,
-            summary: n.summary,
-            raw_text: n.raw_text,
-            processing_status: n.processing_status,
-          })),
-        }
-      } catch {
-        // Fallback: make individual calls if /workspace/overview doesn't exist
-        const [pagesResp, stats, notesResp] = await Promise.allSettled([
-          api.listPages(),
-          api.getStats(),
-          api.listNotes(1, 5),
-        ])
+      // Fetch overview data using supported v3 endpoints
+      const [pagesResp, stats, notesResp] = await Promise.allSettled([
+        api.listPages(),
+        api.getStats(),
+        api.listNotes(1, 5),
+      ])
 
-        return {
-          stats: stats.status === "fulfilled" ? stats.value : null,
-          pages: pagesResp.status === "fulfilled" ? pagesResp.value.pages : [],
-          recentNotes:
-            notesResp.status === "fulfilled"
-              ? notesResp.value.notes.map((n) => ({
-                  id: n.id,
-                  title: n.title,
-                  summary: n.summary,
-                  raw_text: n.raw_text,
-                  processing_status: n.processing_status,
-                }))
-              : [],
-        }
+      return {
+        stats: stats.status === "fulfilled" ? stats.value : null,
+        pages: pagesResp.status === "fulfilled" ? pagesResp.value.pages : [],
+        recentNotes:
+          notesResp.status === "fulfilled"
+            ? notesResp.value.notes.map((n) => ({
+                id: n.id,
+                title: n.title,
+                summary: n.summary,
+                raw_text: n.raw_text,
+                processing_status: n.processing_status,
+              }))
+            : [],
       }
     },
     []

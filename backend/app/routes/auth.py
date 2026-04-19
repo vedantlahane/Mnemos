@@ -41,6 +41,8 @@ async def google_login(payload: GoogleAuthRequest):
 
 @router.post("/auth/refresh")
 async def refresh_token(payload: RefreshRequest):
+    if not settings.auth_enabled:
+        return {"access_token": "auth-disabled"}
     claims = verify_token(payload.refresh_token)
     if not claims or claims.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
@@ -53,7 +55,11 @@ async def refresh_token(payload: RefreshRequest):
 @router.get("/auth/me")
 async def get_me(request: Request):
     if not settings.auth_enabled:
-        return {"auth_enabled": False, "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"}}
+        return {
+            "auth_enabled": False,
+            "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"},
+            "google_client_id": settings.google_client_id,
+        }
     user = None
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):

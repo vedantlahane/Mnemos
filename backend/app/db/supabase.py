@@ -11,7 +11,10 @@ from datetime import datetime, timedelta, timezone
 from supabase import create_client
 from app.config import settings
 
-client = create_client(settings.supabase_url, settings.supabase_key)
+# Use service role key for backend operations (bypasses RLS)
+# Falls back to regular key if service role key not provided
+supabase_key = settings.supabase_service_role_key or settings.supabase_key
+client = create_client(settings.supabase_url, supabase_key)
 
 
 def _run(fn):
