@@ -2,7 +2,6 @@ import { useCallback } from "react"
 import { api } from "@/api/client"
 import { useAppStore, useChatStore, useCanvasStore } from "@/store"
 import {
-  panelForAction,
   extractNavigation,
   shouldReloadCanvas,
   getCanvasVersion,
@@ -12,16 +11,14 @@ import {
 /**
  * THE core hook.
  * Sends a message to POST /api/chat, then routes the response:
- *   1. Always show response.text in chat
- *   2. Map ui_action → panel
- *   3. Handle open_board → set workspace
- *   4. Handle canvas_update → trigger reload
- *   5. Handle open_settings → store preferences
+ *   1. Show response.text + inline card data in chat
+ *   2. Handle open_board → set workspace
+ *   3. Handle canvas_update → trigger reload
+ *   4. Handle settings → store preferences
  */
 export function useChat() {
   const activeWorkspace = useAppStore((s) => s.activeWorkspace)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
-  const setActivePanel = useAppStore((s) => s.setActivePanel)
   const setPreferences = useAppStore((s) => s.setPreferences)
 
   const addUserMessage = useChatStore((s) => s.addUserMessage)
@@ -47,39 +44,26 @@ export function useChat() {
           getContext(),
         )
 
-        // 1. Always show text
-        addAssistantMessage(response.text)
+        // 1. Show text + card data inline in chat
+        addAssistantMessage(response.text, response)
         setLastResponse(response)
 
-        // 2. Error?
-        if (response.error) {
-          // Error styling is handled by ChatMessage via response.error
-          return
-        }
-
-        // 3. Panel routing
-        const panel = panelForAction(response.ui_action)
-        if (panel !== "none") {
-          setActivePanel(panel)
-        }
-
-        // 4. Workspace navigation
+        // 2. Workspace navigation
         const targetWs = extractNavigation(response)
         if (targetWs) {
-          setActiveWorkspace(targetWs) // also closes panels
+          setActiveWorkspace(targetWs)
         }
 
-        // 5. Settings
+        // 3. Settings
         if (response.ui_action === "open_settings") {
           const prefs = asPreferences(response.data)
           if (prefs) setPreferences(prefs)
         }
 
-        // 6. Canvas reload
+        // 4. Canvas reload
         if (shouldReloadCanvas(response)) {
           const v = getCanvasVersion(response)
           if (v !== null) setVersion(v)
-          // Canvas component watches version and calls loadScene
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Something went wrong"
@@ -91,7 +75,7 @@ export function useChat() {
     [
       activeWorkspace, addUserMessage, addAssistantMessage,
       setLoading, setLastResponse, getContext,
-      setActivePanel, setActiveWorkspace, setPreferences, setVersion,
+      setActiveWorkspace, setPreferences, setVersion,
     ],
   )
 

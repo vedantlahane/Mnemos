@@ -1,67 +1,65 @@
 ﻿import { useRef, type RefObject } from "react"
 import { ChatBox } from "./ChatBox"
-import { PanelContainer } from "@/components/panels/PanelContainer"
 import { useAppStore } from "@/store"
 import { useDraggable } from "@/hooks/useDraggable"
-import { GripHorizontal } from "lucide-react"
 
 interface Props {
   inputRef: RefObject<HTMLTextAreaElement | null>
 }
 
 export function Overlay({ inputRef }: Props) {
-  const panel = useAppStore((s) => s.activePanel)
   const activeWorkspace = useAppStore((s) => s.activeWorkspace)
   const dragHandleRef = useRef<HTMLDivElement>(null)
-  
-  // Starting position assuming window is ~1200px width.
-  // Draggable handles absolute offset.
-  const position = useDraggable(dragHandleRef, { x: window.innerWidth - 420, y: 64 })
+  const position = useDraggable(dragHandleRef, {
+    x: window.innerWidth - 420,
+    y: 56,
+  })
 
+  // No workspace → centered minimal chat at bottom
   if (!activeWorkspace) {
-    // Hyper-minimal center-down fixed chat when no workspace is open
     return (
-      <div className="absolute inset-0 pointer-events-none flex flex-col justify-end items-center pb-12 z-50">
-        <div className="pointer-events-auto w-full max-w-2xl px-4 animate-slide-up">
+      <div className="absolute inset-0 pointer-events-none flex flex-col justify-end items-center pb-10 z-50">
+        <div className="pointer-events-auto w-full max-w-xl px-4 animate-slide-up">
           <ChatBox inputRef={inputRef} minimal />
         </div>
       </div>
     )
   }
 
-  // Draggable liquid glass panel when canvas is open
+  // Workspace open → floating glass chat panel
   return (
     <div
-      className="absolute flex flex-col pointer-events-auto z-50 shadow-2xl overflow-hidden transition-shadow"
-        style={{
-          width: 380,
-          height: "calc(100vh - 140px)",
-          left: position.x || undefined,
-          top: position.y || undefined,
-          right: position.x ? undefined : 40,
-          borderRadius: 24,
-          background: "linear-gradient(to bottom, rgba(30, 30, 40, 0.45), rgba(20, 20, 30, 0.35))",
-          backdropFilter: "blur(40px)",
-          WebkitBackdropFilter: "blur(40px)",
-          boxShadow: "0 0 0 1px rgba(255,255,255,0.08), 0 30px 60px -12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1)",
-        }}
+      className="absolute flex flex-col pointer-events-auto z-50 overflow-hidden animate-scale-in"
+      style={{
+        width: 380,
+        height: "calc(100vh - 120px)",
+        left: position.x || undefined,
+        top: position.y || undefined,
+        right: position.x ? undefined : 32,
+        borderRadius: 24,
+        background: "linear-gradient(165deg, rgba(18, 18, 32, 0.55), rgba(10, 10, 22, 0.45))",
+        backdropFilter: "blur(48px) saturate(1.4)",
+        WebkitBackdropFilter: "blur(48px) saturate(1.4)",
+        boxShadow: `
+          0 0 0 1px rgba(255,255,255,0.06),
+          0 0 0 0.5px rgba(255,255,255,0.03) inset,
+          0 1px 0 rgba(255,255,255,0.04) inset,
+          0 32px 64px -16px rgba(0,0,0,0.55)
+        `,
+      }}
+    >
+      {/* Drag handle */}
+      <div
+        ref={dragHandleRef}
+        className="h-8 flex items-center justify-center cursor-grab active:cursor-grabbing group"
       >
-        <div 
-          ref={dragHandleRef} 
-          className="h-10 flex items-center justify-center cursor-grab active:cursor-grabbing border-b border-white/5 text-white/30 hover:text-white/80 hover:bg-white/5 transition-all"
-        >
-          <GripHorizontal size={18} strokeWidth={2} />
-        </div>
-
-        {panel !== "none" && (
-          <div className="flex-shrink-0 max-h-[50%] overflow-y-auto border-b border-white/10 bg-black/20">
-            <PanelContainer />
-          </div>
-        )}
-
-        <div className="flex-1 min-h-0 flex flex-col">
-          <ChatBox inputRef={inputRef} />
-        </div>
+        <div className="w-6 h-[3px] rounded-full bg-white/10 group-hover:bg-white/20 group-hover:w-8 transition-all duration-200" />
       </div>
+
+      {/* Chat */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        <ChatBox inputRef={inputRef} />
+      </div>
+    </div>
   )
 }

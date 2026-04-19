@@ -1,7 +1,5 @@
 import type {
   ChatResponse,
-  UIAction,
-  ActivePanel,
   Workspace,
   BoardListData,
   ItemListData,
@@ -16,22 +14,6 @@ import type {
 // ══════════════════════════════════════════
 // RESPONSE ROUTING
 // ══════════════════════════════════════════
-
-const ACTION_TO_PANEL: Record<string, ActivePanel> = {
-  open_settings: "settings",
-  list_boards: "boards",
-  list_items: "items",
-  open_board: "none",
-  open_graph: "graph",
-  list_tags: "tags",
-  show_stats: "stats",
-  show_search: "search",
-}
-
-export function panelForAction(action: UIAction): ActivePanel {
-  if (!action) return "none"
-  return ACTION_TO_PANEL[action] ?? "none"
-}
 
 export function extractNavigation(response: ChatResponse): Workspace | null {
   if (response.ui_action === "open_board") {
@@ -113,22 +95,6 @@ export function formatSimilarity(score: number | undefined): string {
 export function truncate(text: string | null | undefined, max = 100): string {
   if (!text) return ""
   return text.length <= max ? text : text.slice(0, max - 1) + "…"
-}
-
-export function contentTypeIcon(type: string): string {
-  const map: Record<string, string> = {
-    note: "📝", code: "💻", url: "🔗",
-    thought: "💭", question: "❓", snippet: "✂️",
-  }
-  return map[type] ?? "📝"
-}
-
-export function statusColor(status: string): string {
-  const map: Record<string, string> = {
-    pending: "var(--amber)", processing: "var(--accent)",
-    ready: "var(--green)", error: "var(--red)",
-  }
-  return map[status] ?? "var(--glass-text-dim)"
 }
 
 // ══════════════════════════════════════════

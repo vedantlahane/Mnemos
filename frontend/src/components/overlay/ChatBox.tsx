@@ -5,7 +5,7 @@ import { ChatInput } from "./ChatInput"
 import { TypingIndicator } from "./TypingIndicator"
 import { useChatStore } from "@/store"
 import { useChat } from "@/hooks/useChat"
-import { CHAT_SUGGESTIONS } from "@/lib/constants"
+import { Logo } from "@/components/shared/Logo"
 
 interface Props {
   inputRef: RefObject<HTMLTextAreaElement | null>
@@ -18,41 +18,39 @@ export function ChatBox({ inputRef, minimal }: Props) {
   const { send } = useChat()
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll on new messages
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages.length, isLoading])
 
   return (
-    <div className={`flex flex-col ${minimal ? "h-auto max-h-[60vh] justify-end" : "h-full"}`}>
+    <div className={`flex flex-col ${minimal ? "h-auto max-h-[70vh] justify-end" : "h-full"}`}>
       {/* Messages */}
       <div
         ref={scrollRef}
-        className={`overflow-y-auto px-4 py-3 space-y-3 ${minimal ? (messages.length > 0 ? "mb-2" : "hidden") : "flex-1"}`}
-        style={minimal ? { WebkitMaskImage: "linear-gradient(to top, black 80%, rgba(0,0,0,0))" } : undefined}
+        className={`overflow-y-auto px-4 py-3 space-y-4 ${
+          minimal
+            ? messages.length > 0 ? "mb-2" : "hidden"
+            : "flex-1"
+        }`}
+        style={
+          minimal
+            ? { WebkitMaskImage: "linear-gradient(to top, black 85%, rgba(0,0,0,0))" }
+            : undefined
+        }
       >
+        {/* Empty state — just a subtle hint */}
         {messages.length === 0 && !minimal && (
-          <div className="flex flex-col items-center justify-center h-full gap-4">
-            <p className="text-sm text-[var(--glass-text-muted)]">
-              Ask anything — I`ll navigate, capture, search, draw, and answer.
+          <div className="flex flex-col items-center justify-center h-full animate-fade-in">
+            <Logo size={32} animated className="opacity-40 mb-3" />
+            <p className="text-[12px] text-white/20 text-center max-w-[200px] leading-relaxed">
+              Ask anything or type <span className="font-mono text-[var(--accent-light)]/40">/</span> for commands
             </p>
-            <div className="flex flex-wrap gap-2 justify-center">
-              {CHAT_SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => send(s)}
-                  className="text-xs px-3 py-1.5 rounded-full bg-[var(--glass-bg-thick)] text-[var(--glass-text-dim)] border border-[var(--glass-border)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-all"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <ChatMessage key={i} message={msg} />
+        {messages.map((msg) => (
+          <ChatMessage key={msg.id} message={msg} />
         ))}
 
         {isLoading && <TypingIndicator />}
@@ -63,4 +61,3 @@ export function ChatBox({ inputRef, minimal }: Props) {
     </div>
   )
 }
-

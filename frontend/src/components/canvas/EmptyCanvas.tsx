@@ -1,15 +1,26 @@
+import { Logo } from "@/components/shared/Logo"
+
 export function EmptyCanvas() {
   return (
-    <div className="h-full flex items-center justify-center bg-[var(--color-void)]">
-      <div className="text-center max-w-xs">
-        <p className="text-5xl mb-4">🧠</p>
-        <h2 className="text-lg font-semibold text-white mb-2">Mnemos</h2>
-        <p className="text-sm text-[var(--glass-text-dim)] leading-relaxed">
-          Open a board to start. Try{" "}
-          <code className="px-1.5 py-0.5 rounded text-xs bg-[var(--glass-bg-thick)] text-[var(--accent)] border border-[var(--glass-border)]">
-            show boards
-          </code>{" "}
-          in the chat.
+    <div className="h-full flex flex-col items-center justify-center bg-[var(--color-void)] relative overflow-hidden select-none">
+      {/* Ambient */}
+      <div
+        className="absolute w-[600px] h-[500px] opacity-[0.03] pointer-events-none"
+        style={{
+          background: "radial-gradient(ellipse, var(--accent), transparent 70%)",
+          top: "30%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+        }}
+      />
+
+      <div className="relative z-10 text-center animate-fade-in">
+        <div className="inline-block mb-6">
+          <Logo size={52} animated />
+        </div>
+        <h1 className="text-xl font-semibold text-white tracking-tight mb-2">Mnemos</h1>
+        <p className="text-[13px] text-white/30 max-w-[260px] mx-auto leading-relaxed">
+          Capture, connect, and recall knowledge through conversation.
         </p>
       </div>
     </div>
