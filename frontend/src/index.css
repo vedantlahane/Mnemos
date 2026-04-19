@@ -1,37 +1,23 @@
 @import "tailwindcss";
 
 @theme {
-  /* ─── Void ─── */
   --color-void: #08080f;
   --color-void-light: #0e0e1a;
 
-  /* ─── Content ─── */
-  --color-card: #ffffff;
-  --color-card-hover: #fafafa;
-  --color-card-text: #111827;
-  --color-card-muted: #6b7280;
-  --color-card-faint: #d1d5db;
-
-  /* ─── Glass ─── */
   --glass-bg: rgba(14, 14, 26, 0.55);
   --glass-bg-medium: rgba(12, 12, 24, 0.65);
   --glass-bg-thick: rgba(10, 10, 20, 0.75);
   --glass-border: rgba(255, 255, 255, 0.07);
   --glass-border-hover: rgba(255, 255, 255, 0.14);
-  --glass-shine: rgba(255, 255, 255, 0.04);
   --glass-text: rgba(255, 255, 255, 0.88);
   --glass-text-dim: rgba(255, 255, 255, 0.50);
   --glass-text-muted: rgba(255, 255, 255, 0.22);
 
-  /* ─── Accent ─── */
   --accent: #6366f1;
   --accent-light: #818cf8;
   --accent-glow: rgba(99, 102, 241, 0.12);
   --accent-glow-strong: rgba(99, 102, 241, 0.25);
   --accent-subtle: rgba(99, 102, 241, 0.08);
-  --purple: #a855f7;
-  --purple-subtle: rgba(168, 85, 247, 0.1);
-  --cyan: #06b6d4;
   --green: #22c55e;
   --green-subtle: rgba(34, 197, 94, 0.08);
   --amber: #f59e0b;
@@ -39,10 +25,8 @@
   --red: #ef4444;
   --red-subtle: rgba(239, 68, 68, 0.08);
 
-  /* ─── Fonts ─── */
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-hand: "Caveat", cursive;
 }
 
 @layer base {
@@ -77,302 +61,102 @@
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.07);
+    background: rgba(255, 255, 255, 0.07);
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255,255,255,0.14);
+    background: rgba(255, 255, 255, 0.14);
   }
 }
 
 @layer utilities {
-  /* ─── Glass (lightest) ─── */
   .glass {
     background: var(--glass-bg);
     backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
     -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
     border: 1px solid var(--glass-border);
     box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 0 0 0.5px rgba(255, 255, 255, 0.04) inset,
+      0 1px 0 rgba(255, 255, 255, 0.03) inset,
       0 8px 40px rgba(0, 0, 0, 0.5),
       0 2px 8px rgba(0, 0, 0, 0.3);
   }
 
-  .glass::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 40%, transparent 60%, rgba(255,255,255,0.02) 100%);
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  /* ─── Glass Surface 1 (primary cards) ─── */
-  .glass-surface-1 {
-    background: var(--glass-bg);
-    backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5);
-  }
-
-  /* ─── Glass Surface 2 (nested/inset elements) ─── */
-  .glass-surface-2 {
-    background: var(--glass-bg-medium);
-    backdrop-filter: blur(30px) saturate(1.3);
-    -webkit-backdrop-filter: blur(30px) saturate(1.3);
-    border: 1px solid rgba(255,255,255,0.05);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.03) inset,
-      0 4px 20px rgba(0, 0, 0, 0.3);
-  }
-
-  /* ─── Glass Surface 3 (deepest — chips, pills, inputs) ─── */
-  .glass-surface-3 {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255,255,255,0.04);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  }
-
-  /* ─── Glass Solid (floating panels, overlays) ─── */
   .glass-solid {
     background: var(--glass-bg-thick);
     backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
     -webkit-backdrop-filter: blur(60px) saturate(1.6) brightness(1.08);
-    border: 1px solid rgba(255,255,255,0.09);
+    border: 1px solid rgba(255, 255, 255, 0.09);
     box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.05) inset,
-      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 0 0 0.5px rgba(255, 255, 255, 0.05) inset,
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
       0 16px 64px rgba(0, 0, 0, 0.6),
       0 4px 12px rgba(0, 0, 0, 0.4);
   }
 
-  .glass-solid::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%, rgba(255,255,255,0.02) 100%);
-    pointer-events: none;
-    z-index: 1;
-  }
-
-  /* ─── Hover effect ─── */
-  .glass-hover {
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-  }
-  .glass-hover:hover {
-    border-color: var(--glass-border-hover);
-    transform: translateY(-1px);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.06) inset,
-      0 12px 48px rgba(0,0,0,0.5),
-      0 0 20px var(--accent-glow);
-  }
-
-  /* ─── Interactive glass (cards you click) ─── */
   .glass-interactive {
     background: var(--glass-bg);
     backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
     -webkit-backdrop-filter: blur(40px) saturate(1.4) brightness(1.05);
     border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.04) inset,
-      0 8px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.04) inset, 0 8px 40px rgba(0, 0, 0, 0.5);
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
   .glass-interactive:hover {
     border-color: var(--glass-border-hover);
     transform: translateY(-1px);
     box-shadow:
-      0 0 0 0.5px rgba(255,255,255,0.06) inset,
-      0 12px 48px rgba(0,0,0,0.5),
+      0 0 0 0.5px rgba(255, 255, 255, 0.06) inset,
+      0 12px 48px rgba(0, 0, 0, 0.5),
       0 0 20px var(--accent-glow);
   }
 
-  /* ─── Paper (white content cards) ─── */
-  .paper {
-    background: #ffffff;
-    color: var(--color-card-text);
-    border-radius: 10px;
-    box-shadow:
-      0 1px 2px rgba(0,0,0,0.08),
-      0 4px 16px rgba(0,0,0,0.25),
-      0 0 0 1px rgba(0,0,0,0.04);
-    transition: all 0.2s ease;
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
-  .paper:hover {
-    box-shadow:
-      0 2px 4px rgba(0,0,0,0.1),
-      0 8px 32px rgba(0,0,0,0.35),
-      0 0 0 1px rgba(0,0,0,0.06);
-    transform: translateY(-1px);
+  .animate-slide-in { animation: slide-in 0.2s ease-out; }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
+  .animate-fade-in { animation: fade-in 0.15s ease-out; }
 
-  /* ─── Animations ─── */
-  @keyframes breathe {
-    0%, 100% {
-      box-shadow:
-        0 0 0 0.5px rgba(255,255,255,0.04) inset,
-        0 8px 40px rgba(0,0,0,0.5),
-        0 0 24px var(--accent-glow);
-    }
-    50% {
-      box-shadow:
-        0 0 0 0.5px rgba(255,255,255,0.06) inset,
-        0 8px 40px rgba(0,0,0,0.5),
-        0 0 40px var(--accent-glow-strong);
-    }
-  }
-  .cmd-glow { animation: breathe 5s ease-in-out infinite; }
-
-  @keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-  }
-  .shimmer {
-    background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0) 100%);
-    background-size: 200% 100%;
-    animation: shimmer 8s ease-in-out infinite;
-  }
-
-  .draggable { cursor: grab; user-select: none; }
-  .draggable:active { cursor: grabbing; }
-
-  /* ─── Excalidraw Overrides (single source of truth) ─── */
-
-  /* Kill the welcome screen entirely */
+  /* ─── Excalidraw overrides ─── */
   .excalidraw .welcome-screen-center,
-  .excalidraw .welcome-screen-decor,
-  .excalidraw .welcome-screen-menu-hints,
   .excalidraw [class*="WelcomeScreen"],
   .excalidraw [class*="welcome-screen"],
-  .excalidraw [class*="welcomeScreen"],
-  .excalidraw-container [class*="welcome"],
-  .excalidraw .welcome-screen-decor__wrapper,
-  .excalidraw .welcome-screen-decor svg,
-  .excalidraw .welcome-screen-center__logo,
-  .excalidraw .welcome-screen-center__heading,
-  .excalidraw .welcome-screen-center__menu {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    overflow: hidden !important;
-    position: absolute !important;
-    z-index: -1 !important;
-  }
-
-  /* Hide the decorative shapes (lock icon, etc) */
-  .excalidraw .layer-ui__wrapper .welcome-screen-decor,
-  .excalidraw .layer-ui__wrapper [class*="welcome"] {
-    display: none !important;
-  }
-
-  /* Hide scroll back to content button */
   .excalidraw .scroll-back-to-content {
     display: none !important;
   }
 
-  /* Hide the sidebar trigger button visually but keep it in DOM
-     so programmatic toggleSidebar() still works */
   .excalidraw .sidebar-trigger {
     position: absolute !important;
-    width: 1px !important;
-    height: 1px !important;
+    width: 1px !important; height: 1px !important;
     overflow: hidden !important;
     clip: rect(0,0,0,0) !important;
     pointer-events: none !important;
   }
 
-  /* Standard z-index management */
   .excalidraw .Toast { bottom: 80px !important; z-index: 55 !important; }
+  .excalidraw .Island { z-index: 15 !important; }
+  .excalidraw .excalidraw-textEditorContainer { z-index: 55 !important; }
   .excalidraw .popover,
   .excalidraw .context-menu,
   .excalidraw .dropdown-menu-container { z-index: 100 !important; }
-  .excalidraw .library-menu,
   .excalidraw .Dialog,
-  .excalidraw .Dialog__overlay,
-  .excalidraw .layer-ui__library,
-  .excalidraw-modal-container { z-index: 70 !important; }
-
-  /* Library sidebar needs to be above the Stream floating panel (z-35) */
-  .excalidraw .sidebar,
-  .excalidraw .layer-ui__sidebar,
-  .excalidraw [class*="sidebar"] {
-    z-index: 50 !important;
-  }
-  .excalidraw .excalidraw-textEditorContainer { z-index: 55 !important; }
+  .excalidraw .Dialog__overlay { z-index: 70 !important; }
   .excalidraw .color-picker,
   .excalidraw .color-picker-content { z-index: 100 !important; }
-  .excalidraw .Island { z-index: 15 !important; }
 
-  /* Make hint viewer less intrusive */
   .excalidraw .HintViewer {
     background: rgba(14, 14, 26, 0.8) !important;
-    border: 1px solid rgba(255,255,255,0.07) !important;
-    color: rgba(255,255,255,0.5) !important;
+    border: 1px solid rgba(255, 255, 255, 0.07) !important;
+    color: rgba(255, 255, 255, 0.5) !important;
     border-radius: 10px !important;
     font-size: 11px !important;
     padding: 4px 10px !important;
     backdrop-filter: blur(16px) !important;
-  }
-
-  /* Nuclear: hide ANY large SVG in Excalidraw layer-ui that isn't a tool icon */
-  .excalidraw .layer-ui__wrapper > div > svg,
-  .excalidraw .layer-ui__wrapper > div > div > svg {
-    max-width: 48px !important;
-    max-height: 48px !important;
-  }
-
-  /* Hide the entire welcome screen layer */
-  .excalidraw .layer-ui__wrapper > div:has([class*="welcome"]),
-  .excalidraw .layer-ui__wrapper > div:has(svg[width="200"]),
-  .excalidraw .layer-ui__wrapper > div:has(svg[height="200"]) {
-    display: none !important;
-  }
-
-  /* ─── Notebook Mode Overrides ─── */
-
-  /* In notebook mode, hide horizontal scrollbar and constrain toolbar */
-  .notebook-mode .excalidraw {
-    overflow-x: hidden !important;
-  }
-
-  /* Make the toolbar more compact in notebook mode */
-  .notebook-mode .excalidraw .Island {
-    opacity: 0.7;
-    transition: opacity 0.2s ease;
-  }
-  .notebook-mode .excalidraw .Island:hover {
-    opacity: 1;
-  }
-
-  /* Hide zoom controls in notebook (vertical scroll only) */
-  .notebook-mode .excalidraw .zoom-actions {
-    display: none !important;
-  }
-
-  /* Column guide line (subtle center indicator) */
-  .notebook-mode::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: calc(var(--notebook-width, 720px) * var(--notebook-zoom, 1));
-    border-left: 2px dashed rgba(160, 160, 160, 0.4);
-    border-right: 2px dashed rgba(160, 160, 160, 0.4);
-    pointer-events: none;
-    z-index: 1;
-    transition: width 0s;
   }
 }

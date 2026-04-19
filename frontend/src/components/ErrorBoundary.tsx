@@ -1,50 +1,35 @@
 import { Component, type ReactNode, type ErrorInfo } from "react"
-import { AlertCircle } from "lucide-react"
 
-interface Props {
-  children: ReactNode
-  fallback?: ReactNode
-}
-
-interface State {
-  hasError: boolean
-  error: Error | null
-}
+interface Props { children: ReactNode }
+interface State { hasError: boolean; error: Error | null }
 
 export class ErrorBoundary extends Component<Props, State> {
-  constructor(props: Props) {
-    super(props)
-    this.state = { hasError: false, error: null }
-  }
+  state: State = { hasError: false, error: null }
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error }
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("ErrorBoundary caught:", error, errorInfo)
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("ErrorBoundary:", error, info)
   }
 
   render() {
     if (this.state.hasError) {
-      if (this.props.fallback) return this.props.fallback
       return (
-        <div className="glass-surface-1 p-4 rounded-2xl flex items-center gap-3">
-          <AlertCircle className="text-[var(--red)]" size={16} />
-          <div>
-            <p className="text-[13px] text-[var(--red)] font-semibold">
-              Something went wrong
-            </p>
-            <p className="text-[11px] text-[var(--glass-text-muted)] mt-1">
+        <div className="h-full flex items-center justify-center bg-[var(--color-void)]">
+          <div className="glass rounded-2xl p-6 max-w-md text-center">
+            <p className="text-[var(--red)] text-sm font-semibold mb-1">Something went wrong</p>
+            <p className="text-[var(--glass-text-muted)] text-xs mb-4">
               {this.state.error?.message}
             </p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="text-xs text-[var(--accent)] hover:underline"
+            >
+              Try again
+            </button>
           </div>
-          <button
-            onClick={() => this.setState({ hasError: false, error: null })}
-            className="ml-auto text-[11px] text-[var(--accent)] hover:underline"
-          >
-            Retry
-          </button>
         </div>
       )
     }
