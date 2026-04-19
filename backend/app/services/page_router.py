@@ -2,6 +2,7 @@
 
 from app.db.supabase import db
 from app.llm import router as llm
+from app.config import settings
 import logging
 
 logger = logging.getLogger("mnemos.router")
@@ -83,6 +84,3 @@ async def _ensure_uncategorized(user_id: str = None) -> dict:
     if not uncat:
         uncat = await db.insert_page(name="Uncategorized", user_id=user_id)
     return uncat
-
-
-from app.config import settings

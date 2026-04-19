@@ -8,7 +8,15 @@ import logging
 
 logger = logging.getLogger("mnemos.llm.google")
 
-client = genai.Client(api_key=settings.gemini_api_key)
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        if not settings.gemini_api_key:
+            raise ValueError("Gemini API key not configured")
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 def get_google_llm(model: str = None, temperature: float = 0.3, streaming: bool = True) -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(
@@ -30,7 +38,7 @@ async def google_chat_call(system: str, messages: list[dict], model: str = None)
         else:
             history.append(types.Content(role="model" if role == "assistant" else role, parts=[types.Part.from_text(content)]))
 
-    chat = client.chats.create(
+    chat = _get_client().chats.create(
         model=model or settings.gemini_model,
         config=types.GenerateContentConfig(
             system_instruction=system,
@@ -51,7 +59,7 @@ async def google_structured_call(system: str, prompt: str, response_schema: dict
         
     config = types.GenerateContentConfig(**config_kwargs)
 
-    response = client.models.generate_content(
+    response = _get_client().models.generate_content(
         model=model or settings.gemini_model,
         contents=prompt,
         config=config,

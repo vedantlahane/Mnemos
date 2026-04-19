@@ -65,7 +65,7 @@ async def handle_sync(
     merged = _merge(server_scene, changes, server_new_ids, base_version)
 
     new_version = server_version + 1
-    await db.save_scene(page_id, merged, new_version    )
+    await db.save_scene(page_id, merged, new_version)
     await ops_svc.log_and_notify(
         page_id, new_version, "user_sync", actor="user",
     )
