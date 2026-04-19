@@ -6,9 +6,9 @@ import logging
 import numpy as np
 
 from app.db.supabase import db
-from backend.app.canvas.renderer import normalize_scene
+from app.canvas.renderer import normalize_scene
 from app.canvas import scene_manager
-from backend.app.core.config import settings
+from app.core.config import settings
 
 logger = logging.getLogger("mnemos.curator")
 
