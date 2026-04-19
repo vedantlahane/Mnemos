@@ -29,6 +29,8 @@ _PATTERNS: list[tuple[list[str], str, str]] = [
      "navigate", "list_tags"),
     (["stats", "statistics", "dashboard", "show stats"],
      "navigate", "show_stats"),
+    (["what is on this page", "whats on this page", "what's on this page", "what is on this board", "whats on this board", "what's on this board", "what is on page", "whats on page", "what's on page", "what is on board", "whats on board", "what's on board", "summarize this page", "summarize page", "summarize board", "summarize this board"],
+     "chat", "summarize_board"),
 
     # Capture
     (["remember ", "save this", "capture ", "note this", "jot down"],

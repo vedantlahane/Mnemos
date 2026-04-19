@@ -16,15 +16,13 @@ export function StatsCard({ data }: Props) {
   const statusEntries = Object.entries(data.statuses).filter(([, v]) => v > 0)
 
   return (
-    <div className="space-y-3 animate-scale-in">
-      {/* Stat pills */}
+    <div className="space-y-2 animate-scale-in">
       <div className="grid grid-cols-3 gap-2">
         <StatPill icon="note" label="Items" value={data.total_items} />
         <StatPill icon="boards" label="Boards" value={data.total_workspaces} />
         <StatPill icon="tags" label="Tags" value={data.total_tags} />
       </div>
 
-      {/* Status bar */}
       {statusEntries.length > 0 && (
         <div className="glass-card rounded-2xl p-3 space-y-2.5">
           <div className="flex h-1.5 rounded-full overflow-hidden bg-black/30">
@@ -43,7 +41,7 @@ export function StatsCard({ data }: Props) {
             {statusEntries.map(([status, count]) => (
               <div key={status} className="flex items-center gap-1.5">
                 <span
-                  className="w-1.5 h-1.5 rounded-full"
+                  className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                   style={{ backgroundColor: STATUS_COLORS[status] }}
                 />
                 <span className="text-[11px] text-[var(--glass-text-dim)] capitalize">{status}</span>

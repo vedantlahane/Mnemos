@@ -9,6 +9,7 @@ import { Logo } from "@/components/shared/Logo"
 
 interface Props {
   inputRef: RefObject<HTMLTextAreaElement | null>
+  /** true = just the input bar, no message list */
   minimal?: boolean
 }
 
@@ -23,26 +24,27 @@ export function ChatBox({ inputRef, minimal }: Props) {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" })
   }, [messages.length, isLoading])
 
+  // Minimal = just the input, no message history
+  if (minimal) {
+    return (
+      <div className="animate-slide-up">
+        <ChatInput ref={inputRef} onSend={send} disabled={isLoading} minimal />
+      </div>
+    )
+  }
+
+  // Full chat with messages
   return (
-    <div className={`flex flex-col ${minimal ? "h-auto max-h-[70vh] justify-end" : "h-full"}`}>
+    <div className="flex flex-col h-full">
       {/* Messages */}
       <div
         ref={scrollRef}
-        className={`overflow-y-auto px-4 py-3 space-y-4 ${
-          minimal
-            ? messages.length > 0 ? "mb-2" : "hidden"
-            : "flex-1"
-        }`}
-        style={
-          minimal
-            ? { WebkitMaskImage: "linear-gradient(to top, black 85%, rgba(0,0,0,0))" }
-            : undefined
-        }
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-4"
       >
-        {/* Empty state — just a subtle hint */}
-        {messages.length === 0 && !minimal && (
+        {/* Empty state */}
+        {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in">
-            <Logo size={32} animated className="opacity-40 mb-3" />
+            <Logo size={28} animated className="opacity-30 mb-3" />
             <p className="text-[12px] text-white/20 text-center max-w-[200px] leading-relaxed">
               Ask anything or type <span className="font-mono text-[var(--accent-light)]/40">/</span> for commands
             </p>
@@ -57,7 +59,7 @@ export function ChatBox({ inputRef, minimal }: Props) {
       </div>
 
       {/* Input */}
-      <ChatInput ref={inputRef} onSend={send} disabled={isLoading} minimal={minimal} />
+      <ChatInput ref={inputRef} onSend={send} disabled={isLoading} />
     </div>
   )
 }

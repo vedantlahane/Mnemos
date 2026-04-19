@@ -3,9 +3,10 @@ import type { ItemListData } from "@/api/types"
 
 interface Props {
   data: ItemListData
+  send: (msg: string) => void
 }
 
-export function ItemsCard({ data }: Props) {
+export function ItemsCard({ data, send }: Props) {
   if (!data.items.length) {
     return (
       <div className="glass-card rounded-2xl p-4 text-center">
@@ -21,9 +22,10 @@ export function ItemsCard({ data }: Props) {
         {data.total} item{data.total !== 1 ? "s" : ""}
       </p>
       {data.items.map((item) => (
-        <div
+        <button
           key={item.id}
-          className="glass-card rounded-2xl px-4 py-3"
+          onClick={() => send(`show item ${item.title || item.id}`)}
+          className="glass-card w-full rounded-2xl px-4 py-3 text-left cursor-pointer"
         >
           <div className="flex items-center gap-2.5 mb-1.5">
             <div className="w-6 h-6 rounded-lg bg-[var(--accent-subtle)] flex items-center justify-center flex-shrink-0">
@@ -58,7 +60,7 @@ export function ItemsCard({ data }: Props) {
               ))}
             </div>
           )}
-        </div>
+        </button>
       ))}
     </div>
   )

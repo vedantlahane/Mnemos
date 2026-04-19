@@ -47,7 +47,7 @@ async def handle(
         elif intent == "settings":
             return await _handle_settings(action, params, ctx)
         else:
-            return await _handle_chat(message, ctx)
+            return await _handle_chat(action, message, ctx)
     except Exception as e:
         logger.error(f"Handler failed: {intent}/{action}: {e}")
         return CommandResponse(
@@ -613,7 +613,7 @@ async def _handle_settings(action: str, params: dict, ctx: dict) -> CommandRespo
 # CHAT (fallback — Q&A with knowledge)
 # ═══════════════════════════════════════
 
-async def _handle_chat(message: str, ctx: dict) -> CommandResponse:
+async def _handle_chat(action: str, message: str, ctx: dict) -> CommandResponse:
     owner_id = ctx["owner_id"]
     workspace_id = ctx.get("workspace_id")
 
@@ -621,21 +621,36 @@ async def _handle_chat(message: str, ctx: dict) -> CommandResponse:
     context = ""
     sources = []
     try:
-        results = await search_svc.semantic_search(
-            query=message, owner_id=owner_id,
-            workspace_id=workspace_id, limit=8,
-        )
-        if results:
-            context = "\n\n".join(
-                f"[{r.get('title', 'Untitled')}]: "
-                f"{r.get('summary') or r.get('source_text', '')[:300]}"
-                for r in results[:8]
+        if action == "summarize_board" and workspace_id:
+            items = await repo.get_items_for_workspace(workspace_id=workspace_id, owner_id=owner_id)
+            if items:
+                context = "\n\n".join(
+                    f"[{i.get('title', 'Untitled')}]: "
+                    f"{i.get('summary') or i.get('source_text', '')[:300]}"
+                    for i in items[:15]
+                )
+                sources = [
+                    {"title": i.get("title", "Untitled"), "id": i.get("id"), "similarity": 1.0}
+                    for i in items[:5]
+                ]
+            else:
+                context = "The board is currently empty."
+        else:
+            results = await search_svc.semantic_search(
+                query=message, owner_id=owner_id,
+                workspace_id=workspace_id, limit=8,
             )
-            sources = [
-                {"title": r.get("title", "Untitled"), "id": r.get("id"),
-                 "similarity": r.get("similarity", 0)}
-                for r in results[:5]
-            ]
+            if results:
+                context = "\n\n".join(
+                    f"[{r.get('title', 'Untitled')}]: "
+                    f"{r.get('summary') or r.get('source_text', '')[:300]}"
+                    for r in results[:8]
+                )
+                sources = [
+                    {"title": r.get("title", "Untitled"), "id": r.get("id"),
+                     "similarity": r.get("similarity", 0)}
+                    for r in results[:5]
+                ]
     except Exception:
         pass
 

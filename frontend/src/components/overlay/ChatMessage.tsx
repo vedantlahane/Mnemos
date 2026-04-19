@@ -7,6 +7,7 @@ import { TagsCard } from "@/components/cards/TagsCard"
 import { SearchCard } from "@/components/cards/SearchCard"
 import { SettingsCard } from "@/components/cards/SettingsCard"
 import { GraphCard } from "@/components/cards/GraphCard"
+import { useChat } from "@/hooks/useChat"
 import {
   asBoardList, asItemList, asGraph,
   asSearch, asTags, asStats, asPreferences,
@@ -19,10 +20,11 @@ interface Props {
 export function ChatMessage({ message }: Props) {
   const isUser = message.role === "user"
   const isError = !!message.error || message.content.startsWith("⚠️")
+  const { send } = useChat()
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} animate-slide-up`}>
-      <div className={`max-w-[90%] space-y-2.5`}>
+      <div className="max-w-[90%] space-y-2.5">
         {/* Text bubble */}
         <div
           className={cn(
@@ -35,16 +37,16 @@ export function ChatMessage({ message }: Props) {
           )}
         >
           {isUser ? (
-            <p>{String(message.content)}</p>
+            <p>{message.content}</p>
           ) : (
-            <Markdown content={String(message.content)} />
+            <Markdown content={message.content} />
           )}
         </div>
 
-        {/* Inline card below assistant text */}
+        {/* Inline interactive card */}
         {!isUser && !!message.data && (
           <div className="pl-1">
-            <InlineCard action={message.ui_action} data={message.data} />
+            <InlineCard action={message.ui_action} data={message.data} send={send} />
           </div>
         )}
       </div>
@@ -52,15 +54,23 @@ export function ChatMessage({ message }: Props) {
   )
 }
 
-function InlineCard({ action, data }: { action?: string | null; data: unknown }) {
+function InlineCard({
+  action,
+  data,
+  send,
+}: {
+  action?: string | null
+  data: unknown
+  send: (msg: string) => void
+}) {
   switch (action) {
     case "list_boards": {
       const d = asBoardList(data)
-      return d ? <BoardsCard data={d} /> : null
+      return d ? <BoardsCard data={d} send={send} /> : null
     }
     case "list_items": {
       const d = asItemList(data)
-      return d ? <ItemsCard data={d} /> : null
+      return d ? <ItemsCard data={d} send={send} /> : null
     }
     case "show_stats": {
       const d = asStats(data)
@@ -68,19 +78,19 @@ function InlineCard({ action, data }: { action?: string | null; data: unknown })
     }
     case "list_tags": {
       const d = asTags(data)
-      return d ? <TagsCard data={d} /> : null
+      return d ? <TagsCard data={d} send={send} /> : null
     }
     case "show_search": {
       const d = asSearch(data)
-      return d ? <SearchCard data={d} /> : null
+      return d ? <SearchCard data={d} send={send} /> : null
     }
     case "open_settings": {
       const d = asPreferences(data)
-      return d ? <SettingsCard data={d} /> : null
+      return d ? <SettingsCard data={d} send={send} /> : null
     }
     case "open_graph": {
       const d = asGraph(data)
-      return d ? <GraphCard data={d} /> : null
+      return d ? <GraphCard data={d} send={send} /> : null
     }
     default:
       return null

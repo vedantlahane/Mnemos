@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useEffect, useRef } from "react"
+import { useMemo, useState, useEffect, useRef } from "react"
 import { Icon } from "@/components/shared/Icon"
 import { COMMANDS, CATEGORY_LABELS, type Command } from "@/lib/constants"
 
