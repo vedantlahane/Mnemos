@@ -25,12 +25,12 @@ export const useAppStore = create<AppStore>((set) => ({
   user: null,
   authEnabled: false,
   activeWorkspace: null,
-  activePanel: "none",
+  activePanel: "none" as ActivePanel,
   preferences: null,
 
   setUser: (user) => set({ user }),
   setAuthEnabled: (authEnabled) => set({ authEnabled }),
-  setActiveWorkspace: (ws) => set({ activeWorkspace: ws, activePanel: "none" }),
+  setActiveWorkspace: (ws) => set({ activeWorkspace: ws, activePanel: "none" as ActivePanel }),
   setActivePanel: (activePanel) => set({ activePanel }),
   setPreferences: (preferences) => set({ preferences }),
 }))

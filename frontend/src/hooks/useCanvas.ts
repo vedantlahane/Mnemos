@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from "react"
+import { useMemo, useEffect, useCallback, useRef } from "react"
 import { api } from "@/api/client"
 import { debounce } from "@/lib/utils"
 import { SYNC_DEBOUNCE_MS, SSE_RECONNECT_MS } from "@/lib/constants"
@@ -46,7 +46,7 @@ export function useCanvas() {
   }, [loadScene])
 
   // ── Debounced sync ──
-  const debouncedSync = useCallback(
+  const debouncedSync = useMemo(() => 
     debounce(async (updatedScene: ExcalidrawScene) => {
       if (!activeWorkspace) return
       setSyncing(true)

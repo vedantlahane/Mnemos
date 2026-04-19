@@ -208,7 +208,90 @@ class SceneManager:
         if theme not in self._factory_cache:
             self._factory_cache[theme] = ElementFactory(theme=theme)
         return self._factory_cache[theme]
+    def extract_position_changes(
+        self,
+        incoming_elements: list[dict],
+        current_placements: list[dict],
+    ) -> list[dict]:
+        """User may have dragged items around. Extract those position changes."""
+        changes = []
+        curr_map = {p["item_id"]: p for p in current_placements}
+        for el in incoming_elements:
+            if el.get("isDeleted"):
+                continue
+            custom = el.get("customData")
+            if isinstance(custom, dict) and custom.get("type") == "note-frame":
+                item_id = custom.get("noteId")
+                if not item_id:
+                    continue
+                new_x, new_y = el.get("x", 0), el.get("y", 0)
+                new_w, new_h = el.get("width", 0), el.get("height", 0)
+                curr = curr_map.get(item_id)
+                if not curr or abs(curr["x"] - new_x) > 1 or abs(curr["y"] - new_y) > 1 or abs(curr["w"] - new_w) > 1 or abs(curr.get("h", 0) - new_h) > 1:
+                    changes.append({
+                        "item_id": item_id,
+                        "x": new_x, "y": new_y, "w": new_w, "h": new_h,
+                    })
+        return changes
 
+    def extract_user_drawn(self, elements: list[dict]) -> list[dict]:
+        """Extract elements drawn by user (not managed by system via build_scene)."""
+        kept = []
+        managed_types = {
+            "note-frame", "note-accent", "note-title", "note-summary", "note-tags",
+            "sticky-bg", "sticky-text",
+            "composed-text"
+        }
+        for el in elements:
+            if el.get("isDeleted"):
+                continue
+            custom = el.get("customData")
+            if isinstance(custom, dict):
+                t = custom.get("type")
+                if t in managed_types:
+                    continue
+            kept.append(el)
+        return kept
+
+    def build_scene(
+        self,
+        items: list[dict],
+        placements: list[dict],
+        objects: list[dict],
+        user_drawn: list[dict],
+        theme: str = "dark",
+        background: str = "#0e0e1a",
+    ) -> dict:
+        """
+        Get the full rendered scene for a workspace.
+        This REBUILDS from source-of-truth tables every time.
+        """
+        scene = normalize_scene(None)
+        scene = self.set_theme(scene, theme)
+        scene = self.set_background(scene, background)
+
+        scene["elements"].extend(user_drawn)
+
+        for obj in objects:
+            kind = obj.get("kind")
+            data = obj.get("meta", {})
+            content = obj.get("content", "")
+            x = obj.get("x", 0)
+            y = obj.get("y", 0)
+            
+            if kind == "sticky":
+                self.add_sticky(scene, content, x, y, bg_color=data.get("color", "#fef08a"))
+            elif kind == "text":
+                self.add_text(scene, content, x, y, max_width=obj.get("w", 500))
+            
+        placement_map = {p["item_id"]: p for p in placements}
+        for item in items:
+            p = placement_map.get(item["id"])
+            if not p:
+                continue
+            self.upsert_note_card(scene, item, p["x"], p["y"], p.get("w"), p.get("h"))
+
+        return scene
     # ── Note card operations ──
 
     def upsert_note_card(

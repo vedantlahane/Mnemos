@@ -1,6 +1,6 @@
 import { useRef, useEffect } from "react"
 import { Canvas } from "@/components/canvas/Canvas"
-import { Sidebar } from "@/components/sidebar/Sidebar"
+import { Overlay } from "@/components/overlay/Overlay"
 import { useAuth } from "@/hooks/useAuth"
 import { useKeyboard } from "@/hooks/useKeyboard"
 import { useAppStore } from "@/store"
@@ -14,11 +14,11 @@ export function Shell() {
   useKeyboard(inputRef, () => setActivePanel("none"))
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-[var(--color-void)]">
-      <div className="flex-1 relative">
+    <div className="flex h-full w-full overflow-hidden bg-[#0A0A0A] relative"> 
+      <div className="flex-1 relative w-full h-full">
         <Canvas />
       </div>
-      <Sidebar inputRef={inputRef} />
+      <Overlay inputRef={inputRef} />
     </div>
   )
 }

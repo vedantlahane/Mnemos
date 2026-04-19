@@ -8,7 +8,7 @@ import { EmptyCanvas } from "./EmptyCanvas"
 
 export function Canvas() {
   const workspace = useAppStore((s) => s.activeWorkspace)
-  const { scene, version, onSceneChange } = useCanvas()
+  const { scene, onSceneChange } = useCanvas()
 
   const handleChange = useCallback(
     (elements: readonly OrderedExcalidrawElement[], appState: AppState, _files: BinaryFiles) => {
@@ -27,6 +27,31 @@ export function Canvas() {
     [scene],
   )
 
+  const initialData = useMemo(() => {
+    if (!scene) return null;
+    return {
+      elements: scene.elements as any,
+      appState: {
+        ...scene.appState,
+        viewBackgroundColor: background,
+        theme,
+      },
+      files: (scene.files as any) ?? undefined,
+    }
+  }, [scene, background, theme])
+
+  const menu = useMemo(
+    () => (
+      <MainMenu>
+        <MainMenu.DefaultItems.SaveAsImage />
+        <MainMenu.DefaultItems.ClearCanvas />
+        <MainMenu.DefaultItems.ToggleTheme />
+        <MainMenu.DefaultItems.ChangeCanvasBackground />
+      </MainMenu>
+    ),
+    [],
+  )
+
   if (!workspace) return <EmptyCanvas />
 
   if (!scene) {
@@ -43,16 +68,8 @@ export function Canvas() {
   return (
     <div className="w-full h-full">
       <Excalidraw
-        key={version}
-        initialData={{
-          elements: scene.elements as any,
-          appState: {
-            ...scene.appState,
-            viewBackgroundColor: background,
-            theme,
-          },
-          files: scene.files as any ?? undefined,
-        }}
+        key={workspace.id}
+        initialData={initialData ?? undefined}
         onChange={handleChange}
         theme={theme}
         langCode="en"
@@ -60,12 +77,7 @@ export function Canvas() {
         viewModeEnabled={false}
         zenModeEnabled={false}
       >
-        <MainMenu>
-          <MainMenu.DefaultItems.SaveAsImage />
-          <MainMenu.DefaultItems.ClearCanvas />
-          <MainMenu.DefaultItems.ToggleTheme />
-          <MainMenu.DefaultItems.ChangeCanvasBackground />
-        </MainMenu>
+        {menu}
       </Excalidraw>
     </div>
   )
