@@ -1,6 +1,8 @@
+# === FILE: backend/app/llm/groq_provider.py ===
+
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from app.config import settings
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger("mnemos.llm.groq")

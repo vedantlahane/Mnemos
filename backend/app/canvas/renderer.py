@@ -7,11 +7,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from app.excalidraw.constants import DEFAULT_SCENE, THEME_COLORS
-from app.excalidraw.factory import ElementFactory, _luminance
-from app.excalidraw.text_measure import measure_text
-from app.excalidraw import layout as diagram_layout
-from app.config import settings
+from app.canvas.constants import DEFAULT_SCENE, THEME_COLORS
+from app.canvas.factory import ElementFactory, _luminance
+from app.canvas.text_measure import measure_text
+from app.canvas import layout as diagram_layout
+from app.core.config import settings
 
 logger = logging.getLogger("mnemos.scene")
 

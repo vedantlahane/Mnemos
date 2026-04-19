@@ -3,12 +3,13 @@
 from google import genai
 from google.genai import types
 from langchain_google_genai import ChatGoogleGenerativeAI
-from app.config import settings
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger("mnemos.llm.google")
 
 _client = None
+
 
 def _get_client():
     global _client
@@ -18,7 +19,9 @@ def _get_client():
         _client = genai.Client(api_key=settings.gemini_api_key)
     return _client
 
-def get_google_llm(model: str = None, temperature: float = 0.3, streaming: bool = True) -> ChatGoogleGenerativeAI:
+
+def get_google_llm(model: str = None, temperature: float = 0.3,
+                   streaming: bool = True) -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(
         model=model or settings.gemini_model,
         google_api_key=settings.gemini_api_key,
@@ -26,8 +29,9 @@ def get_google_llm(model: str = None, temperature: float = 0.3, streaming: bool 
         streaming=streaming,
     )
 
-async def google_chat_call(system: str, messages: list[dict], model: str = None) -> str:
-    """Direct Gemini API call (non-streaming)."""
+
+async def google_chat_call(system: str, messages: list[dict],
+                           model: str = None) -> str:
     history = []
     last_content = ""
     for msg in messages:
@@ -36,29 +40,29 @@ async def google_chat_call(system: str, messages: list[dict], model: str = None)
         if role == "user":
             last_content = content
         else:
-            history.append(types.Content(role="model" if role == "assistant" else role, parts=[types.Part.from_text(content)]))
+            history.append(types.Content(
+                role="model" if role == "assistant" else role,
+                parts=[types.Part.from_text(content)],
+            ))
 
     chat = _get_client().chats.create(
         model=model or settings.gemini_model,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-        )
+        config=types.GenerateContentConfig(system_instruction=system),
     )
-    
     if history:
         chat._history = history
 
     response = chat.send_message(last_content)
     return response.text
 
-async def google_structured_call(system: str, prompt: str, response_schema: dict = None, model: str = None) -> str:
-    """Call Gemini with optional JSON mode."""
-    config_kwargs = {"temperature": 0.2, "system_instruction": system}
-    if response_schema:
-        config_kwargs["response_mime_type"] = "application/json"
-        
-    config = types.GenerateContentConfig(**config_kwargs)
 
+async def google_structured_call(system: str, prompt: str,
+                                 model: str = None) -> str:
+    config = types.GenerateContentConfig(
+        temperature=0.2,
+        system_instruction=system,
+        response_mime_type="application/json",
+    )
     response = _get_client().models.generate_content(
         model=model or settings.gemini_model,
         contents=prompt,

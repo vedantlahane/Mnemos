@@ -1,3 +1,5 @@
+# === FILE: backend/app/llm/router.py ===
+
 """LLM Router — provider selection + structured calls."""
 
 from __future__ import annotations
@@ -5,9 +7,8 @@ import json
 import re
 import logging
 
-from app.config import settings
-from app.models.schemas import ProcessedCapture, EdgeClassification
-from app.db.supabase import db
+from app.core.config import settings
+from app.db.repo import repo
 
 logger = logging.getLogger("mnemos.llm.router")
 
@@ -17,10 +18,10 @@ async def _runtime_models(user_id: str = None) -> tuple[str, str]:
     secondary = settings.groq_model
     if user_id:
         try:
-            user_settings = await db.get_settings(user_id)
-            if user_settings:
-                primary = user_settings.get("model") or primary
-                secondary = user_settings.get("groq_model") or secondary
+            prefs = await repo.get_preferences(user_id)
+            if prefs:
+                primary = prefs.get("primary_model") or primary
+                secondary = prefs.get("secondary_model") or secondary
         except Exception:
             pass
     return primary, secondary
@@ -55,9 +56,20 @@ async def chat(system: str, messages: list[dict],
             raise
 
 
-async def process_capture(raw_text: str, user_id: str = None) -> ProcessedCapture:
+async def process_capture(raw_text: str, user_id: str = None):
+    """Extract structured data from captured text."""
+    from pydantic import BaseModel
+
+    class ProcessedCapture(BaseModel):
+        title: str
+        summary: str
+        tags: list[str]
+        tasks: list[str]
+        entities: list[str]
+        content_type: str
+
     system = """You are a note processor. Return valid JSON:
-{"title":"short title","summary":"2-3 sentences","tags":["tag"],"tasks":["task"],"entities":["entity"],"content_type":"note|code|url|thought|question|clip"}"""
+{"title":"short title","summary":"2-3 sentences","tags":["tag"],"tasks":["task"],"entities":["entity"],"content_type":"note|code|url|thought|question|snippet"}"""
     prompt = f"Process this text:\n\n{raw_text[:4000]}"
 
     try:
@@ -72,12 +84,32 @@ async def process_capture(raw_text: str, user_id: str = None) -> ProcessedCaptur
                 tags=[], tasks=[], entities=[], content_type="note",
             )
 
-    return _parse_processed_capture(response, raw_text)
+    data = _extract_json(response) if isinstance(response, str) else (response or {})
+    return ProcessedCapture(
+        title=str(data.get("title", ""))[:100] or raw_text[:60],
+        summary=str(data.get("summary", ""))[:500] or raw_text[:280],
+        tags=[str(t).lower().strip() for t in data.get("tags", []) if t][:12]
+            if isinstance(data.get("tags"), list) else [],
+        tasks=[str(t).strip() for t in data.get("tasks", []) if t][:12]
+            if isinstance(data.get("tasks"), list) else [],
+        entities=[str(e).strip() for e in data.get("entities", []) if e][:12]
+            if isinstance(data.get("entities"), list) else [],
+        content_type=str(data.get("content_type", "note"))
+            if data.get("content_type") in ("note", "code", "url", "thought", "question", "snippet")
+            else "note",
+    )
 
 
 async def classify_edge(title_a: str, content_a: str,
                         title_b: str, content_b: str,
-                        user_id: str = None) -> EdgeClassification:
+                        user_id: str = None):
+    from pydantic import BaseModel
+
+    class EdgeClassification(BaseModel):
+        edge_type: str
+        label: str | None = None
+        confidence: float
+
     system = """Classify the relationship. Return JSON:
 {"edge_type":"related|depends_on|extends|contradicts|summarizes|example_of","label":"brief","confidence":0.0-1.0}"""
     prompt = f'Note A: "{title_a}"\n{content_a[:500]}\n\nNote B: "{title_b}"\n{content_b[:500]}'
@@ -97,15 +129,19 @@ async def classify_edge(title_a: str, content_a: str,
 async def route_to_page(title: str, tags: list[str], content: str,
                         source_url: str, pages_info: str,
                         user_id: str = None) -> dict:
-    system = """You are a page router. Return JSON:
-{"page":"PageName or NEW:NewPageName","confidence":0.0-1.0,"reason":"why"}"""
-    prompt = f"""Note: {title}\nTags: {', '.join(tags)}\nContent: {content[:300]}\nSource: {source_url or 'manual'}\n\nPages:\n{pages_info}"""
+    system = """You are a workspace router. Return JSON:
+{"page":"WorkspaceName or NEW:NewWorkspaceName","confidence":0.0-1.0,"reason":"why"}"""
+    prompt = (
+        f"Item: {title}\nTags: {', '.join(tags)}\n"
+        f"Content: {content[:300]}\nSource: {source_url or 'manual'}\n\n"
+        f"Workspaces:\n{pages_info}"
+    )
 
     try:
         response = await chat(system, [{"role": "user", "content": prompt}], user_id)
         return _extract_json(response)
     except Exception:
-        return {"page": "Uncategorized", "confidence": 0.0, "reason": "LLM failed"}
+        return {"page": "Inbox", "confidence": 0.0, "reason": "LLM failed"}
 
 
 async def generate_diagram(topic: str, user_id: str = None) -> dict:
@@ -119,7 +155,10 @@ Create 4-8 elements. Keep labels concise."""
         response = await google_structured_call(system, prompt)
         topology = _extract_json(response)
         if not topology.get("elements"):
-            topology["elements"] = [{"id": "node1", "label": topic, "type": "box", "style": "accent", "width": 200, "height": 60}]
+            topology["elements"] = [
+                {"id": "node1", "label": topic, "type": "box",
+                 "style": "accent", "width": 200, "height": 60},
+            ]
         if not topology.get("layout_type"):
             topology["layout_type"] = "flow"
         return topology
@@ -128,8 +167,10 @@ Create 4-8 elements. Keep labels concise."""
         return {
             "layout_type": "flow",
             "elements": [
-                {"id": "node1", "label": topic, "type": "box", "style": "accent", "width": 200, "height": 60},
-                {"id": "node2", "label": "Details", "type": "box", "style": "default", "width": 200, "height": 60},
+                {"id": "node1", "label": topic, "type": "box",
+                 "style": "accent", "width": 200, "height": 60},
+                {"id": "node2", "label": "Details", "type": "box",
+                 "style": "default", "width": 200, "height": 60},
             ],
             "connections": [{"from": "node1", "to": "node2", "style": "solid"}],
         }
@@ -142,32 +183,16 @@ def _extract_json(text: str) -> dict:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    code_block = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
-    if code_block:
+    m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if m:
         try:
-            return json.loads(code_block.group(1).strip())
+            return json.loads(m.group(1).strip())
         except json.JSONDecodeError:
             pass
-    brace = re.search(r"\{.*\}", text, re.DOTALL)
-    if brace:
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
         try:
-            return json.loads(brace.group(0))
+            return json.loads(m.group(0))
         except json.JSONDecodeError:
             pass
     return {}
-
-
-def _parse_processed_capture(response: str, raw_text: str) -> ProcessedCapture:
-    data = _extract_json(response) if isinstance(response, str) else (response or {})
-    title = str(data.get("title", ""))[:100] or raw_text[:60]
-    summary = str(data.get("summary", ""))[:500] or raw_text[:280]
-    tags = [str(t).lower().strip() for t in data.get("tags", []) if t][:12] if isinstance(data.get("tags"), list) else []
-    tasks = [str(t).strip() for t in data.get("tasks", []) if t][:12] if isinstance(data.get("tasks"), list) else []
-    entities = [str(e).strip() for e in data.get("entities", []) if e][:12] if isinstance(data.get("entities"), list) else []
-    content_type = str(data.get("content_type", "note"))
-    if content_type not in ("note", "code", "url", "thought", "question", "clip"):
-        content_type = "note"
-    return ProcessedCapture(
-        title=title, summary=summary, tags=tags,
-        tasks=tasks, entities=entities, content_type=content_type,
-    )

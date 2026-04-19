@@ -1,184 +1,173 @@
+# === FILE: backend/app/routes/chat.py ===
+
+"""
+THE route. One endpoint. Chat drives everything.
+Plus canvas sync and SSE.
+"""
+
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
-from app.models.schemas import ChatRequest
-from app.db.supabase import db
-from app.services import embeddings
-from app.llm import router as llm
-from app.llm.prompts import CHAT_SYSTEM, FOLLOW_UP_PROMPT
+from pydantic import BaseModel
+from typing import Optional
+from app.commands import router as cmd_router
+from app.commands.handlers import handle
 from app.auth.dependencies import get_optional_user_id
-from app.config import settings
+from app.db.repo import repo
+from app.services.sync import handle_sync
+from app.services.broadcaster import broadcaster
 import asyncio
 import json
 
 router = APIRouter()
 
 
+class ChatMessage(BaseModel):
+    message: str
+    workspace_id: Optional[str] = None
+    history: list[dict] = []
+
+
+class SyncPayload(BaseModel):
+    base_version: int
+    scene: Optional[dict] = None
+
+
+# ═══════════════════════════════════════
+# THE chat endpoint — one input, everything happens
+# ═══════════════════════════════════════
+
 @router.post("/chat")
-async def chat(payload: ChatRequest,
+async def chat(payload: ChatMessage,
                user_id: str = Depends(get_optional_user_id)):
-    # Gather context from notes
-    context = ""
-    try:
-        query_emb = await embeddings.generate_query(payload.question)
-        if payload.page_id:
-            relevant = await db.vector_search_in_page(
-                query_emb, payload.page_id, limit=8, threshold=0.5,
-            )
-        else:
-            relevant = await db.vector_search(query_emb, limit=8, threshold=0.55)
-        if user_id:
-            relevant = [r for r in relevant if r.get("user_id") == user_id]
-        if relevant:
-            context = "\n\n".join(
-                f"[{n.get('title', 'Untitled')}]: {n.get('summary') or n.get('raw_text', '')[:300]}"
-                for n in relevant[:8]
-            )
-    except Exception:
-        pass
+    """
+    Single chat endpoint. User types anything:
+    - "show boards" → returns board list + ui_action
+    - "remember Docker is great" → captures item
+    - "draw diagram about ML" → creates diagram on canvas
+    - "what is Docker?" → answers from knowledge base
+    """
+    # Build context for classifier
+    context = {"owner_id": user_id}
+    if payload.workspace_id:
+        ws = await repo.get_workspace(payload.workspace_id, owner_id=user_id)
+        if ws:
+            context["workspace_id"] = ws["id"]
+            context["workspace_name"] = ws["display_name"]
 
-    system = CHAT_SYSTEM
-    if context:
-        system += f"\n\nRelevant notes:\n{context}"
+    # Classify intent
+    classified = await cmd_router.classify(payload.message, context)
 
-    messages = payload.history + [{"role": "user", "content": payload.question}]
-    answer = await llm.chat(system, messages, user_id=user_id)
-
-    # Generate follow-ups
-    follow_ups = []
-    try:
-        fu_prompt = FOLLOW_UP_PROMPT.format(question=payload.question, answer=answer[:500])
-        fu_response = await llm.chat(
-            "Return JSON array of follow-up questions.",
-            [{"role": "user", "content": fu_prompt}],
-            user_id=user_id,
-        )
-        fu_data = json.loads(fu_response) if fu_response.strip().startswith("[") else []
-        follow_ups = [str(q) for q in fu_data[:3]]
-    except Exception:
-        pass
-
-    # Save chat history
-    try:
-        chat_messages = messages + [{"role": "assistant", "content": answer}]
-        await db.insert_chat(
-            user_id=user_id,
-            page_id=payload.page_id,
-            context_type=payload.context_type,
-            messages=chat_messages,
-            title=payload.question[:100],
-        )
-    except Exception:
-        pass
+    # Handle it
+    result = await handle(
+        intent=classified["intent"],
+        action=classified["action"],
+        params=classified["params"],
+        message=payload.message,
+        owner_id=user_id,
+        workspace_id=payload.workspace_id,
+    )
 
     return {
-        "answer": answer,
-        "follow_ups": follow_ups,
-        "sources": [
-            {"title": n.get("title", "Untitled"), "id": n.get("id"),
-             "similarity": n.get("similarity", 0)}
-            for n in (relevant[:5] if 'relevant' in dir() else [])
-        ],
+        "text": result.text,
+        "intent": result.intent,
+        "ui_action": result.ui_action,
+        "data": result.data,
+        "canvas_update": result.canvas_update,
+        "error": result.error,
     }
 
 
-@router.post("/chat/stream")
-async def chat_stream(payload: ChatRequest,
-                      user_id: str = Depends(get_optional_user_id)):
-    context = ""
-    relevant = []
-    try:
-        query_emb = await embeddings.generate_query(payload.question)
-        if payload.page_id:
-            relevant = await db.vector_search_in_page(
-                query_emb, payload.page_id, limit=8, threshold=0.5,
-            )
-        else:
-            relevant = await db.vector_search(query_emb, limit=8, threshold=0.55)
-        if user_id:
-            relevant = [r for r in relevant if r.get("user_id") == user_id]
-        if relevant:
-            context = "\n\n".join(
-                f"[{n.get('title', 'Untitled')}]: {n.get('summary') or n.get('raw_text', '')[:300]}"
-                for n in relevant[:8]
-            )
-    except Exception:
-        pass
+# ═══════════════════════════════════════
+# Canvas sync — Excalidraw ↔ backend
+# ═══════════════════════════════════════
 
-    system = CHAT_SYSTEM
-    if context:
-        system += f"\n\nRelevant notes:\n{context}"
+@router.post("/workspaces/{workspace_id}/sync")
+async def sync(workspace_id: str, payload: SyncPayload,
+               user_id: str = Depends(get_optional_user_id)):
+    ws = await repo.get_workspace(workspace_id, owner_id=user_id)
+    if not ws:
+        # === FILE: backend/app/routes/chat.py (continued) ===
 
-    messages = payload.history + [{"role": "user", "content": payload.question}]
+        raise HTTPException(404, "Workspace not found")
 
-    async def generate():
-        # Send sources first
-        sources = [
-            {"title": n.get("title", "Untitled"), "id": n.get("id"),
-             "similarity": n.get("similarity", 0)}
-            for n in relevant[:5]
-        ]
-        yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+    result = await handle_sync(
+        workspace_id=workspace_id,
+        base_version=payload.base_version,
+        incoming_scene=payload.scene,
+        owner_id=user_id,
+    )
+    return result
 
-        # Stream answer
-        full_answer = ""
+
+@router.get("/workspaces/{workspace_id}/scene")
+async def get_scene(workspace_id: str,
+                    user_id: str = Depends(get_optional_user_id)):
+    """
+    Get the full rendered scene for a workspace.
+    This REBUILDS from source-of-truth tables every time.
+    """
+    from app.canvas import canvas_renderer
+
+    ws = await repo.get_workspace(workspace_id, owner_id=user_id)
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    stored = await repo.get_canvas(workspace_id)
+    items = await repo.get_items_for_workspace(workspace_id, user_id)
+    placements = await repo.get_placements(workspace_id)
+    objects = await repo.get_canvas_objects(workspace_id)
+    user_drawn = canvas_renderer.extract_user_drawn(
+        stored["scene"].get("elements", []),
+    )
+
+    scene = canvas_renderer.build_scene(
+        items, placements, objects, user_drawn,
+        theme=stored.get("theme", "dark"),
+        background=stored.get("background", "#0e0e1a"),
+    )
+
+    return {
+        "scene": scene,
+        "version": stored["version"],
+        "workspace_id": workspace_id,
+    }
+
+
+@router.get("/workspaces/{workspace_id}/version")
+async def get_version(workspace_id: str):
+    stored = await repo.get_canvas(workspace_id)
+    return {"version": stored["version"], "workspace_id": workspace_id}
+
+
+# ═══════════════════════════════════════
+# SSE — real-time canvas updates
+# ═══════════════════════════════════════
+
+@router.get("/workspaces/{workspace_id}/events")
+async def sse_events(workspace_id: str):
+    """Server-Sent Events for real-time canvas updates."""
+    queue = broadcaster.subscribe(workspace_id)
+
+    async def stream():
         try:
-            primary, _ = await llm._runtime_models(user_id)
-            from app.services.composition import _streaming_llm
-            from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-
-            llm_inst = _streaming_llm(primary)
-            lc_messages = [SystemMessage(content=system)]
-            for msg in messages:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                if role == "user":
-                    lc_messages.append(HumanMessage(content=content))
-                elif role == "assistant":
-                    lc_messages.append(AIMessage(content=content))
-
-            async for chunk in llm_inst.astream(lc_messages):
-                text = chunk.content if hasattr(chunk, "content") else str(chunk)
-                if text:
-                    full_answer += text
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': text})}\n\n"
-                    await asyncio.sleep(settings.stream_chunk_delay)
-        except Exception as e:
-            # Fallback to non-streaming
-            full_answer = await llm.chat(system, messages, user_id=user_id)
-            yield f"data: {json.dumps({'type': 'chunk', 'content': full_answer})}\n\n"
-
-        yield f"data: {json.dumps({'type': 'done', 'full_answer': full_answer})}\n\n"
-
-        # Save history
-        try:
-            chat_messages = messages + [{"role": "assistant", "content": full_answer}]
-            await db.insert_chat(
-                user_id=user_id, page_id=payload.page_id,
-                context_type=payload.context_type,
-                messages=chat_messages, title=payload.question[:100],
-            )
-        except Exception:
+            yield f"data: {json.dumps({'type': 'connected', 'workspace_id': workspace_id})}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30)
+                    yield f"data: {json.dumps(event, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f": keepalive\n\n"
+        except asyncio.CancelledError:
             pass
+        finally:
+            broadcaster.unsubscribe(workspace_id, queue)
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
-
-
-@router.get("/chat/history")
-async def chat_history(page_id: str = None, limit: int = 20,
-                       user_id: str = Depends(get_optional_user_id)):
-    chats = await db.list_chats(user_id=user_id, page_id=page_id, limit=limit)
-    return {"chats": chats}
-
-
-@router.get("/chat/{chat_id}")
-async def get_chat(chat_id: str):
-    chat_data = await db.get_chat(chat_id)
-    if not chat_data:
-        raise HTTPException(status_code=404, detail="Chat not found")
-    return chat_data
-
-
-@router.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str):
-    await db.delete_chat(chat_id)
-    return {"status": "deleted"}
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

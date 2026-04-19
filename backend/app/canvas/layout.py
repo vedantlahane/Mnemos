@@ -8,9 +8,9 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from app.excalidraw.text_measure import measure_text
-from app.excalidraw.factory import ElementFactory
-from app.config import settings
+from app.canvas.text_measure import measure_text
+from app.canvas.factory import ElementFactory
+from app.core.config import settings
 
 
 def layout_diagram(

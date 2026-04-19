@@ -6,9 +6,9 @@ import logging
 import numpy as np
 
 from app.db.supabase import db
-from app.excalidraw.scene import normalize_scene
-from app.excalidraw import scene_manager
-from app.config import settings
+from backend.app.canvas.renderer import normalize_scene
+from app.canvas import scene_manager
+from backend.app.core.config import settings
 
 logger = logging.getLogger("mnemos.curator")
 

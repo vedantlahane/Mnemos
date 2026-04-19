@@ -1,9 +1,11 @@
+# === FILE: backend/app/routes/auth.py ===
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from app.config import settings
+from app.core.config import settings
 from app.auth.google_oauth import verify_google_token
 from app.auth.jwt_handler import create_access_token, create_refresh_token, verify_token
-from app.db.supabase import db
+from app.db.repo import repo
 
 router = APIRouter()
 
@@ -26,47 +28,39 @@ async def google_login(payload: GoogleAuthRequest):
         }
     user_info = await verify_google_token(payload.token)
     if not user_info:
-        raise HTTPException(status_code=401, detail="Invalid Google token")
-    user = await db.upsert_user(
+        raise HTTPException(401, "Invalid Google token")
+    user = await repo.upsert_user(
         google_id=user_info["google_id"], email=user_info["email"],
         name=user_info.get("name"), avatar_url=user_info.get("avatar_url"),
     )
     return {
         "access_token": create_access_token(user["id"], user["email"]),
         "refresh_token": create_refresh_token(user["id"]),
-        "user": {"id": user["id"], "email": user["email"],
-                 "name": user.get("name"), "avatar_url": user.get("avatar_url")},
+        "user": user,
     }
 
 
 @router.post("/auth/refresh")
-async def refresh_token(payload: RefreshRequest):
+async def refresh(payload: RefreshRequest):
     if not settings.auth_enabled:
         return {"access_token": "auth-disabled"}
     claims = verify_token(payload.refresh_token)
     if not claims or claims.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    user = await db.get_user(claims["sub"])
+        raise HTTPException(401, "Invalid refresh token")
+    user = await repo.get_user(claims["sub"])
     if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise HTTPException(401, "User not found")
     return {"access_token": create_access_token(user["id"], user["email"])}
 
 
 @router.get("/auth/me")
-async def get_me(request: Request):
+async def me(request: Request):
     if not settings.auth_enabled:
-        return {
-            "auth_enabled": False,
-            "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"},
-            "google_client_id": settings.google_client_id,
-        }
+        return {"auth_enabled": False, "user": {"id": "anonymous", "email": "anonymous@local", "name": "Anonymous"}}
     user = None
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        claims = verify_token(auth_header[7:])
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        claims = verify_token(auth[7:])
         if claims and claims.get("sub"):
-            db_user = await db.get_user(claims["sub"])
-            if db_user:
-                user = {"id": db_user["id"], "email": db_user["email"],
-                        "name": db_user.get("name"), "avatar_url": db_user.get("avatar_url")}
+            user = await repo.get_user(claims["sub"])
     return {"auth_enabled": True, "user": user, "google_client_id": settings.google_client_id}

@@ -1,5 +1,7 @@
+# === FILE: backend/app/auth/dependencies.py ===
+
 from fastapi import Request
-from app.config import settings
+from app.core.config import settings
 
 
 async def get_optional_user_id(request: Request) -> str | None:

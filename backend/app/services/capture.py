@@ -1,165 +1,222 @@
+# === FILE: backend/app/services/capture.py ===
+
 """
-Capture pipeline — processes a note end-to-end.
+Item processing pipeline.
+Listens to ITEM_CREATED events.
 Extract → Embed → Route → Place on canvas.
 """
 
 from __future__ import annotations
 import logging
 
-from app.db.supabase import db
-from app.services import embeddings
+from app.db.repo import repo
+from app.services import search as search_svc
 from app.services.placement import find_placement
-from app.services import operations as ops_svc
-from app.excalidraw.scene import normalize_scene
-from app.excalidraw import scene_manager
-from app.llm import router as llm
+from app.canvas import canvas_renderer
+from app.llm import router as llm_router
+from app.core.events import bus, Event, ITEM_CREATED, ITEM_READY, ITEM_PLACED
+from app.core.config import settings
 
 logger = logging.getLogger("mnemos.capture")
 
 
-async def process_note(
-    note_id: str,
-    raw_text: str,
-    page_hint: str = None,
-    viewport: dict = None,
-):
-    """Full note processing pipeline."""
-    try:
-        await db.update_note(note_id, processing_status="processing")
+def register_handlers():
+    """Called at startup to wire event handlers."""
+    bus.on(ITEM_CREATED, _on_item_created)
+    bus.on(ITEM_READY, _on_item_ready)
 
-        # 1. Extract structured data
-        processed = await _extract(raw_text)
-        await db.update_note(
-            note_id,
+
+async def _on_item_created(event: Event):
+    """Full processing pipeline triggered by capture."""
+    item_id = event.data["item_id"]
+    source_text = event.data["source_text"]
+    board_hint = event.data.get("board_hint")
+    workspace_id = event.data.get("workspace_id")
+    owner_id = event.data.get("owner_id")
+
+    try:
+        await repo.update_item(item_id, status="processing")
+
+        # 1. Extract structured data via LLM
+        processed = await _extract(source_text, owner_id)
+        await repo.update_item(
+            item_id,
             title=processed.title,
             summary=processed.summary,
             tags=processed.tags,
-            tasks=processed.tasks,
             entities=processed.entities,
+            tasks=processed.tasks,
             content_type=processed.content_type,
         )
 
         # 2. Generate embedding
-        emb = None
-        try:
-            emb = await embeddings.generate(raw_text)
-            await db.upsert_embedding(note_id, emb)
-        except Exception as e:
-            logger.warning(f"Embedding failed for {note_id[:8]}: {e}")
-
-        # 3. Find related notes & create edges
+        emb = await _embed(source_text)
         if emb:
-            try:
-                related = await db.vector_search(emb, limit=5, threshold=0.7)
-                related = [r for r in related if r["id"] != note_id]
-                for rel in related[:3]:
-                    await _create_edge(note_id, rel, raw_text)
-            except Exception as e:
-                logger.warning(f"Edge creation failed: {e}")
+            await repo.upsert_embedding(item_id, emb)
 
-        # 4. Route to page
-        page_id = await _route(note_id, raw_text, processed, page_hint)
+        # 3. Find related items and create connections
+        if emb:
+            await _connect(item_id, emb, source_text, owner_id)
 
-        # 5. Place on canvas
-        if page_id:
-            await _place_on_canvas(note_id, page_id, viewport)
+        # 4. Route to workspace
+        ws_id = await _route(item_id, source_text, processed,
+                             board_hint, workspace_id, owner_id)
 
-        await db.update_note(note_id, processing_status="done")
+        await repo.update_item(item_id, status="ready")
+
+        await bus.emit(Event(ITEM_READY, {
+            "item_id": item_id,
+            "workspace_id": ws_id,
+            "owner_id": owner_id,
+        }))
 
     except Exception as e:
-        logger.error(f"Processing failed for {note_id}: {e}")
+        logger.error(f"Processing failed for {item_id}: {e}")
         try:
-            await db.update_note(note_id, processing_status="failed")
+            await repo.update_item(item_id, status="error")
         except Exception:
             pass
 
 
-async def _extract(raw_text: str):
-    try:
-        return await llm.process_capture(raw_text)
-    except Exception:
-        from app.models.schemas import ProcessedCapture
-        return ProcessedCapture(
-            title=raw_text[:60], summary=raw_text[:280],
-            tags=[], tasks=[], entities=[], content_type="note",
-        )
+async def _on_item_ready(event: Event):
+    """Place item on canvas after processing is done."""
+    item_id = event.data["item_id"]
+    workspace_id = event.data.get("workspace_id")
+    owner_id = event.data.get("owner_id")
 
-
-async def _route(note_id: str, raw_text: str, processed, page_hint: str) -> str | None:
-    try:
-        from app.services.page_router import route_note
-        routing = await route_note(
-            text=raw_text, title=processed.title,
-            tags=processed.tags, page_hint=page_hint,
-        )
-        page_id = routing["page_id"]
-        await db.update_note(note_id, page_id=page_id)
-        return page_id
-    except Exception as e:
-        logger.warning(f"Routing failed: {e}")
-        try:
-            uncat = await db.get_page_by_name("Uncategorized")
-            if uncat:
-                await db.update_note(note_id, page_id=uncat["id"])
-                return uncat["id"]
-        except Exception:
-            pass
-    return None
-
-
-async def _create_edge(note_id: str, related: dict, raw_text: str):
-    try:
-        classification = await llm.classify_edge(
-            title_a="", content_a=raw_text[:300],
-            title_b=related.get("title", ""), content_b=related.get("raw_text", "")[:300],
-        )
-        await db.insert_edge_if_not_exists(
-            source_id=note_id, target_id=related["id"],
-            edge_type=classification.edge_type,
-            label=classification.label,
-            strength=classification.confidence,
-            created_by="processor",
-        )
-    except Exception:
-        await db.insert_edge_if_not_exists(
-            source_id=note_id, target_id=related["id"],
-            edge_type="related",
-            strength=related.get("similarity", 0.0),
-            created_by="processor",
-        )
-
-
-async def _place_on_canvas(note_id: str, page_id: str, viewport: dict = None):
-    note = await db.get_note(note_id)
-    if not note:
+    if not workspace_id:
         return
 
-    stored = await db.get_scene(page_id)
-    scene = normalize_scene(stored["scene"])
-    current_version = stored["version"]
+    try:
+        item = await repo.get_item(item_id)
+        if not item:
+            return
 
-    placement = await find_placement(
-        page_id, scene, note=note,
-        viewport=viewport, strategy="auto",
-    )
+        stored = await repo.get_canvas(workspace_id)
+        items = await repo.get_items_for_workspace(workspace_id, owner_id)
+        placements = await repo.get_placements(workspace_id)
 
-    scene, element_ids = scene_manager.upsert_note_card(
-        scene, note, placement.x, placement.y,
-    )
+        # Find position
+        placement = find_placement(placements)
 
-    new_version = current_version + 1
-    await db.save_scene(page_id, scene, new_version)
+        # Save placement (source of truth for position)
+        await repo.upsert_placement(
+            workspace_id, item_id,
+            placement["x"], placement["y"],
+            settings.card_w, settings.card_h,
+        )
 
-    # Update note with canvas position and element IDs
-    await db.update_note(
-        note_id,
-        canvas_x=placement.x,
-        canvas_y=placement.y,
-        element_ids=element_ids,
-    )
+        # Rebuild scene
+        placements = await repo.get_placements(workspace_id)  # re-fetch with new
+        objects = await repo.get_canvas_objects(workspace_id)
+        user_drawn = canvas_renderer.extract_user_drawn(
+            stored["scene"].get("elements", []),
+        )
 
-    await ops_svc.log_and_notify(
-        page_id, new_version, "add_note_card",
-        actor="ai", element_ids=element_ids,
-        payload={"note_id": note_id, "x": placement.x, "y": placement.y},
-    )
+        scene = canvas_renderer.build_scene(
+            items, placements, objects, user_drawn,
+            theme=stored.get("theme", "dark"),
+            background=stored.get("background", "#0e0e1a"),
+        )
+
+        new_version = stored["version"] + 1
+        await repo.save_canvas(workspace_id, scene, new_version)
+        await repo.log_op(
+            workspace_id, new_version, "card_placed",
+            actor="ai", data={"item_id": item_id,
+                              "x": placement["x"], "y": placement["y"]},
+        )
+
+        # Notify frontend
+        from app.services.broadcaster import broadcaster
+        await broadcaster.notify(workspace_id, {
+            "type": "canvas_updated",
+            "version": new_version,
+            "op": "card_placed",
+            "item_id": item_id,
+        })
+
+    except Exception as e:
+        logger.error(f"Canvas placement failed for {item_id}: {e}")
+
+
+async def _extract(text: str, owner_id: str = None):
+    try:
+        return await llm_router.process_capture(text, user_id=owner_id)
+    except Exception:
+        from app.commands.responses import CommandResponse
+        from pydantic import BaseModel
+
+        class FallbackCapture(BaseModel):
+            title: str
+            summary: str
+            tags: list[str]
+            entities: list[str]
+            tasks: list[str]
+            content_type: str
+
+        return FallbackCapture(
+            title=text[:60], summary=text[:280],
+            tags=[], entities=[], tasks=[], content_type="note",
+        )
+
+
+async def _embed(text: str) -> list[float] | None:
+    try:
+        from app.services.embeddings import generate
+        return await generate(text)
+    except Exception as e:
+        logger.warning(f"Embedding failed: {e}")
+        return None
+
+
+async def _connect(item_id: str, emb: list[float], text: str,
+                   owner_id: str = None):
+    try:
+        related = await repo.vector_search(emb, limit=5, threshold=0.7)
+        related = [r for r in related if r["id"] != item_id]
+        for rel in related[:3]:
+            classification = await llm_router.classify_edge(
+                title_a="", content_a=text[:300],
+                title_b=rel.get("title", ""),
+                content_b=rel.get("source_text", "")[:300],
+                user_id=owner_id,
+            )
+            await repo.create_connection(
+                from_id=item_id, to_id=rel["id"],
+                rel_type=classification.edge_type,
+                label=classification.label,
+                score=classification.confidence,
+                created_by="system",
+            )
+    except Exception as e:
+        logger.warning(f"Connection creation failed: {e}")
+
+
+async def _route(item_id: str, text: str, processed,
+                 board_hint: str, workspace_id: str,
+                 owner_id: str) -> str | None:
+    """Route item to a workspace and link it."""
+    try:
+        from app.services.workspace_router import route_item
+        ws_id = await route_item(
+            text=text, title=processed.title,
+            tags=processed.tags, board_hint=board_hint,
+            current_workspace_id=workspace_id,
+            owner_id=owner_id,
+        )
+        if ws_id:
+            await repo.link_item_to_workspace(ws_id, item_id, added_by="system")
+            return ws_id
+    except Exception as e:
+        logger.warning(f"Routing failed: {e}")
+
+    # Fallback to inbox
+    try:
+        inbox = await repo.get_workspace_by_slug("inbox", owner_id=owner_id)
+        if inbox:
+            await repo.link_item_to_workspace(inbox["id"], item_id, added_by="system")
+            return inbox["id"]
+    except Exception:
+        pass
+    return None

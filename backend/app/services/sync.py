@@ -1,239 +1,93 @@
+# === FILE: backend/app/services/sync.py ===
+
 """
-Scene sync — three-way merge between frontend and backend.
+Canvas sync.
+Frontend saves Excalidraw scene → we extract position changes → update placements.
+Backend changes items → we rebuild scene from placements.
 """
 
 from __future__ import annotations
 import logging
 
-from app.db.supabase import db
-from app.excalidraw.scene import normalize_scene
-from app.services import operations as ops_svc
-from app.config import settings
+from app.db.repo import repo
+from app.canvas import canvas_renderer
+from app.services.broadcaster import broadcaster
+from app.core.config import settings
 
 logger = logging.getLogger("mnemos.sync")
 
 
 async def handle_sync(
-    page_id: str,
+    workspace_id: str,
     base_version: int,
-    changes: dict,
-    full_scene: dict | None = None,
+    incoming_scene: dict = None,
+    owner_id: str = None,
 ) -> dict:
     """
-    Handle frontend sync request.
-    Returns sync response with status and any server changes.
+    Handle frontend scene save.
+
+    1. Extract position changes from incoming scene → update canvas_placements
+    2. Merge user-drawn elements
+    3. Rebuild scene from source-of-truth tables
+    4. Save and return new version
     """
-    stored = await db.get_scene(page_id)
+    stored = await repo.get_canvas(workspace_id)
     server_version = stored["version"]
-    server_scene = normalize_scene(stored["scene"])
 
-    # No server changes since last sync — fast path
-    if server_version == base_version:
-        if full_scene:
-            new_scene = normalize_scene(full_scene)
-        else:
-            new_scene = _apply_changes(server_scene, changes)
-
-        new_version = server_version + 1
-        await db.save_scene(page_id, new_scene, new_version)
-        await ops_svc.log_and_notify(
-            page_id, new_version, "user_sync", actor="user",
+    # Too far behind — full reload
+    if server_version - base_version > settings.max_version_gap:
+        items = await repo.get_items_for_workspace(workspace_id, owner_id)
+        placements = await repo.get_placements(workspace_id)
+        objects = await repo.get_canvas_objects(workspace_id)
+        scene = canvas_renderer.build_scene(
+            items, placements, objects, [],
+            theme=stored.get("theme", "dark"),
+            background=stored.get("background", "#0e0e1a"),
         )
-        return {"status": "ok", "version": new_version}
-
-    # Server has changes — merge needed
-    gap = server_version - base_version
-
-    if gap > settings.sync_max_version_gap:
-        # Too far behind — send full scene
         return {
-            "status": "full_rebuild",
+            "status": "full_reload",
             "version": server_version,
-            "scene": server_scene,
+            "scene": scene,
         }
 
-    # Get server operations since base_version
-    server_ops = await db.get_scene_ops_since(page_id, base_version)
+    if not incoming_scene:
+        return {"status": "ok", "version": server_version}
 
-    # Compute what server added (new element IDs)
-    server_new_ids: set[str] = set()
-    for op in server_ops:
-        if op.get("actor") != "user":
-            server_new_ids.update(op.get("element_ids", []))
+    incoming_elements = incoming_scene.get("elements", [])
 
-    # Merge: start with server scene, apply user changes
-    merged = _merge(server_scene, changes, server_new_ids, base_version)
+    # ── REVERSE SYNC: scene → placements ──
+    # User may have dragged items around. Extract those position changes.
+    current_placements = await repo.get_placements(workspace_id)
+    position_changes = canvas_renderer.extract_position_changes(
+        incoming_elements, current_placements,
+    )
+    for change in position_changes:
+        await repo.upsert_placement(
+            workspace_id, change["item_id"],
+            change["x"], change["y"], change["w"], change["h"],
+        )
 
-    new_version = server_version + 1
-    await db.save_scene(page_id, merged, new_version)
-    await ops_svc.log_and_notify(
-        page_id, new_version, "user_sync", actor="user",
+    # ── Extract user-drawn elements ──
+    user_drawn = canvas_renderer.extract_user_drawn(incoming_elements)
+
+    # ── FORWARD SYNC: rebuild scene from truth ──
+    items = await repo.get_items_for_workspace(workspace_id, owner_id)
+    placements = await repo.get_placements(workspace_id)  # re-fetch after updates
+    objects = await repo.get_canvas_objects(workspace_id)
+
+    scene = canvas_renderer.build_scene(
+        items, placements, objects, user_drawn,
+        theme=stored.get("theme", "dark"),
+        background=stored.get("background", "#0e0e1a"),
     )
 
-    # Compute delta to send back (only server's new elements)
-    new_elements = [
-        el for el in merged.get("elements", [])
-        if el.get("id") in server_new_ids
-    ]
+    new_version = server_version + 1
+    await repo.save_canvas(workspace_id, scene, new_version)
+    await repo.log_op(workspace_id, new_version, "user_sync", actor="user")
 
-    return {
-        "status": "merged",
-        "version": new_version,
-        "new_elements": new_elements,
-        "server_ops_applied": len(server_ops),
-    }
+    await broadcaster.notify(workspace_id, {
+        "type": "canvas_updated", "version": new_version,
+        "op": "user_sync",
+    })
 
-
-def _apply_changes(scene: dict, changes: dict) -> dict:
-    """Apply frontend changes to scene."""
-    elements = scene.get("elements", [])
-    el_map = {el["id"]: el for el in elements}
-
-    # Apply additions
-    for el in changes.get("added", []):
-        el_map[el["id"]] = el
-
-    # Apply modifications
-    for mod in changes.get("modified", []):
-        el_id = mod.get("id")
-        if el_id and el_id in el_map:
-            el_map[el_id].update({k: v for k, v in mod.items() if k != "id"})
-            el_map[el_id]["version"] = el_map[el_id].get("version", 1) + 1
-
-    # Apply deletions
-    for el_id in changes.get("deleted", []):
-        if el_id in el_map:
-            del el_map[el_id]
-
-    scene["elements"] = list(el_map.values())
-    return scene
-
-
-def _merge(
-    server_scene: dict,
-    user_changes: dict,
-    server_new_ids: set[str],
-    base_version: int,
-) -> dict:
-    """
-    Three-way merge.
-    Strategy:
-      - Start with server scene (includes AI additions)
-      - Apply user additions (user-drawn elements)
-      - Apply user modifications (user moved/edited elements)
-      - Handle deletions carefully (don't delete AI additions user hasn't seen)
-    """
-    elements = server_scene.get("elements", [])
-    el_map = {el["id"]: el for el in elements}
-
-    # User additions — always accept
-    for el in user_changes.get("added", []):
-        if el["id"] not in el_map:
-            el_map[el["id"]] = el
-
-    # User modifications
-    for mod in user_changes.get("modified", []):
-        el_id = mod.get("id")
-        if not el_id or el_id not in el_map:
-            continue
-
-        existing = el_map[el_id]
-        is_server_new = el_id in server_new_ids
-
-        if is_server_new:
-            # Server added this element after user's base_version.
-            # Only accept position changes from user (they dragged it).
-            # Content stays as server set it.
-            for field in ("x", "y"):
-                if field in mod:
-                    existing[field] = mod[field]
-        else:
-            # Element existed before — user wins on all changes
-            existing.update({k: v for k, v in mod.items() if k != "id"})
-
-        existing["version"] = existing.get("version", 1) + 1
-
-    # User deletions
-    for el_id in user_changes.get("deleted", []):
-        if el_id in el_map:
-            if el_id in server_new_ids:
-                # User hasn't seen this element — don't delete
-                pass
-            else:
-                del el_map[el_id]
-
-    # Overlap resolution
-    final_elements = list(el_map.values())
-    final_elements = _resolve_overlaps(final_elements)
-
-    server_scene["elements"] = final_elements
-    return server_scene
-
-
-def _resolve_overlaps(elements: list[dict]) -> list[dict]:
-    """
-    Check for overlapping element groups and shift to fix.
-    Groups are identified by customData.noteId or first groupId.
-    """
-    # Group elements by their logical block
-    groups: dict[str, list[dict]] = {}
-    ungrouped: list[dict] = []
-
-    for el in elements:
-        if el.get("isDeleted"):
-            ungrouped.append(el)
-            continue
-        custom = el.get("customData") if isinstance(el.get("customData"), dict) else {}
-        note_id = custom.get("noteId")
-        diagram_id = custom.get("diagramId")
-        group_key = note_id or diagram_id
-
-        if group_key:
-            groups.setdefault(group_key, []).append(el)
-        else:
-            gids = el.get("groupIds", [])
-            if gids:
-                groups.setdefault(gids[0], []).append(el)
-            else:
-                ungrouped.append(el)
-
-    if not groups:
-        return elements
-
-    # Compute bounding boxes per group
-    group_bounds = []
-    for key, group_els in groups.items():
-        active = [e for e in group_els if not e.get("isDeleted")]
-        if not active:
-            continue
-        min_y = min(e.get("y", 0) for e in active)
-        max_y = max(e.get("y", 0) + e.get("height", 0) for e in active)
-        group_bounds.append({
-            "key": key,
-            "y_start": min_y,
-            "y_end": max_y,
-            "elements": group_els,
-        })
-
-    group_bounds.sort(key=lambda g: g["y_start"])
-
-    # Fix overlaps
-    min_gap = 40
-    for i in range(1, len(group_bounds)):
-        prev = group_bounds[i - 1]
-        curr = group_bounds[i]
-        overlap = prev["y_end"] + min_gap - curr["y_start"]
-
-        if overlap > 0:
-            # Shift this group and everything below
-            for j in range(i, len(group_bounds)):
-                for el in group_bounds[j]["elements"]:
-                    el["y"] = el.get("y", 0) + overlap
-                group_bounds[j]["y_start"] += overlap
-                group_bounds[j]["y_end"] += overlap
-
-    # Reassemble
-    result = ungrouped[:]
-    for gb in group_bounds:
-        result.extend(gb["elements"])
-    return result
+    return {"status": "ok", "version": new_version}

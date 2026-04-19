@@ -1,3 +1,5 @@
+# === FILE: backend/app/auth/google_oauth.py ===
+
 import httpx
 
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
@@ -5,9 +7,7 @@ GOOGLE_TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 
 
 async def verify_google_token(token: str) -> dict | None:
-    """Verify Google OAuth token and return user info."""
     async with httpx.AsyncClient() as client:
-        # Try as access token first
         resp = await client.get(
             GOOGLE_USERINFO_URL,
             headers={"Authorization": f"Bearer {token}"},
@@ -22,7 +22,6 @@ async def verify_google_token(token: str) -> dict | None:
                 "avatar_url": data.get("picture"),
             }
 
-        # Try as ID token
         resp = await client.get(
             GOOGLE_TOKEN_INFO_URL,
             params={"id_token": token},

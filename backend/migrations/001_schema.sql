@@ -1,15 +1,14 @@
--- ══════════════════════════════════════════════════════
--- Mnemos v3 — Fresh Database Setup
--- Run this in Supabase SQL Editor on a clean database
--- ══════════════════════════════════════════════════════
+-- === FILE: backend/migrations/001_schema.sql ===
 
--- Extensions
+-- Mnemos v4 — Knowledge ≠ Presentation
+-- Run in Supabase SQL Editor on clean database
+
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- ══════════════════════════════════════════════════════
--- 1. USERS
--- ══════════════════════════════════════════════════════
+-- ══════════════════════════════════════════
+-- USERS
+-- ══════════════════════════════════════════
 
 CREATE TABLE users (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -21,169 +20,201 @@ CREATE TABLE users (
     updated_at  TIMESTAMPTZ DEFAULT now()
 );
 
--- ══════════════════════════════════════════════════════
--- 2. PAGES
--- ══════════════════════════════════════════════════════
+-- ══════════════════════════════════════════
+-- KNOWLEDGE LAYER
+-- No visual data. No position data.
+-- "What do you know?" lives here.
+-- ══════════════════════════════════════════
 
-CREATE TABLE pages (
+CREATE TABLE items (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
-    name          TEXT NOT NULL,
-    description   TEXT,
-    icon          TEXT DEFAULT '📄',
-    color         TEXT DEFAULT '#6366f1',
-    is_archived   BOOLEAN DEFAULT FALSE,
-    scene_data    JSONB NOT NULL DEFAULT '{"elements":[],"appState":{"viewBackgroundColor":"#0e0e1a","theme":"dark"},"files":{}}',
-    scene_version INTEGER NOT NULL DEFAULT 0,
+    owner_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+
+    -- Original capture
+    source_text   TEXT NOT NULL,
+    source_url    TEXT,
+    source_title  TEXT,
+    source_type   TEXT DEFAULT 'manual'
+        CHECK (source_type IN ('manual','extension','api','import')),
+
+    -- AI-extracted
+    title         TEXT,
+    summary       TEXT,
+    content_type  TEXT DEFAULT 'note'
+        CHECK (content_type IN ('note','code','url','thought','question','snippet')),
+    tags          TEXT[] DEFAULT '{}',
+    entities      TEXT[] DEFAULT '{}',
+    tasks         TEXT[] DEFAULT '{}',
+
+    -- Processing
+    status        TEXT DEFAULT 'pending'
+        CHECK (status IN ('pending','processing','ready','error')),
+
     created_at    TIMESTAMPTZ DEFAULT now(),
     updated_at    TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_pages_user ON pages(user_id);
-CREATE INDEX idx_pages_archived ON pages(is_archived);
+CREATE INDEX idx_items_owner ON items(owner_id);
+CREATE INDEX idx_items_status ON items(status);
+CREATE INDEX idx_items_tags ON items USING GIN(tags);
+CREATE INDEX idx_items_created ON items(created_at DESC);
 
--- ══════════════════════════════════════════════════════
--- 3. NOTES
--- ══════════════════════════════════════════════════════
-
-CREATE TABLE notes (
-    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id           UUID REFERENCES users(id) ON DELETE SET NULL,
-    page_id           UUID REFERENCES pages(id) ON DELETE SET NULL,
-    raw_text          TEXT NOT NULL,
-    title             TEXT,
-    summary           TEXT,
-    tags              TEXT[] DEFAULT '{}',
-    tasks             TEXT[] DEFAULT '{}',
-    entities          TEXT[] DEFAULT '{}',
-    content_type      TEXT DEFAULT 'note'
-        CHECK (content_type IN ('note','code','url','thought','question','clip')),
-    source_url        TEXT,
-    source_title      TEXT,
-    capture_type      TEXT DEFAULT 'manual',
-    processing_status TEXT DEFAULT 'pending'
-        CHECK (processing_status IN ('pending','processing','done','failed')),
-    canvas_x          FLOAT,
-    canvas_y          FLOAT,
-    canvas_width      FLOAT DEFAULT 360,
-    canvas_height     FLOAT DEFAULT 240,
-    element_ids       TEXT[] DEFAULT '{}',
-    metadata          JSONB DEFAULT '{}',
-    created_at        TIMESTAMPTZ DEFAULT now(),
-    updated_at        TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX idx_notes_user ON notes(user_id);
-CREATE INDEX idx_notes_page ON notes(page_id);
-CREATE INDEX idx_notes_status ON notes(processing_status);
-CREATE INDEX idx_notes_tags ON notes USING GIN(tags);
-CREATE INDEX idx_notes_created ON notes(created_at DESC);
-
--- ══════════════════════════════════════════════════════
--- 4. NOTE_EMBEDDINGS
--- ══════════════════════════════════════════════════════
-
-CREATE TABLE note_embeddings (
-    note_id    UUID PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE,
-    embedding  vector(768) NOT NULL,
+CREATE TABLE item_embeddings (
+    item_id    UUID PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+    vector     vector(768) NOT NULL,
     model      TEXT DEFAULT 'gemini-embedding-001',
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_embeddings_ivfflat
-    ON note_embeddings USING ivfflat (embedding vector_cosine_ops)
+CREATE INDEX idx_item_emb_ivfflat
+    ON item_embeddings USING ivfflat (vector vector_cosine_ops)
     WITH (lists = 100);
 
--- ══════════════════════════════════════════════════════
--- 5. NOTE_EDGES
--- ══════════════════════════════════════════════════════
-
-CREATE TABLE note_edges (
+CREATE TABLE item_connections (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_id   UUID NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    target_id   UUID NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    edge_type   TEXT DEFAULT 'related'
-        CHECK (edge_type IN ('related','depends_on','extends','contradicts','summarizes','example_of')),
+    from_id     UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    to_id       UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    rel_type    TEXT DEFAULT 'related'
+        CHECK (rel_type IN ('related','depends_on','extends',
+                            'contradicts','summarizes','example_of')),
     label       TEXT,
-    strength    FLOAT DEFAULT 0.0,
-    created_by  TEXT DEFAULT 'processor',
+    score       FLOAT DEFAULT 0.0,
+    created_by  TEXT DEFAULT 'system'
+        CHECK (created_by IN ('system','user','curator')),
     created_at  TIMESTAMPTZ DEFAULT now(),
-    UNIQUE (source_id, target_id),
-    CHECK (source_id != target_id)
+    UNIQUE (from_id, to_id),
+    CHECK (from_id != to_id)
 );
 
-CREATE INDEX idx_edges_source ON note_edges(source_id);
-CREATE INDEX idx_edges_target ON note_edges(target_id);
+CREATE INDEX idx_conn_from ON item_connections(from_id);
+CREATE INDEX idx_conn_to ON item_connections(to_id);
 
--- ══════════════════════════════════════════════════════
--- 6. SCENE_OPERATIONS
--- ══════════════════════════════════════════════════════
+-- ══════════════════════════════════════════
+-- PRESENTATION LAYER
+-- "How do you view it?" lives here.
+-- ══════════════════════════════════════════
 
-CREATE TABLE scene_operations (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    page_id     UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-    version     INTEGER NOT NULL,
-    op_type     TEXT NOT NULL
-        CHECK (op_type IN (
-            'add_elements','update_elements','delete_elements',
-            'move_elements','add_note_card','remove_note_card',
-            'add_diagram','set_background','user_sync','full_rebuild'
-        )),
-    actor       TEXT DEFAULT 'ai' CHECK (actor IN ('ai','user','system')),
-    element_ids TEXT[] DEFAULT '{}',
-    payload     JSONB DEFAULT '{}',
-    created_at  TIMESTAMPTZ DEFAULT now()
+CREATE TABLE workspaces (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    slug          TEXT NOT NULL,
+    display_name  TEXT NOT NULL,
+    description   TEXT,
+    icon          TEXT DEFAULT '📄',
+    color         TEXT DEFAULT '#6366f1',
+    is_archived   BOOLEAN DEFAULT FALSE,
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (owner_id, slug)
 );
 
-CREATE INDEX idx_ops_page_version ON scene_operations(page_id, version);
+CREATE INDEX idx_ws_owner ON workspaces(owner_id);
 
--- ══════════════════════════════════════════════════════
--- 7. CHAT_HISTORY
--- ══════════════════════════════════════════════════════
-
-CREATE TABLE chat_history (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
-    page_id      UUID REFERENCES pages(id) ON DELETE SET NULL,
-    context_type TEXT DEFAULT 'home',
-    messages     JSONB DEFAULT '[]',
-    title        TEXT,
-    created_at   TIMESTAMPTZ DEFAULT now(),
-    updated_at   TIMESTAMPTZ DEFAULT now()
+-- M:N — same item can appear on multiple workspaces
+CREATE TABLE workspace_items (
+    workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    item_id       UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    added_at      TIMESTAMPTZ DEFAULT now(),
+    added_by      TEXT DEFAULT 'system',
+    PRIMARY KEY (workspace_id, item_id)
 );
 
--- ══════════════════════════════════════════════════════
--- 8. SETTINGS
--- ══════════════════════════════════════════════════════
-
-CREATE TABLE settings (
-    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id              UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    theme                TEXT DEFAULT 'dark',
-    model                TEXT DEFAULT 'gemini-2.5-flash',
-    groq_model           TEXT DEFAULT 'llama-3.3-70b-versatile',
-    similarity_threshold FLOAT DEFAULT 0.65,
-    auto_layout          BOOLEAN DEFAULT TRUE,
-    auto_connect         BOOLEAN DEFAULT TRUE,
-    created_at           TIMESTAMPTZ DEFAULT now(),
-    updated_at           TIMESTAMPTZ DEFAULT now()
+-- Canvas scene — Excalidraw JSON (rendered cache, NOT source of truth for items)
+CREATE TABLE canvas_state (
+    workspace_id  UUID PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+    scene         JSONB NOT NULL DEFAULT '{"elements":[],"appState":{"viewBackgroundColor":"#0e0e1a","theme":"dark"},"files":{}}',
+    background    TEXT DEFAULT '#0e0e1a',
+    theme         TEXT DEFAULT 'dark',
+    version       INTEGER DEFAULT 0,
+    updated_at    TIMESTAMPTZ DEFAULT now()
 );
 
--- ══════════════════════════════════════════════════════
--- FUNCTIONS: Vector Search
--- ══════════════════════════════════════════════════════
+-- Item positions on canvas — THIS is the source of truth for "where"
+CREATE TABLE canvas_placements (
+    workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    item_id       UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    x             FLOAT NOT NULL DEFAULT 0,
+    y             FLOAT NOT NULL DEFAULT 0,
+    w             FLOAT NOT NULL DEFAULT 360,
+    h             FLOAT NOT NULL DEFAULT 240,
+    element_ids   TEXT[] DEFAULT '{}',
+    updated_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (workspace_id, item_id)
+);
 
-CREATE OR REPLACE FUNCTION match_notes(
-    query_embedding vector(768),
-    match_threshold FLOAT DEFAULT 0.65,
-    match_count     INTEGER DEFAULT 10
+-- Non-item canvas elements (AI-generated diagrams, composed text, stickies)
+CREATE TABLE canvas_objects (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind            TEXT NOT NULL
+        CHECK (kind IN ('text','diagram','sticky','shape','image')),
+    origin          TEXT DEFAULT 'user'
+        CHECK (origin IN ('user','ai')),
+    excalidraw_ids  TEXT[] DEFAULT '{}',
+    x               FLOAT,
+    y               FLOAT,
+    w               FLOAT,
+    h               FLOAT,
+    content         TEXT,
+    meta            JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_canvas_obj_ws ON canvas_objects(workspace_id);
+
+-- ══════════════════════════════════════════
+-- SUPPORT LAYER
+-- ══════════════════════════════════════════
+
+CREATE TABLE board_ops (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    version       INTEGER NOT NULL,
+    op            TEXT NOT NULL,
+    actor         TEXT DEFAULT 'ai' CHECK (actor IN ('ai','user','system')),
+    targets       TEXT[] DEFAULT '{}',
+    data          JSONB DEFAULT '{}',
+    created_at    TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_ops_ws_ver ON board_ops(workspace_id, version);
+
+CREATE TABLE conversations (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    workspace_id  UUID REFERENCES workspaces(id) ON DELETE SET NULL,
+    title         TEXT,
+    messages      JSONB DEFAULT '[]',
+    created_at    TIMESTAMPTZ DEFAULT now(),
+    updated_at    TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_conv_owner ON conversations(owner_id);
+
+CREATE TABLE user_preferences (
+    owner_id              UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    theme                 TEXT DEFAULT 'dark',
+    primary_model         TEXT DEFAULT 'gemini-2.5-flash',
+    secondary_model       TEXT DEFAULT 'llama-3.3-70b-versatile',
+    similarity_threshold  FLOAT DEFAULT 0.65,
+    auto_layout           BOOLEAN DEFAULT TRUE,
+    auto_connect          BOOLEAN DEFAULT TRUE,
+    updated_at            TIMESTAMPTZ DEFAULT now()
+);
+
+-- ══════════════════════════════════════════
+-- VECTOR SEARCH FUNCTIONS
+-- ══════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION search_items(
+    query_vector  vector(768),
+    threshold     FLOAT DEFAULT 0.65,
+    max_results   INTEGER DEFAULT 10
 )
 RETURNS TABLE (
-    id UUID, user_id UUID, page_id UUID,
-    title TEXT, summary TEXT, raw_text TEXT,
-    tags TEXT[], content_type TEXT,
-    source_url TEXT, processing_status TEXT,
-    metadata JSONB, created_at TIMESTAMPTZ,
+    id UUID, owner_id UUID, title TEXT, summary TEXT,
+    source_text TEXT, tags TEXT[], content_type TEXT,
+    source_url TEXT, status TEXT, created_at TIMESTAMPTZ,
     similarity FLOAT
 )
 LANGUAGE plpgsql AS 
@@ -191,33 +222,29 @@ $$
 BEGIN
     RETURN QUERY
     SELECT
-        n.id, n.user_id, n.page_id,
-        n.title, n.summary, n.raw_text,
-        n.tags, n.content_type,
-        n.source_url, n.processing_status,
-        n.metadata, n.created_at,
-        1 - (ne.embedding <=> query_embedding) AS similarity
-    FROM notes n
-    JOIN note_embeddings ne ON ne.note_id = n.id
-    WHERE 1 - (ne.embedding <=> query_embedding) > match_threshold
-    ORDER BY ne.embedding <=> query_embedding
-    LIMIT match_count;
+        i.id, i.owner_id, i.title, i.summary,
+        i.source_text, i.tags, i.content_type,
+        i.source_url, i.status, i.created_at,
+        1 - (ie.vector <=> query_vector) AS similarity
+    FROM items i
+    JOIN item_embeddings ie ON ie.item_id = i.id
+    WHERE 1 - (ie.vector <=> query_vector) > threshold
+    ORDER BY ie.vector <=> query_vector
+    LIMIT max_results;
 END;
 $$
 ;
 
-CREATE OR REPLACE FUNCTION match_notes_in_page(
-    query_embedding vector(768),
-    target_page_id  UUID,
-    match_threshold FLOAT DEFAULT 0.65,
-    match_count     INTEGER DEFAULT 10
+CREATE OR REPLACE FUNCTION search_items_in_workspace(
+    query_vector      vector(768),
+    target_ws_id      UUID,
+    threshold         FLOAT DEFAULT 0.65,
+    max_results       INTEGER DEFAULT 10
 )
 RETURNS TABLE (
-    id UUID, user_id UUID, page_id UUID,
-    title TEXT, summary TEXT, raw_text TEXT,
-    tags TEXT[], content_type TEXT,
-    source_url TEXT, processing_status TEXT,
-    metadata JSONB, created_at TIMESTAMPTZ,
+    id UUID, owner_id UUID, title TEXT, summary TEXT,
+    source_text TEXT, tags TEXT[], content_type TEXT,
+    source_url TEXT, status TEXT, created_at TIMESTAMPTZ,
     similarity FLOAT
 )
 LANGUAGE plpgsql AS 
@@ -225,33 +252,21 @@ $$
 BEGIN
     RETURN QUERY
     SELECT
-        n.id, n.user_id, n.page_id,
-        n.title, n.summary, n.raw_text,
-        n.tags, n.content_type,
-        n.source_url, n.processing_status,
-        n.metadata, n.created_at,
-        1 - (ne.embedding <=> query_embedding) AS similarity
-    FROM notes n
-    JOIN note_embeddings ne ON ne.note_id = n.id
-    WHERE n.page_id = target_page_id
-        AND 1 - (ne.embedding <=> query_embedding) > match_threshold
-    ORDER BY ne.embedding <=> query_embedding
-    LIMIT match_count;
+        i.id, i.owner_id, i.title, i.summary,
+        i.source_text, i.tags, i.content_type,
+        i.source_url, i.status, i.created_at,
+        1 - (ie.vector <=> query_vector) AS similarity
+    FROM items i
+    JOIN item_embeddings ie ON ie.item_id = i.id
+    JOIN workspace_items wi ON wi.item_id = i.id
+    WHERE wi.workspace_id = target_ws_id
+        AND 1 - (ie.vector <=> query_vector) > threshold
+    ORDER BY ie.vector <=> query_vector
+    LIMIT max_results;
 END;
 $$
 ;
 
--- ══════════════════════════════════════════════════════
--- SEED: Default Uncategorized page
--- ══════════════════════════════════════════════════════
-
-INSERT INTO pages (name, description, icon, color)
-VALUES ('Uncategorized', 'Default page for unrouted notes', '📥', '#6b7280');
-
--- ══════════════════════════════════════════════════════
--- DONE — Verify
--- ══════════════════════════════════════════════════════
-
-SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;
+-- Seed inbox
+INSERT INTO workspaces (slug, display_name, description, icon, color)
+VALUES ('inbox', 'Inbox', 'Default workspace for unrouted items', '📥', '#6b7280');

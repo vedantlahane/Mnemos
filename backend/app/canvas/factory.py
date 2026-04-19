@@ -9,12 +9,12 @@ import time
 import uuid
 from typing import Any, Optional
 
-from app.excalidraw.constants import (
+from app.canvas.constants import (
     BASE_DEFAULTS, TEXT_DEFAULTS, ARROW_DEFAULTS,
     BASE_REQUIRED, TYPE_EXTRA_REQUIRED,
     THEME_COLORS, FONT_FAMILIES,
 )
-from app.excalidraw.text_measure import measure_text
+from app.canvas.text_measure import measure_text
 
 
 def _id() -> str:
