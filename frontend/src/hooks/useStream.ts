@@ -161,33 +161,10 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   },
 
   saveConversation: async (contextType, contextId) => {
-    const messages: ChatMessage[] = get()
-      .items.filter((i): i is Extract<StreamItem, { type: "user" | "assistant" }> =>
-        i.type === "user" || i.type === "assistant"
-      )
-      .map((i) => ({
-        role: i.type as "user" | "assistant",
-        content: i.content,
-        sources: i.type === "assistant" ? (i as { sources?: ChatSource[] }).sources : undefined,
-        followUps: i.type === "assistant" ? (i as { followUps?: string[] }).followUps : undefined,
-      }))
-
-    if (messages.length === 0) return
-
-    try {
-      const firstUserMsg = messages.find((m) => m.role === "user")
-      const title = firstUserMsg?.content.slice(0, 50) || "Chat"
-
-      const saved = await api.saveHistory({
-        context_type: contextType,
-        context_id: contextId,
-        messages,
-        title,
-      })
-      set({ chatId: saved.id })
-    } catch {
-      console.warn("Failed to save conversation")
-    }
+    // Backend API v3 does not support saving conversations.
+    // Chat messages are automatically recorded when sent through /chat or /canvas-chat endpoints.
+    // This function is kept for backward compatibility but is now a no-op.
+    return Promise.resolve()
   },
 }))
 

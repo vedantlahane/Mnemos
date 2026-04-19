@@ -2,46 +2,31 @@ import { parseNLPIntent } from "../utils/nlpParser"
 import type {
   AuthState,
   AuthTokens,
-  BlockCreateRequest,
-  BlockMoveRequest,
-  BlockReference,
-  BlockReferenceCreateRequest,
-  BlockUpdateRequest,
   CacheStats,
   CanvasOp,
   CanvasStreamRequest,
   CaptureRequest,
   ChatConversation,
   ChatRequest,
-  ChatResponse,
   CuratorApplyRequest,
   CuratorScanResult,
   DiagramTopology,
-  DocumentUpdateRequest,
   Edge,
   EdgeCreateRequest,
-  FullGraph,
-  InlineEmbed,
-  InlineEmbedCreateRequest,
   IntentDecision,
   ModelCatalog,
   Note,
-  NoteMoveRequest,
   NoteUpdateRequest,
   Page,
-  PageBlock,
   PageCreateRequest,
-  PageDocument,
   PageStats,
   PageSummary,
   PageUpdateRequest,
   ReadingStep,
   Region,
   Scene,
-  SearchResponse,
   SettingsUpdateRequest,
   TagCount,
-  TagSearchResponse,
   UserSettings,
   WorkspaceOverview,
   WorkspaceStats,
@@ -54,7 +39,6 @@ const API = `${BASE_URL}/api`
 const TOKEN_KEY = "mnemos-token"
 const REFRESH_TOKEN_KEY = "mnemos-refresh-token"
 const SCENE_STORAGE_PREFIX = "mnemos:v2:scene:"
-const VIEWPORT_STORAGE_PREFIX = "mnemos:v2:viewport:"
 
 class ApiError extends Error {
   status: number
@@ -215,11 +199,6 @@ function sceneStorageKey(pageId: string, mode: "canvas" | "notebook" = "canvas")
   return `${SCENE_STORAGE_PREFIX}${pageId}`
 }
 
-function viewportStorageKey(pageId: string, mode: "canvas" | "notebook" = "canvas"): string {
-  if (mode === "notebook") return `${VIEWPORT_STORAGE_PREFIX}${pageId}_notebook`
-  return `${VIEWPORT_STORAGE_PREFIX}${pageId}`
-}
-
 function getEmptyScene(): Scene {
   return {
     elements: [],
@@ -287,31 +266,6 @@ function writeLocalScene(pageId: string, scene: Scene, mode: "canvas" | "noteboo
   }
 }
 
-function readLocalViewport(pageId: string, mode: "canvas" | "notebook" = "canvas"): { scroll_x: number; scroll_y: number; zoom: number } {
-  try {
-    const raw = localStorage.getItem(viewportStorageKey(pageId, mode))
-    if (!raw) {
-      return { scroll_x: 0, scroll_y: 0, zoom: 1 }
-    }
-    const parsed = JSON.parse(raw) as Partial<{ scroll_x: number; scroll_y: number; zoom: number }>
-    return {
-      scroll_x: typeof parsed.scroll_x === "number" ? parsed.scroll_x : 0,
-      scroll_y: typeof parsed.scroll_y === "number" ? parsed.scroll_y : 0,
-      zoom: typeof parsed.zoom === "number" ? parsed.zoom : 1,
-    }
-  } catch {
-    return { scroll_x: 0, scroll_y: 0, zoom: 1 }
-  }
-}
-
-function writeLocalViewport(pageId: string, viewport: { scroll_x: number; scroll_y: number; zoom: number }, mode: "canvas" | "notebook" = "canvas"): void {
-  try {
-    localStorage.setItem(viewportStorageKey(pageId, mode), JSON.stringify(viewport))
-  } catch {
-    // No-op on storage quota or private mode.
-  }
-}
-
 function computeVisualContextFromScene(pageId: string, scene: Scene) {
   const elements = Array.isArray(scene.elements) ? scene.elements : []
   const background =
@@ -329,51 +283,6 @@ function computeVisualContextFromScene(pageId: string, scene: Scene) {
     bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
     element_count: elements.length,
   }
-}
-
-async function resolvePageIdFromHint(pageHint?: string): Promise<string | null> {
-  try {
-    const listed = await pages.list(true)
-    if (!pageHint || !pageHint.trim()) {
-      const uncategorized = listed.pages.find((p) => p.name.toLowerCase() === "uncategorized")
-      if (uncategorized) {
-        return uncategorized.id
-      }
-      return listed.pages[0]?.id ?? null
-    }
-
-    const normalized = pageHint.trim().toLowerCase()
-    const exact = listed.pages.find((p) => p.name.toLowerCase() === normalized)
-    if (exact) {
-      return exact.id
-    }
-    const fuzzy = listed.pages.find((p) => p.name.toLowerCase().includes(normalized))
-    return fuzzy?.id ?? listed.pages[0]?.id ?? null
-  } catch {
-    return null
-  }
-}
-
-async function streamCaptureFallback(pageId: string, request: CaptureRequest): Promise<{ status: string; note_id: string }> {
-  const message = `capture: ${request.text}`
-  let capturedNoteId: string | null = null
-
-  for await (const op of canvasChat.stream(pageId, {
-    message,
-    viewport: request.viewport,
-    history: [],
-    context_type: "page",
-  })) {
-    if (op.op === "create_note") {
-      capturedNoteId = op.note_id || op.note?.id || null
-    }
-  }
-
-  if (!capturedNoteId) {
-    throw new Error("Capture route unavailable and canvas chat fallback did not return a note id")
-  }
-
-  return { status: "captured_via_canvas_chat", note_id: capturedNoteId }
 }
 
 export const auth = {
@@ -447,7 +356,6 @@ export const scene = {
   }> {
     try {
       const resp = await apiFetch<{ scene: Scene; version: number; page_id: string }>(`/pages/${pageId}/scene`)
-      const localViewport = readLocalViewport(pageId)
       
       // Trust the server response
       if (resp && resp.scene && Array.isArray(resp.scene.elements)) {
@@ -1086,34 +994,18 @@ export const settings = {
     return apiFetch("/settings")
   },
 
-  update(data: SettingsUpdateRequest): Promise<{ status: string }> {
+  update(data: SettingsUpdateRequest): Promise<UserSettings> {
     return apiFetch("/settings", {
       method: "PUT",
       body: JSON.stringify(data),
     })
   },
-}
 
-export const chatHistory = {
-  async list(_limit = 20): Promise<{ conversations: ChatConversation[] }> {
-    return { conversations: [] }
-  },
-
-  async get(_id: string): Promise<ChatConversation> {
-    throw new Error("Chat history is not supported/implemented in backend")
-  },
-
-  async save(_data: {
-    context_type: string
-    context_id?: string
-    messages: ChatConversation["messages"]
-    title?: string
-  }): Promise<ChatConversation> {
-    throw new Error("Chat history is not supported/implemented in backend")
-  },
-
-  async delete(_id: string): Promise<{ status: string }> {
-    return { status: "unsupported" }
+  getAvailableModels(): Promise<{
+    primary: Array<{ id: string; name: string; provider: string; tier: string }>
+    secondary: Array<{ id: string; name: string; provider: string; tier: string }>
+  }> {
+    return apiFetch("/settings/models")
   },
 }
 
@@ -1197,16 +1089,14 @@ async function buildPageStatsCompat(pageId: string): Promise<PageStats> {
     }
   }
 
-  const [notesResult, edgesResult, regionsResult, sceneResult] = await Promise.allSettled([
+  const [notesResult, edgesResult, sceneResult] = await Promise.allSettled([
     notes.list({ page: 1, limit: 500, page_id: pageId }),
     graph.pageEdges(pageId),
-    canvas.listRegions(pageId),
     scene.get(pageId),
   ])
 
   const pageNotes = notesResult.status === "fulfilled" ? notesResult.value.notes : []
   const pageEdges = edgesResult.status === "fulfilled" ? edgesResult.value.edges : []
-  const pageRegions = regionsResult.status === "fulfilled" ? regionsResult.value.regions : []
   const sceneElements = sceneResult.status === "fulfilled" ? sceneResult.value.scene.elements : []
 
   const tagsMap = new Map<string, number>()
@@ -1223,8 +1113,8 @@ async function buildPageStatsCompat(pageId: string): Promise<PageStats> {
   return {
     note_count: pageNotes.length,
     edge_count: pageEdges.length,
-    region_count: pageRegions.length,
-    cluster_count: pageRegions.length,
+    region_count: 0,
+    cluster_count: 0,
     element_count: sceneElements.length,
     tags,
   }
@@ -1266,6 +1156,22 @@ async function detectIntentLocally(query: string, contextType: string): Promise<
   }
 }
 
+// Stubs for deprecated APIs (notebook/document mode and canvas regions)
+// These are kept for backward compatibility but are not functional.
+const document = {
+  get: async (..._args: any[]) => { throw new Error("Document API is not supported in v3") },
+  createBlock: async (..._args: any[]) => { throw new Error("Document API is not supported in v3") },
+  updateBlock: async (..._args: any[]) => { throw new Error("Document API is not supported in v3") },
+  deleteBlock: async (..._args: any[]) => { throw new Error("Document API is not supported in v3") },
+}
+
+const chatHistory = {
+  list: async () => ({ chats: [] as ChatConversation[] }),
+  get: async () => ({ chats: [] as ChatConversation[] }),
+  save: async () => ({ id: "" }),
+  delete: async () => ({ status: "unsupported" }),
+}
+
 export const api = {
   // Auth
   authGoogle: auth.loginGoogle,
@@ -1280,7 +1186,7 @@ export const api = {
   deletePage: pages.delete,
 
   // Scene compatibility
-  async getPageCanvas(pageId: string, mode: "canvas" | "notebook" = "canvas"): Promise<{
+  async getPageCanvas(pageId: string, _mode: "canvas" | "notebook" = "canvas"): Promise<{
     page: Page
     scene_data: Scene
     canvas_data: Scene
@@ -1298,12 +1204,11 @@ export const api = {
       position_y?: number | null
     }>
   }> {
-    const [page, loadedScene, pageNotes, pageEdges, pageRegions] = await Promise.all([
+    const [page, loadedScene, pageNotes, pageEdges] = await Promise.all([
       pages.get(pageId),
-      scene.get(pageId, mode),
+      scene.get(pageId),
       notes.list({ page: 1, limit: 500, page_id: pageId }).then((r) => r.notes).catch(() => []),
       graph.pageEdges(pageId).then((r) => r.edges).catch(() => []),
-      canvas.listRegions(pageId).then((r) => r.regions).catch(() => []),
     ])
 
     const visualContext = computeVisualContextFromScene(pageId, loadedScene.scene)
@@ -1314,41 +1219,28 @@ export const api = {
       canvas_data: loadedScene.scene,
       notes: pageNotes,
       edges: pageEdges,
-      clusters: pageRegions,
-      regions: pageRegions,
+      clusters: [],
+      regions: [],
       visual_context: visualContext,
-      viewport: loadedScene.viewport,
+      viewport: { scroll_x: 0, scroll_y: 0, zoom: 1 },
       elements: loadedScene.scene.elements as any,
     }
   },
 
   async savePageCanvas(
     pageId: string,
-    payload: { mode?: "canvas" | "notebook"; canvas_data?: Scene; viewport?: { x?: number; y?: number; scroll_x?: number; scroll_y?: number; zoom?: number } },
+    payload: { canvas_data?: Scene; viewport?: { scroll_x?: number; scroll_y?: number; zoom?: number } },
   ): Promise<{ status: string }> {
-    let status = "noop"
-
     if (payload.canvas_data) {
-      const saveResult = await scene.save(pageId, {
-        mode: payload.mode || "canvas",
+      await scene.save(pageId, {
         elements: payload.canvas_data.elements,
         appState: payload.canvas_data.appState,
         files: payload.canvas_data.files,
       })
-      status = saveResult.status
     }
 
-    if (payload.viewport) {
-      const viewportResult = await scene.saveViewport(pageId, {
-        mode: payload.mode || "canvas",
-        scroll_x: typeof payload.viewport.scroll_x === "number" ? payload.viewport.scroll_x : payload.viewport.x || 0,
-        scroll_y: typeof payload.viewport.scroll_y === "number" ? payload.viewport.scroll_y : payload.viewport.y || 0,
-        zoom: payload.viewport.zoom || 1,
-      })
-      status = viewportResult.status
-    }
-
-    return { status }
+    // Viewport is managed client-side in local storage
+    return { status: "saved" }
   },
 
   triggerPageLayout: scene.triggerLayout,
@@ -1359,7 +1251,10 @@ export const api = {
   getNote: notes.get,
   updateNote: notes.update,
   deleteNote: notes.delete,
-  retryNote: notes.retry,
+  retryNote: async (_noteId: string) => {
+    // Backend v3 doesn't support explicit retry; notes are reprocessed via curator
+    return { status: "retry_not_supported" }
+  },
   moveNote: notes.move,
 
   // Capture
@@ -1374,23 +1269,14 @@ export const api = {
   createEdge: graph.createEdge,
   deleteEdge: graph.deleteEdge,
 
-  // Regions
-  listClusters: async (pageId?: string) => {
-    if (!pageId) return { clusters: [] as Region[] }
-    const regions = await canvas.listRegions(pageId)
-    return { clusters: regions.regions }
-  },
-  createCluster: (data: { page_id: string; label: string; description?: string; color?: string }) =>
-    canvas.createRegion(data.page_id, data),
-  updateCluster: async (id: string, data: Record<string, unknown>) => {
-    const pageId = typeof data.page_id === "string" ? data.page_id : ""
-    if (!pageId) throw new Error("page_id is required")
-    return canvas.updateRegion(pageId, id, data as Partial<Pick<Region, "label" | "description" | "color" | "layout_hint">>)
-  },
-  deleteCluster: async (_id: string) => ({ status: "unsupported" }),
+  // Regions (deprecated - not supported in v3)
+  listClusters: async () => ({ clusters: [] as Region[] }),
+  createCluster: async () => { throw new Error("Canvas regions are not supported in v3") },
+  updateCluster: async () => { throw new Error("Canvas regions are not supported in v3") },
+  deleteCluster: async () => ({ status: "unsupported" }),
 
-  listElements: canvas.listElements,
-  deleteElement: async (_id: string) => ({ status: "unsupported" }),
+  listElements: async () => ({ elements: [] }),
+  deleteElement: async () => ({ status: "unsupported" }),
 
   // Search
   search: (q: string, limit = 10, pageId?: string) =>
@@ -1411,9 +1297,9 @@ export const api = {
     })
 
     return {
-      answer: response.response,
+      answer: response.answer,
       sources: response.sources,
-      follow_ups: [] as string[],
+      follow_ups: response.follow_ups,
     }
   },
 
@@ -1473,7 +1359,7 @@ export const api = {
     })
 
     try {
-      const parsed = JSON.parse(response.response) as unknown
+      const parsed = JSON.parse(response.answer) as unknown
       const steps = Array.isArray(parsed)
         ? parsed
         : (parsed as { steps?: unknown }).steps
@@ -1493,13 +1379,13 @@ export const api = {
       return { steps: normalized }
     } catch {
       return {
-        steps: [{ title: response.response }],
+        steps: [{ title: response.answer }],
       }
     }
   },
 
   // AI
-  aiLayout: scene.triggerLayout,
+  aiLayout: async (pageId: string) => scene.triggerLayout(pageId),
   aiPosition: async (pageId: string, noteId: string) => {
     const loadedScene = await scene.get(pageId)
     const frame = loadedScene.scene.elements.find((el) => {
@@ -1526,7 +1412,7 @@ export const api = {
     })
 
     return {
-      summary: response.response,
+      summary: response.answer,
       key_topics: response.sources.map((s) => s.title).slice(0, 6),
       connections: response.sources.map((s) => `${s.title} (${Math.round(s.similarity * 100)}%)`).slice(0, 6),
     }

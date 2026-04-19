@@ -26,7 +26,6 @@ export interface Page {
   description: string | null
   icon: string
   color: string
-  layout_mode: "canvas" | "notebook"
   is_archived: boolean
   created_at: string
   updated_at: string
@@ -188,81 +187,8 @@ export interface SceneResponse {
   }>
 }
 
-// ─────────────────────────────────────────────────────────────
-// DOCUMENT / NOTEBOOK MODE
-// ─────────────────────────────────────────────────────────────
-
-export interface PageDocument {
-  page_id: string
-  user_id: string | null
-  default_font: string
-  content_width: number
-  line_height: number
-  left_padding: number
-  right_padding: number
-  metadata: Record<string, unknown>
-  created_at: string
-  updated_at: string
-}
-
-export interface PageBlock {
-  id: string
-  page_id: string
-  block_type: string
-  text_content: string | null
-  order_key: number
-  depth: number
-  parent_block_id: string | null
-  note_id: string | null
-  attrs: Record<string, unknown>
-  provenance: Record<string, unknown>
-  version: number
-  is_deleted: boolean
-  created_by: string
-  created_at: string
-  updated_at: string
-
-  // Compatibility with previous client payloads.
-  metadata?: Record<string, unknown>
-}
-
-export interface PageDocumentBundle {
-  page: Page
-  document: PageDocument | null
-  blocks: PageBlock[]
-}
-
-export interface BlockReference {
-  id: string
-  page_id: string
-  block_id: string
-  ref_type: string
-  ref_id: string
-  start_offset: number
-  end_offset: number | null
-  label: string | null
-  metadata: Record<string, unknown>
-  created_at: string
-}
-
-export interface InlineEmbed {
-  id: string
-  page_id: string
-  block_id: string
-  embed_type: string
-  target_page_id: string | null
-  target_note_id: string | null
-  target_block_id: string | null
-  url: string | null
-  inline_position: Record<string, unknown>
-  display_mode: string
-  width: number | null
-  height: number | null
-  attrs: Record<string, unknown>
-  created_by: string
-  created_at: string
-  updated_at: string
-}
+// Note: Document/Notebook mode types (PageDocument, PageBlock, etc.) were removed.
+// Backend API v3 only supports canvas mode with Excalidraw scene.
 
 // ─────────────────────────────────────────────────────────────
 // CHAT
@@ -430,7 +356,6 @@ export interface PageSummary {
   icon: string
   color: string
   note_count: number
-  layout_mode: "canvas" | "notebook"
   is_archived: boolean
   updated_at: string
 }
@@ -649,7 +574,6 @@ export interface PageCreateRequest {
   description?: string
   icon?: string
   color?: string
-  layout_mode?: "canvas" | "notebook"
 }
 
 export interface PageUpdateRequest {
@@ -658,7 +582,6 @@ export interface PageUpdateRequest {
   icon?: string
   color?: string
   is_archived?: boolean
-  layout_mode?: "canvas" | "notebook"
 }
 
 export interface NoteUpdateRequest {
@@ -704,71 +627,6 @@ export interface CaptureRequest {
   page_hint?: string
   custom_command?: string
   viewport?: Viewport
-}
-
-export interface BlockCreateRequest {
-  block_type?: string
-  text_content?: string
-  parent_block_id?: string
-  prev_block_id?: string
-  next_block_id?: string
-  order_key?: number
-  depth?: number
-  attrs?: Record<string, unknown>
-  note_id?: string
-  provenance?: Record<string, unknown>
-  metadata?: Record<string, unknown>
-  created_by?: string
-}
-
-export interface BlockUpdateRequest {
-  text_content?: string
-  parent_block_id?: string
-  order_key?: number
-  depth?: number
-  block_type?: string
-  attrs?: Record<string, unknown>
-  provenance?: Record<string, unknown>
-  metadata?: Record<string, unknown>
-  is_deleted?: boolean
-}
-
-export interface BlockMoveRequest {
-  prev_block_id?: string
-  next_block_id?: string
-  order_key?: number
-}
-
-export interface BlockReferenceCreateRequest {
-  ref_type: string
-  ref_id: string
-  start_offset?: number
-  end_offset?: number
-  label?: string
-  metadata?: Record<string, unknown>
-}
-
-export interface InlineEmbedCreateRequest {
-  embed_type: string
-  target_page_id?: string
-  target_note_id?: string
-  target_block_id?: string
-  url?: string
-  inline_position?: Record<string, unknown>
-  display_mode?: string
-  width?: number
-  height?: number
-  attrs?: Record<string, unknown>
-  created_by?: string
-}
-
-export interface DocumentUpdateRequest {
-  default_font?: string
-  content_width?: number
-  line_height?: number
-  left_padding?: number
-  right_padding?: number
-  metadata?: Record<string, unknown>
 }
 
 export interface SceneSaveRequest {

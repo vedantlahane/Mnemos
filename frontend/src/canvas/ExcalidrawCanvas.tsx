@@ -13,7 +13,6 @@ import { useCanvasEvents, type CanvasCommand } from "../hooks/useCanvasEvents"
 import { useAppContext } from "../hooks/useAppContext"
 import { useExcalidrawAPI } from "../hooks/useExcalidrawAPI"
 import { useViewport } from "../hooks/useViewport"
-import { useNotebookMode } from "../hooks/useNotebookMode"
 import { CanvasApplier } from "../lib/canvasApplier"
 import { initPretext, createNoteCard, createSticky, createTextBare, layoutText } from "./canvasAI"
 import { readCanvasContext, findOpenPosition, findStackPosition } from "./canvasContext"
@@ -23,7 +22,6 @@ import { nanoid } from "../utils"
 
 interface Props {
   pageId: string
-  viewMode?: "canvas" | "notebook"
 }
 
 function getZoomValue(appState: Record<string, unknown>): number {
@@ -270,7 +268,7 @@ function hasRealCanvasContent(elements: readonly Record<string, unknown>[]): boo
   })
 }
 
-export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props) {
+export default function ExcalidrawCanvas({ pageId }: Props) {
   useEffect(() => {
     initPretext().catch(console.error);
   }, [])
@@ -279,16 +277,13 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
     excalidrawRef, loading, initialScene, error,
     saveScene, addElements, searchElements, searchCanvasBackend,
     scrollToElement, reload,
-  } = useExcalidraw(pageId, viewMode)
+  } = useExcalidraw(pageId)
 
   const { addSystemMessage } = useStream()
   const { current, switchTo } = useAppContext()
   const canvasSeq = useCanvasEvents((s) => s.seq)
   const canvasConsume = useCanvasEvents((s) => s.consume)
   const { getViewport, onScrollChange } = useViewport(excalidrawRef)
-
-  const isNotebook = viewMode === "notebook"
-  const notebook = useNotebookMode(excalidrawRef as React.MutableRefObject<any>, isNotebook, pageId)
 
   const sceneApplied = useRef(false)
   const suppressAutosaveRef = useRef(false)
@@ -325,27 +320,17 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
         exc.updateScene({ appState: restoredAppState as any })
       }
       sceneApplied.current = true
-      setTimeout(() => {
-        suppressAutosaveRef.current = false
-        if (isNotebook) notebook.relayout()
-      }, 100)
+      suppressAutosaveRef.current = false
     }, 150)
     return () => clearTimeout(timer)
-  }, [initialScene, excalidrawRef, isNotebook, notebook])
+  }, [initialScene, excalidrawRef])
 
   useEffect(() => {
     sceneApplied.current = false
     suppressAutosaveRef.current = true
     setEmptyOverlayDismissed(false)
     setHasLiveContent(false)
-  }, [pageId, viewMode])
-
-  useEffect(() => {
-    if (isNotebook && sceneApplied.current) {
-      const timer = setTimeout(() => notebook.relayout(), 300)
-      return () => clearTimeout(timer)
-    }
-  }, [isNotebook, notebook])
+  }, [pageId])
 
   useEffect(() => {
     const handler = () => {
@@ -385,7 +370,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
     const exc = excalidrawRef.current
     if (!exc) return
     const ctx = readCanvasContext(exc as unknown as ExcalidrawImperativeAPI)
-    let localYTracker = isNotebook ? notebook.getBottomY() : 0
 
     switch (cmd.type) {
       case "search": {
@@ -410,7 +394,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
       case "add": {
         const bgColor = ctx.backgroundColor
         const getPos = () => {
-          if (isNotebook) return { x: notebook.getColumn().left + 20, y: localYTracker + 20 }
           return cmd.x !== undefined ? { x: cmd.x, y: cmd.y ?? ctx.viewportCenter.y } : findOpenPosition(ctx, 360, 200)
         }
         
@@ -436,7 +419,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
                     noteId: note.id, title: note.title || "Untitled",
                     summary: note.summary || note.raw_text, tags: note.tags || [],
                   }, { x: pos.x, y: pos.y }, bgColor))
-                  if (isNotebook) notebook.relayout()
                 } catch {}
               }, 3000)
             } catch {
@@ -448,7 +430,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
             }
           }
         }
-        if (isNotebook) setTimeout(() => notebook.relayout(), 100)
         break
       }
 
@@ -475,15 +456,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
                 const dw = bounds.maxX - bounds.minX;
                 const dh = bounds.maxY - bounds.minY;
 
-                if (isNotebook) {
-                  const col = notebook.getColumn();
-                  const alignX = col.left + Math.max(0, (col.width - dw)/2)
-                  const placedDiagram = translateElements(diagramElements as any, alignX - bounds.minX, localYTracker + 40 - bounds.minY)
-                  addElements(placedDiagram as any)
-                  localYTracker += dh + 80 // Advance notebook flow!
-                } else {
-                  addElements(placeDiagramWithoutOverlap(ctx, diagramElements as any) as any)
-                }
+                addElements(placeDiagramWithoutOverlap(ctx, diagramElements as any) as any)
                 addSystemMessage("Diagram added. Now composing text…")
               }
             } catch {
@@ -496,18 +469,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
           if (!answer) return
 
           const blocks = buildCanvasTextBlocks(answer)
-          let positions: Array<{ x: number; y: number }>
-          
-          if (isNotebook) {
-            const col = notebook.getColumn()
-            positions = blocks.map((b) => {
-              const pos = { x: col.left + 20, y: localYTracker + 20 }
-              localYTracker += b.height + 28
-              return pos
-            })
-          } else {
-            positions = findStackPosition(ctx, blocks.map((b) => ({ width: b.width, height: b.height })), 28)
-          }
+          const positions = findStackPosition(ctx, blocks.map((b) => ({ width: b.width, height: b.height })), 28)
 
           for (let idx = 0; idx < blocks.length; idx++) {
             const block = blocks[idx]
@@ -526,7 +488,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
         } finally {
           suppressAutosaveRef.current = false
           flushSceneSave()
-          if (isNotebook) setTimeout(() => notebook.relayout(), 200)
         }
         break
       }
@@ -547,15 +508,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
             const diagramElements = renderTopology(resp.topology as any, ctx, diagramGroupId)
             const bounds = elementBounds(diagramElements as any)
 
-            if (isNotebook) {
-              const dw = bounds.maxX - bounds.minX;
-              const col = notebook.getColumn();
-              const alignX = col.left + Math.max(0, (col.width - dw)/2)
-              const placedDiagram = translateElements(diagramElements as any, alignX - bounds.minX, localYTracker + 40 - bounds.minY)
-              addElements(placedDiagram as any)
-            } else {
-              addElements(placeDiagramWithoutOverlap(ctx, diagramElements as any) as any)
-            }
+            addElements(placeDiagramWithoutOverlap(ctx, diagramElements as any) as any)
             addSystemMessage("Diagram added securely to layout.")
           }
         } catch {
@@ -563,7 +516,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
         } finally {
           suppressAutosaveRef.current = false
           flushSceneSave()
-          if (isNotebook) setTimeout(() => notebook.relayout(), 200)
         }
         break
       }
@@ -620,10 +572,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
 
       onScrollChange((appState.scrollX || 0) as number, (appState.scrollY || 0) as number)
 
-      if (isNotebook && !notebook.isLayouting()) {
-        notebook.onNotebookChange()
-      }
-
       if (suppressAutosaveRef.current || !sceneApplied.current) return
 
       saveScene(
@@ -632,7 +580,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
         files as unknown as Record<string, unknown>
       )
     },
-    [saveScene, onScrollChange, isNotebook, notebook]
+    [saveScene, onScrollChange]
   )
 
   const handleExcalidrawAPI = useCallback(
@@ -682,7 +630,7 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
 
   return (
     <div
-      className={`w-full h-full excalidraw-wrapper relative ${isNotebook ? "notebook-mode" : ""}`}
+      className="w-full h-full excalidraw-wrapper relative"
       data-excalidraw-host="true"
       onPointerDownCapture={() => setEmptyOverlayDismissed(true)}
       onWheelCapture={() => setEmptyOverlayDismissed(true)}
@@ -694,7 +642,6 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
           appState: {
             viewBackgroundColor: canvasBg,
             theme: canvasTheme,
-            ...(isNotebook ? { gridSize: 0 } : {}),
           },
           files: undefined,
         }}
@@ -723,13 +670,10 @@ export default function ExcalidrawCanvas({ pageId, viewMode = "canvas" }: Props)
                   <MousePointer2 size={24} className="text-[var(--accent)]" />
                 </div>
                 <h3 className="text-[16px] font-bold text-white mb-2">
-                  {isNotebook ? "Empty Notebook" : "Empty Canvas"}
+                  Empty Canvas
                 </h3>
                 <p className="text-[12px] text-[var(--glass-text-dim)] leading-relaxed mb-5">
-                  {isNotebook
-                    ? "Start typing or generating. Elements will perfectly flow vertically without overlap."
-                    : "Capture notes or draw freely."
-                  }
+                  Capture notes or draw freely.
                 </p>
                 <div className="flex flex-col gap-2 text-left">
                   <HintRow icon={<StickyNote size={13} />} command="/add sticky: hello" label="Add a sticky" />
