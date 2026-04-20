@@ -20,7 +20,7 @@ BASE_REQUIRED = {
     "id", "type", "x", "y", "width", "height", "angle",
     "strokeColor", "backgroundColor", "fillStyle",
     "strokeWidth", "strokeStyle", "roughness", "opacity",
-    "groupIds", "frameId", "roundness",
+    "groupIds", "frameId", "index", "roundness",
     "seed", "version", "versionNonce",
     "isDeleted", "updated", "link", "locked",
     "customData",

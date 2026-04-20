@@ -23,6 +23,37 @@ def _id() -> str:
     return "".join(random.choice(alpha) for _ in range(21))
 
 
+# ── Fractional Indexing for Excalidraw 0.18+ ──
+# Each element needs an 'index' property for z-ordering and shape cache building.
+# Without it, isPointOnShape() crashes when accessing element.roundness.type.
+
+_index_counter = 0
+
+
+def _fractional_index() -> str:
+    """
+    Generate a fractional index string for Excalidraw 0.18+.
+    Uses simple lexicographic ordering: a0, a1, a2, ... a9, aA, aB, ...
+    Elements are ordered by these strings in the scene.
+    """
+    global _index_counter
+    _index_counter += 1
+    # Simple scheme: "a" + base-62 counter
+    chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    n = _index_counter
+    result = []
+    while n > 0 or not result:
+        result.append(chars[n % len(chars)])
+        n //= len(chars)
+    return "a" + "".join(reversed(result))
+
+
+def reset_index_counter():
+    """Reset index counter — call when building a new scene."""
+    global _index_counter
+    _index_counter = 0
+
+
 def _seed() -> int:
     return random.randint(1, 2_147_483_647)
 
@@ -57,6 +88,7 @@ class ElementFactory:
             "y": 0.0,
             "width": 100.0,
             "height": 100.0,
+            "index": _fractional_index(),  # REQUIRED for Excalidraw 0.18+
             "seed": _seed(),
             "version": 1,
             "versionNonce": _seed(),
@@ -77,6 +109,30 @@ class ElementFactory:
         missing = required - set(el.keys())
         if missing:
             raise ValueError(f"Element '{el_type}' missing fields: {missing}")
+
+        # ── Safety: Excalidraw 0.18 crashes on null for these fields ──
+        # Colors: .length is called → must be string
+        for field in ("strokeColor", "backgroundColor"):
+            if el.get(field) is None:
+                el[field] = BASE_DEFAULTS.get(field, "transparent")
+
+        # fillStyle/strokeStyle: must be string
+        if not isinstance(el.get("fillStyle"), str):
+            el["fillStyle"] = "solid"
+        if not isinstance(el.get("strokeStyle"), str):
+            el["strokeStyle"] = "solid"
+
+        # Arrays: must never be None
+        for field in ("groupIds", "boundElements"):
+            if el.get(field) is None:
+                el[field] = []
+
+        # roundness: can be None (null) — that's OK for Excalidraw
+        # but if it's a dict, it MUST have "type"
+        rn = el.get("roundness")
+        if isinstance(rn, dict) and "type" not in rn:
+            rn["type"] = 3
+
         return el
 
     # ── Shapes ──

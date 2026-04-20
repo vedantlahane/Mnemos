@@ -10,6 +10,7 @@ from app.services import search as search_svc
 from app.services.placement import (
     find_placement, find_placement_for_size, get_column_bounds,
 )
+from app.services.sync import handle_structural_rebuild
 from app.canvas import canvas_renderer
 from app.canvas.layout import layout_diagram
 from app.llm import router as llm_router
@@ -302,29 +303,29 @@ async def _handle_query(action: str, params: dict,
 # ═══════════════════════════════════════
 
 async def _get_canvas_context(workspace_id: str, owner_id: str) -> dict:
-    """Gather everything needed for smart placement decisions."""
+    """Gather everything needed for scene rebuilds."""
     stored = await repo.get_canvas(workspace_id)
     items = await repo.get_items_for_workspace(workspace_id, owner_id)
     placements = await repo.get_placements(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
-    scene_elements = stored["scene"].get("elements", [])
-    user_drawn = canvas_renderer.extract_user_drawn(scene_elements)
-
+    managed_ids = canvas_renderer.collect_managed_ids(items, objects)
+    user_drawn = canvas_renderer.extract_user_drawn(
+        stored["scene"].get("elements", []), managed_ids,
+    )
     return {
         "stored": stored,
         "items": items,
         "placements": placements,
         "objects": objects,
         "user_drawn": user_drawn,
-        "scene_elements": scene_elements,
     }
 
 
-def _rebuild_and_version(ctx: dict, theme: str = None, background: str = None) -> tuple:
-    """Rebuild scene from source-of-truth. Returns (scene, new_version)."""
+def _rebuild_scene(ctx: dict, theme: str = None, background: str = None) -> tuple:
+    """Rebuild scene from DB truth. Returns (scene, new_version)."""
     stored = ctx["stored"]
     t = theme or stored.get("theme", "dark")
-    bg = background or stored.get("background", "#0e0e1a")
+    bg = background or stored.get("background")
     scene = canvas_renderer.build_scene(
         ctx["items"], ctx["placements"], ctx["objects"], ctx["user_drawn"],
         theme=t, background=bg,
@@ -367,7 +368,7 @@ async def _handle_canvas(action: str, params: dict,
         bg = "#0e0e1a" if theme == "dark" else "#ffffff"
 
         canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
-        scene, new_version = _rebuild_and_version(canvas_ctx, theme=theme, background=bg)
+        scene, new_version = _rebuild_scene(canvas_ctx, theme=theme, background=bg)
 
         await repo.save_canvas(workspace_id, scene, new_version,
                                theme=theme, background=bg)
@@ -398,55 +399,53 @@ async def _canvas_add_diagram(params: dict, workspace_id: str,
     topic = params.get("topic", "untitled diagram")
 
     topology = await llm_router.generate_diagram(topic, user_id=owner_id)
-    col = get_column_bounds()
 
+    # Get ALL existing content to find correct placement
     canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
 
-    # Layout diagram to compute bbox (for placement + storage)
+    # Layout diagram to get its actual size
+    col = get_column_bounds()
     f = canvas_renderer.factory(canvas_ctx["stored"].get("theme", "dark"))
-    _, bbox = layout_diagram(
-        topology, 0, 0, f, max_width=col["width"],
-    )
+    _, bbox = layout_diagram(topology, 0, 0, f, max_width=col["width"])
 
-    # Find position below all existing content
-    placement = find_placement_for_size(
+    # Find position BELOW all existing content
+    from app.services.placement import find_diagram_placement
+    placement = find_diagram_placement(
         placements=canvas_ctx["placements"],
         objects=canvas_ctx["objects"],
         user_elements=canvas_ctx["user_drawn"],
-        width=bbox["width"],
-        height=bbox["height"],
+        diagram_width=bbox["width"],
+        diagram_height=bbox["height"],
     )
 
-    # Store the object — build_scene will render it from topology
+    # Store the diagram object
     obj = await repo.create_canvas_object(
         workspace_id=workspace_id,
         kind="diagram", origin="ai",
-        excalidraw_ids=[],  # build_scene creates elements
+        excalidraw_ids=[],
         x=placement["x"], y=placement["y"],
         w=bbox["width"], h=bbox["height"],
         content=topic,
         meta={"topology": topology},
     )
 
-    # DO NOT add diagram elements to user_drawn — build_scene handles it
-    canvas_ctx["objects"] = await repo.get_canvas_objects(workspace_id)
-    scene, new_version = _rebuild_and_version(canvas_ctx)
+    # Structural rebuild — this is a new object
+    result = await handle_structural_rebuild(workspace_id, owner_id)
 
-    await repo.save_canvas(workspace_id, scene, new_version)
-    await repo.log_op(workspace_id, new_version, "diagram_added",
+    await repo.log_op(workspace_id, result["version"], "diagram_added",
                       actor="ai", data={"topic": topic, "bbox": bbox})
 
     from app.services.broadcaster import broadcaster
     await broadcaster.publish(workspace_id, {
         "type": "canvas_updated",
-        "version": new_version,
+        "version": result["version"],
         "op": "diagram_added",
     })
 
     return CommandResponse(
         text=f"Created a diagram about **{topic}**.",
         intent="canvas",
-        canvas_update={"version": new_version, "action": "reload"},
+        canvas_update={"version": result["version"], "action": "reload"},
         data={"bbox": bbox, "object_id": obj.get("id")},
     )
 
@@ -465,11 +464,10 @@ async def _canvas_add_sticky(params: dict, workspace_id: str,
         placements=canvas_ctx["placements"],
         objects=canvas_ctx["objects"],
         user_elements=canvas_ctx["user_drawn"],
-        width=180,
-        height=160,
+        width=180, height=160,
     )
 
-    obj = await repo.create_canvas_object(
+    await repo.create_canvas_object(
         workspace_id=workspace_id,
         kind="sticky", origin="ai",
         x=placement["x"], y=placement["y"], w=180, h=160,
@@ -477,24 +475,19 @@ async def _canvas_add_sticky(params: dict, workspace_id: str,
         meta={"color": color},
     )
 
-    canvas_ctx["objects"] = await repo.get_canvas_objects(workspace_id)
-    scene, new_version = _rebuild_and_version(canvas_ctx)
-
-    await repo.save_canvas(workspace_id, scene, new_version)
-    await repo.log_op(workspace_id, new_version, "element_added",
-                      actor="ai", data={"type": "sticky"})
+    result = await handle_structural_rebuild(workspace_id, owner_id)
 
     from app.services.broadcaster import broadcaster
     await broadcaster.publish(workspace_id, {
         "type": "canvas_updated",
-        "version": new_version,
+        "version": result["version"],
         "op": "element_added",
     })
 
     return CommandResponse(
         text=f"Added a sticky note.",
         intent="canvas",
-        canvas_update={"version": new_version, "action": "reload"},
+        canvas_update={"version": result["version"], "action": "reload"},
     )
 
 
@@ -519,7 +512,7 @@ async def _canvas_compose(params: dict, workspace_id: str,
             objects=canvas_ctx["objects"],
             user_elements=canvas_ctx["user_drawn"],
             width=col["width"],
-            height=300,  # initial guess — will be corrected
+            height=300,
         )
 
         obj = await repo.create_canvas_object(
@@ -547,49 +540,27 @@ async def _canvas_compose(params: dict, workspace_id: str,
         except Exception as e:
             logger.error(f"Compose stream failed: {e}")
 
-        # Clean the final content
+        # Clean markdown
         content = strip_markdown(content)
 
-        # Measure ACTUAL height of the rendered text
-        m = measure_text(
-            content,
-            font_size=16,
-            font_family=1,
-            max_width=col["width"],
-            max_lines=200,
-        )
-        actual_h = m["height"] + 20  # padding
+        # Measure actual height
+        m = measure_text(content, font_size=16, font_family=1,
+                         max_width=col["width"], max_lines=200)
+        actual_h = m["height"] + 20
 
-        # Update object with correct content AND actual dimensions
-        await repo.update_canvas_object(
-            obj_id,
-            content=content,
-            h=actual_h,
-        )
+        # Update object with final content and real dimensions
+        await repo.update_canvas_object(obj_id, content=content, h=actual_h)
 
-        # Re-fetch everything and rebuild
-        items = await repo.get_items_for_workspace(workspace_id, owner_id)
-        placements_db = await repo.get_placements(workspace_id)
-        objects = await repo.get_canvas_objects(workspace_id)
-        stored_latest = await repo.get_canvas(workspace_id)
-        user_drawn = canvas_renderer.extract_user_drawn(
-            stored_latest["scene"].get("elements", []),
-        )
+        # Structural rebuild
+        result = await handle_structural_rebuild(workspace_id, owner_id)
 
-        scene = canvas_renderer.build_scene(
-            items, placements_db, objects, user_drawn,
-            theme=stored_latest.get("theme", "dark"),
-            background=stored_latest.get("background", "#0e0e1a"),
-        )
-        new_version = stored_latest["version"] + 1
-        await repo.save_canvas(workspace_id, scene, new_version)
-        await repo.log_op(workspace_id, new_version, "element_added",
+        await repo.log_op(workspace_id, result["version"], "element_added",
                           actor="ai", data={"type": "composed_text", "topic": topic})
 
         await broadcaster.publish(workspace_id, {
             "type": "stream_end",
             "obj_id": obj_id,
-            "version": new_version,
+            "version": result["version"],
         })
 
     asyncio.create_task(_run_compose())
@@ -628,34 +599,19 @@ async def _canvas_rebuild(workspace_id: str, owner_id: str) -> CommandResponse:
                 w=op.get("w"), h=op.get("h"),
             )
 
-    stored = await repo.get_canvas(workspace_id)
-    new_version = stored["version"] + 1
-
-    # Re-fetch after updates
-    placements_db = await repo.get_placements(workspace_id)
-    objects_db = await repo.get_canvas_objects(workspace_id)
-
-    scene = canvas_renderer.build_scene(
-        items, placements_db, objects_db, [],
-        theme=stored.get("theme", "dark"),
-        background=stored.get("background", "#0e0e1a"),
-    )
-    await repo.save_canvas(workspace_id, scene, new_version)
-    await repo.log_op(workspace_id, new_version, "full_rebuild",
-                      actor="system", data={"item_count": len(items),
-                                            "object_count": len(objects)})
+    result = await handle_structural_rebuild(workspace_id, owner_id)
 
     from app.services.broadcaster import broadcaster
     await broadcaster.publish(workspace_id, {
         "type": "canvas_updated",
-        "version": new_version,
+        "version": result["version"],
         "op": "full_rebuild",
     })
 
     return CommandResponse(
-        text=f"Canvas reorganized: {len(items)} items + {len(objects)} objects, all cleaned up.",
+        text=f"Canvas reorganized: {len(items)} items + {len(objects)} objects.",
         intent="canvas",
-        canvas_update={"version": new_version, "action": "reload"},
+        canvas_update={"version": result["version"], "action": "reload"},
     )
 
 
@@ -765,8 +721,22 @@ async def _handle_settings(action: str, params: dict, ctx: dict) -> CommandRespo
             ws = await repo.get_workspace(workspace_id, owner_id=owner_id)
             if ws:
                 bg = "#0e0e1a" if theme == "dark" else "#ffffff"
-                canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
-                scene, new_version = _rebuild_and_version(canvas_ctx, theme=theme, background=bg)
+
+                # Use structural rebuild
+                stored = await repo.get_canvas(workspace_id)
+                items = await repo.get_items_for_workspace(workspace_id, owner_id)
+                placements = await repo.get_placements(workspace_id)
+                objects = await repo.get_canvas_objects(workspace_id)
+                managed_ids = canvas_renderer.collect_managed_ids(items, objects)
+                user_drawn = canvas_renderer.extract_user_drawn(
+                    stored["scene"].get("elements", []), managed_ids,
+                )
+
+                scene = canvas_renderer.build_scene(
+                    items, placements, objects, user_drawn,
+                    theme=theme, background=bg,
+                )
+                new_version = stored["version"] + 1
 
                 await repo.save_canvas(workspace_id, scene, new_version,
                                        theme=theme, background=bg)

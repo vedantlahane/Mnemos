@@ -95,8 +95,12 @@ async def _on_item_ready(event: Event):
         placements = await repo.get_placements(workspace_id)
         objects = await repo.get_canvas_objects(workspace_id)
         stored = await repo.get_canvas(workspace_id)
+        managed_ids = canvas_renderer.collect_managed_ids(
+            await repo.get_items_for_workspace(workspace_id, owner_id),
+            objects,
+        )
         user_drawn = canvas_renderer.extract_user_drawn(
-            stored["scene"].get("elements", []),
+            stored["scene"].get("elements", []), managed_ids,
         )
 
         # Find best related item for near-placement
@@ -110,7 +114,6 @@ async def _on_item_ready(event: Event):
                     near_id = other
                     break
 
-        # Smart placement — column-aware, gap-detecting
         placement = find_placement(
             placements=placements,
             objects=objects,
@@ -119,37 +122,25 @@ async def _on_item_ready(event: Event):
             near_item_id=near_id,
         )
 
-        # Save placement (source of truth for position)
         await repo.upsert_placement(
             workspace_id, item_id,
             placement["x"], placement["y"],
             settings.card_w, settings.card_h,
         )
 
-        # Rebuild scene from source of truth
-        items = await repo.get_items_for_workspace(workspace_id, owner_id)
-        placements = await repo.get_placements(workspace_id)
-        objects = await repo.get_canvas_objects(workspace_id)
+        # Use structural rebuild
+        from app.services.sync import handle_structural_rebuild
+        result = await handle_structural_rebuild(workspace_id, owner_id)
 
-        scene = canvas_renderer.build_scene(
-            items, placements, objects, user_drawn,
-            theme=stored.get("theme", "dark"),
-            background=stored.get("background", "#0e0e1a"),
-        )
-
-        new_version = stored["version"] + 1
-        await repo.save_canvas(workspace_id, scene, new_version)
         await repo.log_op(
-            workspace_id, new_version, "card_placed",
-            actor="ai", data={"item_id": item_id,
-                              "x": placement["x"], "y": placement["y"]},
+            workspace_id, result["version"], "card_placed",
+            actor="ai", data={"item_id": item_id},
         )
 
-        # Notify frontend
         from app.services.broadcaster import broadcaster
         await broadcaster.notify(workspace_id, {
             "type": "canvas_updated",
-            "version": new_version,
+            "version": result["version"],
             "op": "card_placed",
             "item_id": item_id,
         })

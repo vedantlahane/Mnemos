@@ -1,14 +1,12 @@
 // === FILE: frontend/src/lib/constants.ts ===
 
-export const SYNC_DEBOUNCE_MS = 2000
+export const SYNC_DEBOUNCE_MS = 2500   // was 2000 — slightly more breathing room
 export const SSE_RECONNECT_MS = 3000
 export const MAX_CHAT_CONTEXT = 10
 
 // ── Canvas column model ──
-// Think of the canvas as a vertical document with fixed-width content area.
-// Everything lives within this column. No horizontal scroll, no zoom.
 export const CANVAS_CONTENT_WIDTH = 800
-export const CANVAS_COLUMN_X = 0        // Left edge in canvas coordinates
+export const CANVAS_COLUMN_X = 0
 export const CANVAS_COLUMN_CENTER = CANVAS_COLUMN_X + CANVAS_CONTENT_WIDTH / 2
 
 export interface Command {
@@ -17,23 +15,40 @@ export interface Command {
   label: string
   description: string
   icon: import("@/components/shared/Icon").IconName
-  category: "navigate" | "capture" | "search" | "system"
+  category: "navigate" | "capture" | "canvas" | "search" | "system"
 }
 
 export const COMMANDS: Command[] = [
-  { id: "boards",    slash: "/boards",    label: "Boards",         description: "List all boards",         icon: "boards",   category: "navigate" },
-  { id: "items",     slash: "/items",     label: "Items",          description: "List all items",          icon: "note",     category: "navigate" },
-  { id: "remember",  slash: "/remember",  label: "Remember",       description: "Save a note or thought",  icon: "note",     category: "capture" },
-  { id: "board",     slash: "/board",     label: "New Board",      description: "Create a new board",      icon: "boards",   category: "capture" },
-  { id: "search",    slash: "/search",    label: "Search",         description: "Find by meaning",         icon: "search",   category: "search" },
-  { id: "settings",  slash: "/settings",  label: "Settings",       description: "Models & preferences",    icon: "settings", category: "system" },
+  // Navigate
+  { id: "boards",    slash: "/boards",    label: "Boards",         description: "List all boards",              icon: "boards",   category: "navigate" },
+  { id: "items",     slash: "/items",     label: "Items",          description: "List all items",               icon: "note",     category: "navigate" },
+  // Capture
+  { id: "remember",  slash: "/remember",  label: "Remember",       description: "Save a note or thought",       icon: "note",     category: "capture" },
+  { id: "board",     slash: "/board",     label: "New Board",      description: "Create a new board",           icon: "boards",   category: "capture" },
+  // Canvas
+  { id: "diagram",   slash: "/diagram",   label: "Diagram",        description: "Draw a diagram on canvas",     icon: "graph",    category: "canvas" },
+  { id: "sticky",    slash: "/sticky",    label: "Sticky Note",    description: "Add a sticky note",            icon: "note",     category: "canvas" },
+  { id: "compose",   slash: "/compose",   label: "Compose",        description: "Write text on canvas",         icon: "sparkles", category: "canvas" },
+  { id: "organize",  slash: "/organize",  label: "Organize",       description: "Clean up & reorganize canvas", icon: "boards",   category: "canvas" },
+  { id: "dark",      slash: "/dark",      label: "Dark Mode",      description: "Switch to dark theme",         icon: "moon",     category: "canvas" },
+  { id: "light",     slash: "/light",     label: "Light Mode",     description: "Switch to light theme",        icon: "sun",      category: "canvas" },
+  // Search
+  { id: "search",    slash: "/search",    label: "Search",         description: "Find by meaning",              icon: "search",   category: "search" },
+  // System
+  { id: "settings",  slash: "/settings",  label: "Settings",       description: "Models & preferences",         icon: "settings", category: "system" },
 ]
 
 export const COMMAND_TO_MESSAGE: Record<string, string> = {
   "/boards":    "show boards",
   "/items":     "show cards",
-  "/remember":  "remember ",
+  "/remember":  "remember ",        // trailing space = needs input
   "/board":     "create board ",
+  "/diagram":   "draw diagram ",
+  "/sticky":    "add sticky ",
+  "/compose":   "write about ",
+  "/organize":  "organize page",
+  "/dark":      "dark mode",
+  "/light":     "light mode",
   "/search":    "search for ",
   "/settings":  "open settings",
 }
@@ -41,6 +56,7 @@ export const COMMAND_TO_MESSAGE: Record<string, string> = {
 export const CATEGORY_LABELS: Record<string, string> = {
   navigate: "Navigate",
   capture: "Capture",
+  canvas: "Canvas",
   search: "Search",
   system: "System",
 }

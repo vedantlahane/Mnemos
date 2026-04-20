@@ -7,11 +7,11 @@ import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/ty
 import { useCanvas } from "@/hooks/useCanvas"
 import { useAppStore } from "@/store"
 import { EmptyCanvas } from "./EmptyCanvas"
-import {
-  CANVAS_CONTENT_WIDTH,
-  CANVAS_COLUMN_CENTER,
-} from "@/lib/constants"
+import { CANVAS_CONTENT_WIDTH, CANVAS_COLUMN_CENTER } from "@/lib/constants"
 import { lockCanvas, isCanvasLocked, unlockCanvas } from "@/lib/canvasLock"
+import { sanitizeElements } from "@/lib/sanitizeScene"
+
+const FIXED_ZOOM = 1
 
 function computeLockedScrollX(): number {
   return window.innerWidth / 2 - CANVAS_COLUMN_CENTER
@@ -22,133 +22,162 @@ export function Canvas() {
   const { scene, onSceneChange } = useCanvas()
 
   const wrapperRef = useRef<HTMLDivElement>(null)
-  const excalidrawAPIRef = useRef<any>(null)
-  const hasCentered = useRef<string | null>(null)
-  const lockedScrollXRef = useRef(computeLockedScrollX())
+  const apiRef = useRef<any>(null)
+  const centeredFor = useRef<string | null>(null)
+  const scrollXRef = useRef(computeLockedScrollX())
 
-  // ── Derive theme from scene ──
-  const sceneTheme = useMemo(() => {
-    return scene?.appState?.theme === "light" ? "light" : "dark"
-  }, [scene?.appState?.theme])
+  // Track desired scrollY so we can allow vertical scroll
+  const scrollYRef = useRef(0)
 
-  const setExcalidrawAPI = useCallback((api: any) => {
-    if (excalidrawAPIRef.current !== api) {
-      excalidrawAPIRef.current = api
+  const theme = useMemo(
+    () => (scene?.appState?.theme === "light" ? "light" : "dark"),
+    [scene?.appState?.theme],
+  )
+
+  const setApi = useCallback((api: any) => {
+    if (apiRef.current !== api) {
+      apiRef.current = api
       ;(window as any).excalidrawAPI = api
     }
   }, [])
 
+  // ── LAYER 1: Block zoom/horizontal at native DOM level ──
+  // This fires BEFORE Excalidraw's internal handlers
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+
+    // Block ALL zoom gestures
+    const blockZoom = (e: WheelEvent) => {
+      // Ctrl/Meta + wheel = zoom → block completely
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        return
+      }
+      // Shift + wheel = horizontal scroll → block
+      if (e.shiftKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        return
+      }
+      // Trackpad horizontal swipe → block
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) + 1) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+        return
+      }
+      // Allow vertical scroll through (Excalidraw handles it as scrollY)
+    }
+
+    // Block pinch zoom
+    const blockPinch = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+      }
+    }
+
+    // Block keyboard zoom
+    const blockKeyZoom = (e: KeyboardEvent) => {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key === "+" || e.key === "-" || e.key === "=" || e.key === "0")
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
+      }
+    }
+
+    // Block gesture events (Safari trackpad)
+    const blockGesture = (e: Event) => {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+    }
+
+    // Use capture phase to fire BEFORE Excalidraw
+    el.addEventListener("wheel", blockZoom, { passive: false, capture: true })
+    el.addEventListener("touchmove", blockPinch, { passive: false, capture: true })
+    el.addEventListener("keydown", blockKeyZoom, { capture: true })
+    el.addEventListener("gesturestart", blockGesture, { capture: true })
+    el.addEventListener("gesturechange", blockGesture, { capture: true })
+    el.addEventListener("gestureend", blockGesture, { capture: true })
+
+    return () => {
+      el.removeEventListener("wheel", blockZoom, true)
+      el.removeEventListener("touchmove", blockPinch, true)
+      el.removeEventListener("keydown", blockKeyZoom, true)
+      el.removeEventListener("gesturestart", blockGesture, true)
+      el.removeEventListener("gesturechange", blockGesture, true)
+      el.removeEventListener("gestureend", blockGesture, true)
+    }
+  }, [])
+
+  // ── Window resize → recenter ──
   useEffect(() => {
     const onResize = () => {
-      lockedScrollXRef.current = computeLockedScrollX()
-      const api = excalidrawAPIRef.current
-      if (api) {
-        lockCanvas(200)
-        api.updateScene({
-          appState: { scrollX: lockedScrollXRef.current, zoom: { value: 1 as any } },
-        })
-      }
+      scrollXRef.current = computeLockedScrollX()
+      const api = apiRef.current
+      if (!api) return
+      lockCanvas(200)
+      api.updateScene({
+        appState: {
+          scrollX: scrollXRef.current,
+          zoom: { value: FIXED_ZOOM as any },
+        },
+      })
     }
     window.addEventListener("resize", onResize)
     return () => window.removeEventListener("resize", onResize)
   }, [])
 
+  // ── Cleanup on workspace switch ──
   useEffect(() => {
     return () => {
       unlockCanvas()
-      hasCentered.current = null
+      centeredFor.current = null
     }
   }, [workspace?.id])
 
-  // ── Block ALL zoom and horizontal scroll at the DOM level ──
+  // ── Center content on first load ──
   useEffect(() => {
-    const el = wrapperRef.current
-    if (!el) return
+    if (!scene || !apiRef.current || !workspace) return
+    if (centeredFor.current === workspace.id) return
 
-    const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault()
-        e.stopPropagation()
-        return
-      }
-      if (e.shiftKey) {
-        e.preventDefault()
-        e.stopPropagation()
-        return
-      }
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) + 1) {
-        e.preventDefault()
-        e.stopPropagation()
-        return
-      }
-    }
-
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length > 1) {
-        e.preventDefault()
-      }
-    }
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "+" || e.key === "-" || e.key === "=" || e.key === "0")) {
-        e.preventDefault()
-        e.stopPropagation()
-      }
-    }
-
-    el.addEventListener("wheel", onWheel, { passive: false, capture: true })
-    el.addEventListener("touchmove", onTouchMove, { passive: false })
-    el.addEventListener("keydown", onKeyDown, { capture: true })
-    return () => {
-      el.removeEventListener("wheel", onWheel, true)
-      el.removeEventListener("touchmove", onTouchMove)
-      el.removeEventListener("keydown", onKeyDown, true)
-    }
-  }, [])
-
-  // ── Center content after scene loads ──
-  useEffect(() => {
-    if (!scene || !excalidrawAPIRef.current || !workspace) return
-    if (hasCentered.current === workspace.id) return
-
-    const api = excalidrawAPIRef.current
+    const api = apiRef.current
     const t = setTimeout(() => {
-      try {
-        lockedScrollXRef.current = computeLockedScrollX()
-        lockCanvas(500)
-        api.updateScene({
-          appState: {
-            zoom: { value: 1 as any },
-            scrollX: lockedScrollXRef.current,
-            scrollY: 0,
-          },
-        })
-        hasCentered.current = workspace.id
-      } catch {
-        // Excalidraw not ready
-      }
-    }, 300)
-
+      scrollXRef.current = computeLockedScrollX()
+      scrollYRef.current = 0
+      lockCanvas(500)
+      api.updateScene({
+        appState: {
+          zoom: { value: FIXED_ZOOM as any },
+          scrollX: scrollXRef.current,
+          scrollY: 0,
+        },
+      })
+      centeredFor.current = workspace.id
+    }, 250)
     return () => clearTimeout(t)
   }, [scene, workspace?.id])
 
-  // ── Update theme when it changes (from settings toggle) ──
+  // ── Push theme/background when they change ──
   useEffect(() => {
-    const api = excalidrawAPIRef.current
+    const api = apiRef.current
     if (!api || !scene) return
-
     const bg = scene.appState?.viewBackgroundColor
-    if (bg) {
-      lockCanvas(300)
-      api.updateScene({
-        appState: {
-          theme: sceneTheme,
-          viewBackgroundColor: bg,
-        },
-      })
-    }
-  }, [sceneTheme, scene?.appState?.viewBackgroundColor])
+    if (!bg) return
+    lockCanvas(300)
+    api.updateScene({
+      appState: { theme, viewBackgroundColor: bg },
+    })
+  }, [theme, scene?.appState?.viewBackgroundColor])
 
+  // ── LAYER 2: Correct in onChange (catches anything DOM blocking missed) ──
   const handleChange = useCallback(
     (
       elements: readonly OrderedExcalidrawElement[],
@@ -157,54 +186,95 @@ export function Canvas() {
     ) => {
       if (isCanvasLocked()) return
 
-      const api = excalidrawAPIRef.current
-      const corrections: Record<string, unknown> = {}
-      let needsCorrection = false
+      const api = apiRef.current
+      if (!api) return
 
-      if (appState.zoom?.value !== 1) {
-        corrections.zoom = { value: 1 as any }
-        needsCorrection = true
+      const fixes: Record<string, unknown> = {}
+      let needsFix = false
+
+      // FORCE zoom to 1 — this is the critical fix
+      const currentZoom = appState.zoom?.value ?? 1
+      if (Math.abs(currentZoom - FIXED_ZOOM) > 0.001) {
+        fixes.zoom = { value: FIXED_ZOOM as any }
+        needsFix = true
       }
 
-      const targetScrollX = lockedScrollXRef.current
-      const currentScrollX = appState.scrollX ?? 0
-      if (Math.abs(currentScrollX - targetScrollX) > 3) {
-        corrections.scrollX = targetScrollX
-        needsCorrection = true
+      // FORCE horizontal scroll to locked position
+      const targetX = scrollXRef.current
+      const currentX = appState.scrollX ?? 0
+      if (Math.abs(currentX - targetX) > 2) {
+        fixes.scrollX = targetX
+        needsFix = true
       }
 
-      if (needsCorrection && api) {
-        lockCanvas(150)
-        api.updateScene({ appState: corrections })
-        return
+      // Track vertical scroll (this is allowed)
+      scrollYRef.current = appState.scrollY ?? 0
+
+      if (needsFix) {
+        lockCanvas(100)
+        api.updateScene({ appState: fixes })
+        return // don't sync correction frames
       }
 
+      // Everything is within constraints → pass to sync
       onSceneChange(elements, appState as unknown as Record<string, unknown>)
     },
     [onSceneChange],
   )
 
+  // ── LAYER 3: Periodic enforcement (catches edge cases like focus changes) ──
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const api = apiRef.current
+      if (!api || isCanvasLocked()) return
+
+      try {
+        const state = api.getAppState?.()
+        if (!state) return
+
+        const zoom = state.zoom?.value ?? 1
+        const scrollX = state.scrollX ?? 0
+        const targetX = scrollXRef.current
+
+        if (Math.abs(zoom - FIXED_ZOOM) > 0.01 || Math.abs(scrollX - targetX) > 5) {
+          lockCanvas(100)
+          api.updateScene({
+            appState: {
+              zoom: { value: FIXED_ZOOM as any },
+              scrollX: targetX,
+            },
+          })
+        }
+      } catch {
+        // API not ready
+      }
+    }, 500) // Check every 500ms
+
+    return () => clearInterval(interval)
+  }, [])
+
+  // ── Build initial data ──
   const initialData = useMemo(() => {
-    if (!scene || !scene.elements) return null
-    const safeElements = scene.elements.filter(
-      (el: any) =>
-        el.x !== null &&
-        el.x !== undefined &&
-        el.y !== null &&
-        el.y !== undefined,
+    if (!scene?.elements) return null
+
+    const elements = sanitizeElements(
+      scene.elements.filter(
+        (el: any) => el.x != null && el.y != null,
+      ) as any,
     )
+
     return {
-      elements: JSON.parse(JSON.stringify(safeElements)),
+      elements: JSON.parse(JSON.stringify(elements)),
       files: scene.files ? JSON.parse(JSON.stringify(scene.files)) : undefined,
       appState: {
-        zoom: { value: 1 as any },
+        zoom: { value: FIXED_ZOOM as any },
         scrollX: computeLockedScrollX(),
         scrollY: 0,
-        theme: sceneTheme as any,
+        theme: theme as any,
         viewBackgroundColor: scene.appState?.viewBackgroundColor ?? "#0e0e1a",
       },
     }
-  }, [scene, sceneTheme])
+  }, [scene, theme])
 
   const menu = useMemo(
     () => (
@@ -229,43 +299,32 @@ export function Canvas() {
     )
   }
 
-  // Gutter colors adapt to theme
-  const gutterBg = sceneTheme === "light"
-    ? "rgba(0, 0, 0, 0.04)"
-    : "rgba(0, 0, 0, 0.15)"
-  const gutterBorder = sceneTheme === "light"
-    ? "1px solid rgba(0, 0, 0, 0.06)"
-    : "1px solid rgba(255, 255, 255, 0.03)"
+  const isLight = theme === "light"
+  const gutterBg = isLight ? "rgba(0,0,0,0.03)" : "rgba(0,0,0,0.15)"
+  const gutterBorder = isLight
+    ? "1px solid rgba(0,0,0,0.05)"
+    : "1px solid rgba(255,255,255,0.03)"
+  const gutterWidth = `calc(50% - ${CANVAS_CONTENT_WIDTH / 2}px)`
 
   return (
     <div className="w-full h-full relative canvas-lock" ref={wrapperRef}>
-      {/* Left gutter */}
+      {/* Left gutter — pointer-events: none lets clicks through to canvas beneath */}
       <div
-        className="absolute top-0 bottom-0 pointer-events-none z-10"
-        style={{
-          left: 0,
-          width: `calc(50% - ${CANVAS_CONTENT_WIDTH / 2}px)`,
-          background: gutterBg,
-          borderRight: gutterBorder,
-        }}
+        className="absolute top-0 bottom-0 left-0 pointer-events-none z-10"
+        style={{ width: gutterWidth, background: gutterBg, borderRight: gutterBorder }}
       />
       {/* Right gutter */}
       <div
-        className="absolute top-0 bottom-0 pointer-events-none z-10"
-        style={{
-          right: 0,
-          width: `calc(50% - ${CANVAS_CONTENT_WIDTH / 2}px)`,
-          background: gutterBg,
-          borderLeft: gutterBorder,
-        }}
+        className="absolute top-0 bottom-0 right-0 pointer-events-none z-10"
+        style={{ width: gutterWidth, background: gutterBg, borderLeft: gutterBorder }}
       />
 
       <Excalidraw
-        key={`${workspace.id}-${sceneTheme}`}
+        key={`${workspace.id}-${theme}`}
         initialData={initialData ?? undefined}
-        excalidrawAPI={setExcalidrawAPI}
+        excalidrawAPI={setApi}
         onChange={handleChange}
-        theme={sceneTheme}
+        theme={theme}
         langCode="en"
         gridModeEnabled={false}
         viewModeEnabled={false}

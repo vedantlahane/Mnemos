@@ -6,10 +6,11 @@ import { debounce } from "@/lib/utils"
 import { SYNC_DEBOUNCE_MS, SSE_RECONNECT_MS } from "@/lib/constants"
 import { useAppStore, useCanvasStore } from "@/store"
 import { lockCanvas, isCanvasLocked } from "@/lib/canvasLock"
+import { sanitizeScene } from "@/lib/sanitizeScene"
 import type { ExcalidrawScene, SSEEvent } from "@/api/types"
 
 export function useCanvas() {
-  const activeWorkspace = useAppStore((s) => s.activeWorkspace)
+  const workspace = useAppStore((s) => s.activeWorkspace)
 
   const version = useCanvasStore((s) => s.version)
   const scene = useCanvasStore((s) => s.scene)
@@ -26,53 +27,54 @@ export function useCanvas() {
 
   const wsIdRef = useRef<string | null>(null)
   const loadingRef = useRef(false)
-  const lastSyncTimestamp = useRef(0)
+  const lastSyncTs = useRef(0)
+  const errorCount = useRef(0)
+  const pausedUntil = useRef(0)
 
-  // ── Error backoff state ──
-  const syncErrorCount = useRef(0)
-  const syncPaused = useRef(false)
-
-  // Reset error state when workspace changes
   useEffect(() => {
-    syncErrorCount.current = 0
-    syncPaused.current = false
-  }, [activeWorkspace?.id])
+    errorCount.current = 0
+    pausedUntil.current = 0
+  }, [workspace?.id])
 
-  // ── Load scene (initial + reload) ──
+  // ── Push scene to Excalidraw (only when server sends a rebuild) ──
+  const pushToExcalidraw = useCallback((sceneData: ExcalidrawScene) => {
+    const safe = sanitizeScene(sceneData)
+    setScene(safe)
+
+    const excalidrawApi = (window as any).excalidrawAPI
+    if (excalidrawApi && safe.elements) {
+      const elements = safe.elements.filter(
+        (el: any) => el.x != null && el.y != null,
+      )
+      lockCanvas(1200) // Longer lock for structural rebuilds
+      excalidrawApi.updateScene({
+        elements: JSON.parse(JSON.stringify(elements)),
+      })
+    }
+    return safe
+  }, [setScene])
+
+  // ── Load scene from server (initial load + structural reloads) ──
   const loadScene = useCallback(
-    async (updateExcalidraw = false) => {
-      if (!activeWorkspace || loadingRef.current) return
+    async (pushToCanvas = false) => {
+      if (!workspace || loadingRef.current) return
       loadingRef.current = true
 
       try {
-        const data = await api.canvas.getScene(activeWorkspace.id)
+        const data = await api.canvas.getScene(workspace.id)
+        const safe = sanitizeScene(data.scene)
 
-        setScene(data.scene)
+        setScene(safe)
         setVersion(data.version)
         versionRef.current = data.version
+        errorCount.current = 0
+        pausedUntil.current = 0
 
-        // Clear error state on success
-        syncErrorCount.current = 0
-        syncPaused.current = false
-
-        if (updateExcalidraw) {
-          const apiObj = (window as any).excalidrawAPI
-          if (apiObj && data.scene?.elements) {
-            const safeElements = data.scene.elements.filter(
-              (el: any) =>
-                el.x !== null &&
-                el.x !== undefined &&
-                el.y !== null &&
-                el.y !== undefined,
-            )
-            lockCanvas(800)
-            apiObj.updateScene({
-              elements: JSON.parse(JSON.stringify(safeElements)),
-            })
-          }
+        if (pushToCanvas) {
+          pushToExcalidraw(safe)
         }
       } catch (err: any) {
-        console.error("Failed to load scene:", err)
+        console.error("Scene load failed:", err)
         if (err?.status === 404) {
           useAppStore.getState().setActiveWorkspace(null)
         }
@@ -80,128 +82,80 @@ export function useCanvas() {
         loadingRef.current = false
       }
     },
-    [activeWorkspace, setScene, setVersion],
+    [workspace, setScene, setVersion, pushToExcalidraw],
   )
 
-  // ── Initial load on workspace change ──
+  // ── Initial load ──
   useEffect(() => {
-    if (!activeWorkspace) {
-      reset()
-      return
-    }
+    if (!workspace) { reset(); return }
     loadScene(false)
-  }, [activeWorkspace?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspace?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Reload when chat triggers it ──
+  // ── Reload when chat requests it (structural change) ──
   useEffect(() => {
-    if (reloadRequested > 0 && activeWorkspace) {
+    if (reloadRequested > 0 && workspace) {
       loadScene(true)
     }
   }, [reloadRequested]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Debounced sync with error handling ──
-  const pendingSceneRef = useRef<ExcalidrawScene | null>(null)
+  // ── Debounced sync — ONLY saves positions, doesn't overwrite canvas ──
+  const pendingRef = useRef<ExcalidrawScene | null>(null)
 
   const debouncedSync = useMemo(
     () =>
       debounce(async () => {
-        const sceneToSync = pendingSceneRef.current
-        if (!activeWorkspace || !sceneToSync || isCanvasLocked()) return
-
-        // Stop syncing if too many errors (server probably down)
-        if (syncPaused.current) return
+        const toSync = pendingRef.current
+        if (!workspace || !toSync) return
+        if (isCanvasLocked()) return
+        if (Date.now() < pausedUntil.current) return
 
         setSyncing(true)
-        lastSyncTimestamp.current = Date.now()
+        lastSyncTs.current = Date.now()
 
         try {
           const result = await api.canvas.sync(
-            activeWorkspace.id,
+            workspace.id,
             versionRef.current,
-            sceneToSync,
+            toSync,
           )
 
-          if (result.status === "full_reload" && result.scene) {
-            lockCanvas(800)
-            setScene(result.scene)
-            const apiObj = (window as any).excalidrawAPI
-            if (apiObj && result.scene.elements) {
-              const safeElements = result.scene.elements.filter(
-                (el: any) =>
-                  el.x !== null &&
-                  el.x !== undefined &&
-                  el.y !== null &&
-                  el.y !== undefined,
-              )
-              apiObj.updateScene({
-                elements: JSON.parse(JSON.stringify(safeElements)),
-              })
-            }
-          } else if (result.status === "ok" && result.scene) {
-            // ── NEW: Apply corrected scene from sync ──
-            // Backend rebuilt the scene to deduplicate managed elements,
-            // so we should apply it to prevent stale state (e.g., duplicated text)
-            setScene(result.scene)
-            const apiObj = (window as any).excalidrawAPI
-            if (apiObj && result.scene.elements) {
-              const safeElements = result.scene.elements.filter(
-                (el: any) =>
-                  el.x !== null &&
-                  el.x !== undefined &&
-                  el.y !== null &&
-                  el.y !== undefined,
-              )
-              apiObj.updateScene({
-                elements: JSON.parse(JSON.stringify(safeElements)),
-              })
-            }
+          // KEY CHANGE: Only update Excalidraw if server sent a scene back
+          // (which only happens on full_reload, NOT on position-only syncs)
+          if (result.scene) {
+            pushToExcalidraw(result.scene)
           }
 
+          // Always update version
           markSynced(result.version)
           versionRef.current = result.version
-          lastSyncTimestamp.current = Date.now()
-
-          // Reset error count on success
-          syncErrorCount.current = 0
+          errorCount.current = 0
         } catch (err: any) {
-          syncErrorCount.current += 1
+          errorCount.current++
+          setSyncing(false)
 
-          // 404 = workspace gone → stop everything
           if (err?.status === 404) {
-            syncPaused.current = true
+            pausedUntil.current = Infinity
             useAppStore.getState().setActiveWorkspace(null)
-            setSyncing(false)
             return
           }
 
-          // After 3 consecutive failures, pause syncing for 10s
-          if (syncErrorCount.current >= 3) {
-            console.warn(
-              `Sync failed ${syncErrorCount.current} times, pausing for 10s`,
-            )
-            syncPaused.current = true
-            setTimeout(() => {
-              syncPaused.current = false
-              syncErrorCount.current = 0
-            }, 10_000)
+          if (errorCount.current >= 3) {
+            console.warn("Sync paused after 3 failures")
+            pausedUntil.current = Date.now() + 15_000
+            errorCount.current = 0
           }
-
-          setSyncing(false)
         }
       }, SYNC_DEBOUNCE_MS),
-    [activeWorkspace?.id, setSyncing, markSynced, setScene], // eslint-disable-line react-hooks/exhaustive-deps
+    [workspace?.id, setSyncing, markSynced, pushToExcalidraw], // eslint-disable-line
   )
 
-  /** Called from Excalidraw onChange — MUST be lightweight */
+  // ── onChange — lightweight, just queues for sync ──
   const onSceneChange = useCallback(
-    (
-      elements: readonly unknown[],
-      appState: Record<string, unknown>,
-    ) => {
+    (elements: readonly unknown[], appState: Record<string, unknown>) => {
       if (isCanvasLocked()) return
-      if (syncPaused.current) return
+      if (Date.now() < pausedUntil.current) return
 
-      pendingSceneRef.current = {
+      pendingRef.current = {
         elements: elements as ExcalidrawScene["elements"],
         appState: appState as ExcalidrawScene["appState"],
         files: {},
@@ -212,55 +166,57 @@ export function useCanvas() {
     [setDirty, debouncedSync],
   )
 
-  // ── SSE subscription ──
+  // ── SSE — only reload on structural changes from OTHER clients ──
   useEffect(() => {
-    if (!activeWorkspace) return
+    if (!workspace) return
 
-    const wsId = activeWorkspace.id
+    const wsId = workspace.id
     wsIdRef.current = wsId
     let unsub: (() => void) | undefined
     let reconnectTimer: ReturnType<typeof setTimeout>
-    let reconnectAttempts = 0
+    let attempts = 0
 
     const connect = () => {
       unsub = api.canvas.subscribe(
         wsId,
         (event: SSEEvent) => {
-          // Reset reconnect counter on successful message
-          reconnectAttempts = 0
+          attempts = 0
 
-          if (
-            (event.type === "canvas_updated" || event.type === "stream_end") &&
-            event.version &&
-            event.version > versionRef.current
-          ) {
-            const msSinceSync = Date.now() - lastSyncTimestamp.current
-            if (msSinceSync < 3000) return
-            loadScene(true)
+          if (event.type === "canvas_updated" && event.version) {
+            // Skip if WE caused this (our sync just completed)
+            if (Date.now() - lastSyncTs.current < 4000) return
+
+            // Skip position-only changes from other users
+            if (event.op === "user_move" || event.op === "user_sync") return
+
+            // Structural change (card_placed, diagram_added, theme_changed, etc.)
+            if (event.version > versionRef.current) {
+              loadScene(true)
+            }
+          }
+
+          if (event.type === "stream_end" && event.version) {
+            if (event.version > versionRef.current) {
+              loadScene(true)
+            }
           }
         },
         () => {
-          // Exponential backoff on reconnect (max 30s)
-          if (wsIdRef.current === wsId) {
-            reconnectAttempts++
-            const delay = Math.min(
-              SSE_RECONNECT_MS * Math.pow(1.5, reconnectAttempts - 1),
-              30_000,
-            )
-            reconnectTimer = setTimeout(connect, delay)
-          }
+          if (wsIdRef.current !== wsId) return
+          attempts++
+          const delay = Math.min(SSE_RECONNECT_MS * 2 ** (attempts - 1), 30_000)
+          reconnectTimer = setTimeout(connect, delay)
         },
       )
     }
 
     connect()
-
     return () => {
       wsIdRef.current = null
       unsub?.()
       clearTimeout(reconnectTimer)
     }
-  }, [activeWorkspace?.id, loadScene])
+  }, [workspace?.id, loadScene])
 
   return { scene, version, loadScene, onSceneChange }
 }

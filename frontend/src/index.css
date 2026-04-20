@@ -254,40 +254,52 @@
     backdrop-filter: blur(20px) !important;
   }
 
-  /* ─── Canvas lock: vertical-only notebook ─── */
+  /* ─── NUCLEAR zoom kill ─── */
   .canvas-lock .excalidraw {
     touch-action: pan-y !important;
   }
 
-  /* Kill ALL zoom UI */
+  /* Hide ALL zoom UI completely */
   .canvas-lock .excalidraw .zoom-actions,
-  .canvas-lock .excalidraw .zoom-actions-wrapper,
-  .canvas-lock .excalidraw .layer-ui__wrapper__footer-left,
   .canvas-lock .excalidraw [class*="zoom"],
-  .canvas-lock .excalidraw button[title="Zoom in"],
-  .canvas-lock .excalidraw button[title="Zoom out"],
-  .canvas-lock .excalidraw button[title="Reset zoom"],
   .canvas-lock .excalidraw [class*="Zoom"],
-  .canvas-lock .excalidraw .footer-center {
+  .canvas-lock .excalidraw .layer-ui__wrapper__footer-left,
+  .canvas-lock .excalidraw .footer-center,
+  .canvas-lock .excalidraw .scroll-back-to-content,
+  .canvas-lock .excalidraw .undo-redo-buttons,
+  .canvas-lock .excalidraw .help-icon {
     display: none !important;
-    pointer-events: none !important;
     visibility: hidden !important;
     width: 0 !important;
     height: 0 !important;
     overflow: hidden !important;
+    pointer-events: none !important;
+    position: absolute !important;
+    clip: rect(0,0,0,0) !important;
   }
 
-  /* Hide the scroll-back-to-content button (we control scroll) */
-  .canvas-lock .excalidraw .scroll-back-to-content {
-    display: none !important;
+  /* Toolbar stays above gutters */
+  .canvas-lock .excalidraw .layer-ui__wrapper__top-right,
+  .canvas-lock .excalidraw .App-toolbar-container {
+    z-index: 20 !important;
   }
 
-  /* Prevent cursor change to grab/pan outside content area */
-  .canvas-lock .excalidraw canvas {
+  /* Dropdowns/menus above everything */
+  .canvas-lock .excalidraw .popover,
+  .canvas-lock .excalidraw .context-menu,
+  .canvas-lock .excalidraw .dropdown-menu-container,
+  .canvas-lock .excalidraw .color-picker,
+  .canvas-lock .excalidraw .color-picker-content {
+    z-index: 200 !important;
+  }
+
+  /* Text editor above overlay */
+  .canvas-lock .excalidraw .excalidraw-textEditorContainer {
+    z-index: 200 !important;
+  }
+
+  /* Default cursor in empty areas */
+  .canvas-lock .excalidraw .interactive.canvas {
     cursor: default !important;
-  }
-  .canvas-lock .excalidraw .selected canvas,
-  .canvas-lock .excalidraw canvas:active {
-    cursor: auto !important;
   }
 }

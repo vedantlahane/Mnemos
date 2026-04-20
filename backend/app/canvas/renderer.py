@@ -1,16 +1,17 @@
 # === FILE: backend/app/canvas/renderer.py ===
 
 """
-Scene Manager — single authority for all scene reads/writes.
-Every mutation goes through here. Handles normalization, versioning, and op logging.
+Scene builder — single authority for all scene reads/writes.
+Every canvas mutation goes through here.
+Terminology: "scene" = Excalidraw JSON, "workspace" = board.
 """
 
 from __future__ import annotations
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from app.canvas.constants import DEFAULT_SCENE, THEME_COLORS
-from app.canvas.factory import ElementFactory, _luminance
+from app.canvas.factory import ElementFactory, _luminance, reset_index_counter
 from app.canvas.text_measure import measure_text
 from app.canvas import layout as diagram_layout
 from app.core.config import settings
@@ -18,10 +19,14 @@ from app.core.config import settings
 logger = logging.getLogger("mnemos.scene")
 
 
+# ══════════════════════════════════════
+# Scene helpers
+# ══════════════════════════════════════
+
 def normalize_scene(scene: dict | None) -> dict:
-    """Ensure scene has all required structure."""
     if not scene or not isinstance(scene, dict):
-        return {**DEFAULT_SCENE}
+        return {**DEFAULT_SCENE, "elements": [], "files": {},
+                "appState": {**DEFAULT_SCENE["appState"]}}
 
     elements = scene.get("elements")
     if not isinstance(elements, list):
@@ -59,7 +64,6 @@ def get_background(scene: dict) -> str:
 
 
 def find_elements_by_custom(scene: dict, key: str, value: Any) -> list[dict]:
-    """Find elements where customData[key] == value."""
     return [
         el for el in scene.get("elements", [])
         if isinstance(el.get("customData"), dict)
@@ -76,7 +80,6 @@ def find_element_by_id(scene: dict, element_id: str) -> dict | None:
 
 
 def remove_elements_by_custom(scene: dict, key: str, value: Any) -> list[str]:
-    """Remove elements matching custom data filter. Returns removed IDs."""
     removed = []
     kept = []
     for el in scene.get("elements", []):
@@ -89,28 +92,9 @@ def remove_elements_by_custom(scene: dict, key: str, value: Any) -> list[str]:
     return removed
 
 
-def get_all_element_ids(scene: dict) -> set[str]:
-    return {el["id"] for el in scene.get("elements", []) if not el.get("isDeleted")}
-
-
-def get_occupied_rects(scene: dict) -> list[dict]:
-    """Get bounding rectangles of all non-deleted elements."""
-    rects = []
-    for el in scene.get("elements", []):
-        if el.get("isDeleted"):
-            continue
-        x = el.get("x", 0)
-        y = el.get("y", 0)
-        w = el.get("width", 0)
-        h = el.get("height", 0)
-        if w > 0 and h > 0:
-            rects.append({"x": x, "y": y, "width": w, "height": h})
-    return rects
-
-
 def compute_bounds(scene: dict) -> dict:
-    """Compute bounding box of all elements."""
-    elements = [el for el in scene.get("elements", []) if not el.get("isDeleted") and el.get("x") is not None]
+    elements = [el for el in scene.get("elements", [])
+                if not el.get("isDeleted") and el.get("x") is not None]
     if not elements:
         return {"minX": 0, "minY": 0, "maxX": 1920, "maxY": 1080}
     return {
@@ -138,7 +122,6 @@ def compute_density(scene: dict) -> str:
 
 
 def detect_layout_pattern(scene: dict) -> str:
-    """Detect layout pattern from element positions."""
     elements = [
         el for el in scene.get("elements", [])
         if el.get("type") in ("rectangle", "text", "ellipse", "diamond")
@@ -152,37 +135,14 @@ def detect_layout_pattern(scene: dict) -> str:
     x_range = max(xs) - min(xs) if xs else 0
     y_range = max(ys) - min(ys) if ys else 0
 
-    x_clusters = _alignment_clusters(xs, tolerance=50)
-    y_clusters = _alignment_clusters(ys, tolerance=50)
-
-    if len(x_clusters) >= 2 and len(y_clusters) >= 2:
-        grid_score = min(len(x_clusters), len(y_clusters)) / max(len(x_clusters), len(y_clusters))
-        if grid_score > 0.4:
-            return "grid"
-
-    if x_range > 3 * max(y_range, 1) and len(elements) >= 3:
-        return "timeline"
-    if y_range > 3 * max(x_range, 1) and len(elements) >= 3:
+    if y_range > 3 * max(x_range, 1):
         return "flow"
-
+    if x_range > 3 * max(y_range, 1):
+        return "timeline"
     return "freeform"
 
 
-def _alignment_clusters(values: list[float], tolerance: float = 50) -> list[float]:
-    if not values:
-        return []
-    sorted_v = sorted(values)
-    clusters = [[sorted_v[0]]]
-    for v in sorted_v[1:]:
-        if v - clusters[-1][-1] <= tolerance:
-            clusters[-1].append(v)
-        else:
-            clusters.append([v])
-    return [sum(c) / len(c) for c in clusters if len(c) >= 2]
-
-
 def extract_palette(scene: dict) -> list[str]:
-    """Extract dominant colors from scene."""
     from collections import Counter
     colors = Counter()
     for el in scene.get("elements", []):
@@ -195,17 +155,28 @@ def extract_palette(scene: dict) -> list[str]:
     return [c for c, _ in colors.most_common(8)]
 
 
-class SceneManager:
+# ══════════════════════════════════════
+# Managed element type registry
+# ══════════════════════════════════════
+
+MANAGED_TYPES = frozenset({
+    "note-frame", "note-accent", "note-title", "note-summary", "note-tags",
+    "sticky-bg", "sticky-text",
+    "composed-text",
+    "diagram-node", "diagram-label", "diagram-arrow", "diagram-edge-label",
+})
+
+
+class SceneBuilder:
     """
-    High-level scene operations.
-    All scene mutations go through here.
+    Builds and manages Excalidraw scenes from source-of-truth tables.
+    Single instance — import as `scene_builder`.
     """
 
     def __init__(self):
         self._factory_cache: dict[str, ElementFactory] = {}
 
     def factory(self, scene_or_theme) -> ElementFactory:
-        """Get element factory with correct theme for this scene."""
         if isinstance(scene_or_theme, str):
             theme = scene_or_theme
         else:
@@ -214,6 +185,10 @@ class SceneManager:
             self._factory_cache[theme] = ElementFactory(theme=theme)
         return self._factory_cache[theme]
 
+    # ──────────────────────────────────
+    # Position extraction (Excalidraw → DB)
+    # ──────────────────────────────────
+
     def extract_position_changes(
         self,
         incoming_elements: list[dict],
@@ -221,15 +196,12 @@ class SceneManager:
         current_objects: list[dict] = None,
     ) -> tuple[list[dict], list[dict]]:
         """
-        User may have dragged items around. Extract POSITION changes only.
-        
-        CRITICAL: Never extract 'content' from Excalidraw's text property — 
-        it contains wrapped text from measure_text() and would corrupt the 
-        original content in the DB (double-wrapping on each sync cycle).
+        Extract POSITION-only changes from user drags.
+        NEVER reads text content from Excalidraw (avoids double-wrapping).
         """
         item_changes = []
         obj_changes = []
-        curr_map = {p["item_id"]: p for p in current_placements}
+        place_map = {p["item_id"]: p for p in current_placements}
         obj_map = {str(o["id"]): o for o in (current_objects or [])}
 
         for el in incoming_elements:
@@ -240,161 +212,98 @@ class SceneManager:
                 continue
 
             ctype = custom.get("type")
+            new_x = el.get("x", 0)
+            new_y = el.get("y", 0)
+            new_w = el.get("width", 0)
+            new_h = el.get("height", 0)
 
-            # ── Note card frames → update canvas_placements ──
             if ctype == "note-frame":
                 item_id = custom.get("noteId")
                 if not item_id:
                     continue
-                new_x, new_y = el.get("x", 0), el.get("y", 0)
-                new_w, new_h = el.get("width", 0), el.get("height", 0)
-                curr = curr_map.get(item_id)
-                if not curr or abs(curr["x"] - new_x) > 1 or abs(curr["y"] - new_y) > 1 \
-                        or abs(curr["w"] - new_w) > 1 or abs(curr.get("h", 0) - new_h) > 1:
+                curr = place_map.get(item_id)
+                if not curr:
+                    continue
+                if (abs(curr["x"] - new_x) > 2 or abs(curr["y"] - new_y) > 2
+                        or abs(curr["w"] - new_w) > 2 or abs(curr.get("h", 0) - new_h) > 2):
                     item_changes.append({
                         "item_id": item_id,
                         "x": new_x, "y": new_y, "w": new_w, "h": new_h,
                     })
 
-            # ── Composed text → update position ONLY (never content) ──
             elif ctype == "composed-text":
                 obj_id = str(el.get("id", ""))
-                if not obj_id:
-                    continue
-                import uuid
-                try:
-                    uuid.UUID(obj_id)
-                except ValueError:
-                    continue
-
-                new_x, new_y = el.get("x", 0), el.get("y", 0)
-                new_w, new_h = el.get("width", 0), el.get("height", 0)
                 curr = obj_map.get(obj_id)
-
-                # Only detect POSITION changes — never touch content
                 if not curr:
-                    continue  # unknown object, skip
-                if abs(curr.get("x", 0) - new_x) > 1 or abs(curr.get("y", 0) - new_y) > 1:
+                    continue
+                if abs(curr.get("x", 0) - new_x) > 2 or abs(curr.get("y", 0) - new_y) > 2:
                     obj_changes.append({
                         "obj_id": obj_id,
-                        "x": new_x, "y": new_y,
-                        "w": new_w, "h": new_h,
-                        # NO content here — that's the fix
+                        "x": new_x, "y": new_y, "w": new_w, "h": new_h,
                     })
 
-            # ── Sticky notes → update position, optionally content from text child ──
             elif ctype == "sticky-bg":
-                obj_id = custom.get("stickyId")
-                if not obj_id:
-                    continue
-                obj_id = str(obj_id)
-                import uuid
-                try:
-                    uuid.UUID(obj_id)
-                except ValueError:
-                    continue
-
-                new_x, new_y = el.get("x", 0), el.get("y", 0)
-                new_w, new_h = el.get("width", 0), el.get("height", 0)
-
-                # For stickies, content comes from the paired text element
-                content = None
-                text_id = f"{obj_id}-text"
-                for text_el in incoming_elements:
-                    if text_el.get("id") == text_id and not text_el.get("isDeleted"):
-                        content = text_el.get("originalText") or text_el.get("text", "")
-                        break
-
+                obj_id = str(custom.get("stickyId", ""))
                 curr = obj_map.get(obj_id)
-                changed = False
                 if not curr:
-                    continue  # unknown object, skip
-                if abs(curr.get("x", 0) - new_x) > 1 or abs(curr.get("y", 0) - new_y) > 1:
-                    changed = True
-                # Only update content if user actually edited the sticky text
-                if content is not None and content != (curr.get("content") or ""):
-                    changed = True
-
-                if changed:
-                    update_dict = {
+                    continue
+                if abs(curr.get("x", 0) - new_x) > 2 or abs(curr.get("y", 0) - new_y) > 2:
+                    obj_changes.append({
                         "obj_id": obj_id,
                         "x": new_x, "y": new_y, "w": new_w, "h": new_h,
-                    }
-                    if content is not None and content != (curr.get("content") or ""):
-                        update_dict["content"] = content
-                    obj_changes.append(update_dict)
+                    })
 
         return item_changes, obj_changes
 
-    def extract_user_drawn(self, elements: list[dict], managed_ids: set[str] = None) -> list[dict]:
-        """
-        Extract elements drawn by user (not managed by system via build_scene).
-        
-        Two-layer filter:
-        1. Filter by customData.type (semantic)
-        2. Filter by element ID if we know the managed IDs (exact match)
-        """
+    # ──────────────────────────────────
+    # User-drawn element extraction
+    # ──────────────────────────────────
+
+    def extract_user_drawn(
+        self,
+        elements: list[dict],
+        managed_ids: set[str] = None,
+    ) -> list[dict]:
         kept = []
-        managed_types = {
-            "note-frame", "note-accent", "note-title", "note-summary", "note-tags",
-            "sticky-bg", "sticky-text",
-            "composed-text",
-            "diagram-node", "diagram-label", "diagram-arrow", "diagram-edge-label",
-        }
         skip_ids = managed_ids or set()
 
         for el in elements:
             if el.get("isDeleted"):
                 continue
-
-            el_id = el.get("id", "")
-
-            # Skip by known managed ID
-            if el_id and el_id in skip_ids:
+            eid = el.get("id", "")
+            if eid in skip_ids:
                 continue
-
-            # Skip by customData type
             custom = el.get("customData")
-            if isinstance(custom, dict):
-                t = custom.get("type")
-                if t in managed_types:
-                    continue
-
+            if isinstance(custom, dict) and custom.get("type") in MANAGED_TYPES:
+                continue
             kept.append(el)
         return kept
 
-    def _collect_managed_ids(self, items: list[dict], objects: list[dict]) -> set[str]:
-        """
-        Compute ALL element IDs that build_scene will generate.
-        Used to definitively filter them from user_drawn.
-        """
+    def collect_managed_ids(
+        self,
+        items: list[dict],
+        objects: list[dict],
+    ) -> set[str]:
         ids = set()
-
         for item in items:
-            note_id = item["id"]
+            nid = item["id"]
             ids.update({
-                f"note-frame-{note_id}",
-                f"note-accent-{note_id}",
-                f"note-title-{note_id}",
-                f"note-summary-{note_id}",
-                f"note-tags-{note_id}",
+                f"note-frame-{nid}", f"note-accent-{nid}",
+                f"note-title-{nid}", f"note-summary-{nid}", f"note-tags-{nid}",
             })
-
         for obj in objects:
-            obj_id = str(obj.get("id", ""))
+            oid = str(obj.get("id", ""))
             kind = obj.get("kind")
-
             if kind == "text":
-                ids.add(obj_id)  # composed text uses obj UUID as element ID
-
+                ids.add(oid)
             elif kind == "sticky":
-                ids.add(f"{obj_id}-bg")
-                ids.add(f"{obj_id}-text")
-
-            # Diagram element IDs are generated dynamically by layout_diagram,
-            # so we can't precompute them. They're caught by customData filter.
-
+                ids.add(f"{oid}-bg")
+                ids.add(f"{oid}-text")
         return ids
+
+    # ──────────────────────────────────
+    # Full scene build (source of truth → Excalidraw)
+    # ──────────────────────────────────
 
     def build_scene(
         self,
@@ -403,223 +312,134 @@ class SceneManager:
         objects: list[dict],
         user_drawn: list[dict],
         theme: str = "dark",
-        background: str = "#0e0e1a",
+        background: str = None,
     ) -> dict:
-        """
-        Get the full rendered scene for a workspace.
-        REBUILDS from source-of-truth tables every time.
-        Deduplicates by element ID — managed elements always win.
-        """
-        scene = normalize_scene(None)
-        scene = self.set_theme(scene, theme)
-        scene = self.set_background(scene, background)
+        reset_index_counter()
 
-        # ── Compute managed IDs to definitively filter user_drawn ──
-        managed_ids = self._collect_managed_ids(items, objects)
+        bg = background or ("#0e0e1a" if theme == "dark" else "#ffffff")
+        scene: dict = {
+            "elements": [],
+            "appState": {"viewBackgroundColor": bg, "theme": theme},
+            "files": {},
+        }
 
-        # ── Filter user_drawn against managed IDs ──
-        clean_user_drawn = []
+        managed_ids = self.collect_managed_ids(items, objects)
+
+        # 1. User-drawn elements (filtered against managed)
         for el in user_drawn:
-            el_id = el.get("id", "")
-            if el_id in managed_ids:
-                continue  # this element will be recreated by build_scene
-            # Also check customData type as a backup
+            eid = el.get("id", "")
+            if eid in managed_ids:
+                continue
             custom = el.get("customData")
-            if isinstance(custom, dict):
-                ctype = custom.get("type", "")
-                if ctype in {
-                    "note-frame", "note-accent", "note-title",
-                    "note-summary", "note-tags",
-                    "sticky-bg", "sticky-text",
-                    "composed-text",
-                    "diagram-node", "diagram-label",
-                    "diagram-arrow", "diagram-edge-label",
-                }:
-                    continue
-            clean_user_drawn.append(el)
+            if isinstance(custom, dict) and custom.get("type") in MANAGED_TYPES:
+                continue
+            scene["elements"].append(el)
 
-        scene["elements"].extend(clean_user_drawn)
-
-        # ── Render canvas objects (text, stickies, diagrams) ──
+        # 2. Canvas objects (text, stickies, diagrams)
+        col_width = settings.sheet_width - settings.sheet_margin * 2
         for obj in objects:
             kind = obj.get("kind")
             data = obj.get("meta") or {}
             content = obj.get("content") or ""
-
-            x = obj.get("x")
-            y = obj.get("y")
-            x = x if x is not None else 0
-            y = y if y is not None else 0
-
-            w = obj.get("w")
-            w = w if w is not None else 500
+            x = float(obj.get("x") or 0)
+            y = float(obj.get("y") or 0)
+            w = float(obj.get("w") or 500)
 
             if kind == "sticky":
-                self.add_sticky(scene, content, x, y,
-                                bg_color=data.get("color", "#fef08a"),
-                                id=str(obj.get("id")))
+                self._add_sticky(scene, content, x, y,
+                                 bg_color=data.get("color", "#fef08a"),
+                                 sticky_id=str(obj.get("id")))
             elif kind == "text":
-                col_width = settings.sheet_width - settings.sheet_margin * 2
-                self.add_text(scene, content, x, y,
-                              max_width=min(w, col_width),
-                              element_id=str(obj.get("id")))
+                self._add_text(scene, content, x, y,
+                               max_width=min(w, col_width),
+                               element_id=str(obj.get("id")))
             elif kind == "diagram":
-                # Rebuild diagram from stored topology
                 topology = data.get("topology")
                 if topology:
-                    self._rebuild_diagram(scene, topology, x, y, w, obj)
+                    self._add_diagram(scene, topology, x, y, w)
 
-        # ── Render note cards from placements ──
-        placement_map = {p["item_id"]: p for p in placements}
+        # 3. Note cards
+        place_map = {p["item_id"]: p for p in placements}
         for item in items:
-            p = placement_map.get(item["id"])
+            p = place_map.get(item["id"])
             if not p:
                 continue
-            self.upsert_note_card(scene, item, p["x"], p["y"], p.get("w"), p.get("h"))
+            self._upsert_note_card(
+                scene, item, p["x"], p["y"], p.get("w"), p.get("h"),
+            )
 
-        # ── FINAL SAFETY: deduplicate by element ID ──
-        # If somehow the same ID appears twice, the LAST one wins
-        # (managed elements are added after user_drawn, so they win)
-        seen_ids = {}
-        deduped = []
+        # 4. Deduplicate — last element with a given ID wins
+        seen: dict[str, int] = {}
+        final = []
         for el in scene["elements"]:
-            el_id = el.get("id")
-            if el_id:
-                if el_id in seen_ids:
-                    # Replace the earlier element
-                    deduped[seen_ids[el_id]] = None  # mark for removal
-                seen_ids[el_id] = len(deduped)
-            deduped.append(el)
-
-        scene["elements"] = [el for el in deduped if el is not None]
+            eid = el.get("id")
+            if eid and eid in seen:
+                final[seen[eid]] = None  # type: ignore
+            if eid:
+                seen[eid] = len(final)
+            final.append(el)
+        scene["elements"] = [el for el in final if el is not None]
 
         return scene
 
-    def _rebuild_diagram(self, scene: dict, topology: dict,
-                         x: float, y: float, w: float, obj: dict):
-        """Rebuild diagram elements from stored topology at stored position."""
-        from app.canvas.layout import layout_diagram
+    # ── Internal builders ──
 
+    def _upsert_note_card(self, scene, note, x, y, width=None, height=None):
+        w = width or settings.card_w
+        h = height or settings.card_h
+        f = self.factory(scene)
+        remove_elements_by_custom(scene, "noteId", note["id"])
+        elements, _ = f.note_card(note, x, y, w, h)
+        scene["elements"].extend(elements)
+
+    def _add_text(self, scene, text, x, y, *, max_width=500, element_id=None):
+        f = self.factory(scene)
+        bg = get_background(scene)
+        color = f.contrast_text_color(bg)
+        col_width = settings.sheet_width - settings.sheet_margin * 2
+        el = f.text(
+            text, x, y,
+            id=element_id,
+            font_size=16, max_width=min(max_width, col_width),
+            color=color,
+            custom_data={"type": "composed-text"},
+        )
+        scene["elements"].append(el)
+
+    def _add_sticky(self, scene, content, x, y, bg_color="#fef08a", sticky_id=None):
+        f = self.factory(scene)
+        elements, _ = f.sticky_note(content, x, y, bg_color=bg_color, id=sticky_id)
+        scene["elements"].extend(elements)
+
+    def _add_diagram(self, scene, topology, x, y, w):
         f = self.factory(scene)
         col_width = settings.sheet_width - settings.sheet_margin * 2
         max_w = min(w, col_width) if w and w > 0 else col_width
 
-        elements, bbox = layout_diagram(topology, 0, 0, f, max_width=max_w)
-
+        elements, bbox = diagram_layout.layout_diagram(
+            topology, 0, 0, f, max_width=max_w,
+        )
         if not elements:
             return
 
-        # Center the diagram within the column
-        diagram_w = bbox["width"]
-        if diagram_w < col_width:
-            target_x = settings.sheet_margin + (col_width - diagram_w) / 2
+        # Center diagram in column
+        diag_w = bbox["width"]
+        if diag_w < col_width:
+            target_x = settings.sheet_margin + (col_width - diag_w) / 2
         else:
             target_x = x if x else settings.sheet_margin
 
         dx = target_x - bbox["x"]
         dy = y - bbox["y"]
-
         for el in elements:
             el["x"] = el.get("x", 0) + dx
             el["y"] = el.get("y", 0) + dy
 
         scene["elements"].extend(elements)
 
-    # ── Note card operations ──
+    # ── Diagram wrapper for handlers ──
 
-    def upsert_note_card(
-        self,
-        scene: dict,
-        note: dict,
-        x: float, y: float,
-        width: float = None,
-        height: float = None,
-    ) -> tuple[dict, list[str]]:
-        w = width or settings.card_w
-        h = height or settings.card_h
-        note_id = note["id"]
-        f = self.factory(scene)
-
-        removed = remove_elements_by_custom(scene, "noteId", note_id)
-        elements, group_id = f.note_card(note, x, y, w, h)
-        scene["elements"].extend(elements)
-        element_ids = [el["id"] for el in elements]
-
-        return scene, element_ids
-
-    def remove_note_card(self, scene: dict, note_id: str) -> tuple[dict, list[str]]:
-        removed = remove_elements_by_custom(scene, "noteId", note_id)
-        return scene, removed
-
-    def update_note_card_content(self, scene: dict, note: dict) -> dict:
-        note_id = note["id"]
-        f = self.factory(scene)
-
-        title_el = find_element_by_id(scene, f"note-title-{note_id}")
-        if title_el:
-            new_title = note.get("title") or "Untitled"
-            m = measure_text(new_title, font_size=18, font_family=1, max_width=336, max_lines=2)
-            f.update_element(title_el, text=m["wrapped_text"], originalText=new_title,
-                             width=m["width"], height=m["height"])
-
-        summary_el = find_element_by_id(scene, f"note-summary-{note_id}")
-        if summary_el:
-            new_summary = note.get("summary") or note.get("raw_text", "")
-            m = measure_text(new_summary, font_size=13, font_family=1, max_width=336, max_lines=6)
-            f.update_element(summary_el, text=m["wrapped_text"], originalText=new_summary,
-                             width=m["width"], height=m["height"])
-
-        tags_el = find_element_by_id(scene, f"note-tags-{note_id}")
-        if tags_el:
-            tag_text = "  ".join(f"#{t}" for t in (note.get("tags") or []))
-            m = measure_text(tag_text, font_size=11, font_family=3, max_width=336, max_lines=1)
-            f.update_element(tags_el, text=m["wrapped_text"], originalText=tag_text,
-                             width=m["width"], height=m["height"])
-
-        return scene
-
-    # ── Text operations ──
-
-    def add_text(
-        self,
-        scene: dict,
-        text: str,
-        x: float, y: float,
-        *,
-        font_size: int = 16,
-        max_width: float = 500,
-        element_id: str = None,
-        color: str = None,
-    ) -> tuple[dict, dict, str]:
-        f = self.factory(scene)
-        bg = get_background(scene)
-        text_color = color or f.contrast_text_color(bg)
-
-        # Clamp max_width to column width
-        col_width = settings.sheet_width - settings.sheet_margin * 2
-        effective_max_width = min(max_width, col_width)
-
-        el = f.text(
-            text, x, y,
-            id=element_id,
-            font_size=font_size, max_width=effective_max_width,
-            color=text_color,
-            custom_data={"type": "composed-text"},
-        )
-        scene["elements"].append(el)
-
-        measurement = {"width": el["width"], "height": el["height"]}
-        return scene, measurement, el["id"]
-
-    # ── Diagram operations ──
-
-    def add_diagram(
-        self,
-        scene: dict,
-        topology: dict,
-        x: float, y: float,
-        max_width: float = None,
-    ) -> tuple[dict, dict]:
+    def add_diagram(self, scene, topology, x, y, max_width=None):
         f = self.factory(scene)
         col_width = settings.sheet_width - settings.sheet_margin * 2
         elements, bbox = diagram_layout.layout_diagram(
@@ -628,81 +448,32 @@ class SceneManager:
         scene["elements"].extend(elements)
         return scene, bbox
 
-    # ── Sticky notes ──
+    def add_sticky(self, scene, content, x, y, bg_color="#fef08a", id=None):
+        self._add_sticky(scene, content, x, y, bg_color=bg_color, sticky_id=id)
+        return scene, "ok"
 
-    def add_sticky(
-        self,
-        scene: dict,
-        content: str,
-        x: float, y: float,
-        bg_color: str = "#fef08a",
-        id: str = None,
-    ) -> tuple[dict, str]:
-        f = self.factory(scene)
-        elements, group_id = f.sticky_note(content, x, y, bg_color=bg_color, id=id)
-        scene["elements"].extend(elements)
-        return scene, group_id
+    def add_text(self, scene, text, x, y, *, font_size=16, max_width=500,
+                 element_id=None, color=None):
+        self._add_text(scene, text, x, y, max_width=max_width, element_id=element_id)
+        el = scene["elements"][-1]
+        return scene, {"width": el["width"], "height": el["height"]}, el["id"]
 
-    # ── Background / theme ──
-
-    def set_background(self, scene: dict, color: str) -> dict:
-        app_state = scene.setdefault("appState", {})
-        app_state["viewBackgroundColor"] = color
-        app_state["theme"] = "dark" if _luminance(color) < 0.4 else "light"
-        self._factory_cache.clear()
-        return scene
+    # ── Theme ──
 
     def set_theme(self, scene: dict, theme: str) -> dict:
-        app_state = scene.setdefault("appState", {})
-        app_state["theme"] = theme
-        app_state["viewBackgroundColor"] = (
-            "#0e0e1a" if theme == "dark" else "#ffffff"
-        )
+        bg = "#0e0e1a" if theme == "dark" else "#ffffff"
+        scene.setdefault("appState", {})
+        scene["appState"]["theme"] = theme
+        scene["appState"]["viewBackgroundColor"] = bg
         self._factory_cache.clear()
         return scene
 
-    # ── Bulk operations ──
-
-    def move_elements(
-        self,
-        scene: dict,
-        element_ids: list[str],
-        dx: float, dy: float,
-    ) -> dict:
-        f = self.factory(scene)
-        id_set = set(element_ids)
-        for el in scene.get("elements", []):
-            if el.get("id") in id_set:
-                f.move_element(el, el.get("x", 0) + dx, el.get("y", 0) + dy)
+    def set_background(self, scene: dict, color: str) -> dict:
+        scene.setdefault("appState", {})
+        scene["appState"]["viewBackgroundColor"] = color
+        scene["appState"]["theme"] = "dark" if _luminance(color) < 0.4 else "light"
+        self._factory_cache.clear()
         return scene
-
-    def delete_elements(self, scene: dict, element_ids: list[str]) -> dict:
-        f = self.factory(scene)
-        id_set = set(element_ids)
-        for el in scene.get("elements", []):
-            if el.get("id") in id_set:
-                f.delete_element(el)
-        return scene
-
-    def shift_elements_below(
-        self,
-        scene: dict,
-        after_y: float,
-        shift_amount: float,
-        exclude_ids: set[str] = None,
-    ) -> list[str]:
-        exclude = exclude_ids or set()
-        f = self.factory(scene)
-        shifted = []
-        for el in scene.get("elements", []):
-            if el.get("isDeleted"):
-                continue
-            if el.get("id") in exclude:
-                continue
-            if el.get("y", 0) > after_y:
-                f.update_element(el, y=el["y"] + shift_amount)
-                shifted.append(el["id"])
-        return shifted
 
     # ── Analysis ──
 
@@ -714,8 +485,15 @@ class SceneManager:
             "density": compute_density(scene),
             "bounds": compute_bounds(scene),
             "palette": extract_palette(scene),
-            "element_count": len([e for e in scene.get("elements", []) if not e.get("isDeleted")]),
+            "element_count": len([e for e in scene.get("elements", [])
+                                  if not e.get("isDeleted")]),
         }
 
 
-scene_manager = SceneManager()
+# ── Singleton ──
+scene_builder = SceneBuilder()
+
+# Backward-compatible aliases (remove these once all imports updated)
+scene_manager = scene_builder
+canvas_renderer = scene_builder
+SceneManager = SceneBuilder
