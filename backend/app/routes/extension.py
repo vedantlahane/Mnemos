@@ -2,7 +2,7 @@
 
 """
 Endpoints consumed by the Chrome extension.
-All AI-automated: capture → extract → embed → route → place.
+All AI-automated: capture → extract → embed → route → place as text block.
 """
 
 from fastapi import APIRouter, Depends
@@ -37,29 +37,27 @@ class ContextRequest(BaseModel):
 @router.post("/capture")
 async def capture(payload: CaptureRequest,
                   user_id: str = Depends(get_optional_user_id)):
-    """
-    Extension sends highlighted text / manual capture here.
-    AI pipeline handles everything: extract → embed → route → place on canvas.
-    """
     source_text = payload.text.strip()
     if payload.custom_command:
         source_text = f"{payload.custom_command}\n\n{source_text}"
 
+    resolved_title = payload.source_title or payload.page_title or None
+
     item = await repo.create_item(
         source_text=source_text,
         source_url=payload.source_url or None,
-        source_title=payload.source_title or payload.page_title or None,
+        source_title=resolved_title,
         source_type="extension",
         owner_id=user_id,
         status="pending",
     )
 
-    # Fire event — full AI pipeline runs async:
-    #   extract structured data → generate embedding → find connections
-    #   → route to best workspace (or create new one) → place on canvas
+    # Pass ALL source context in the event — avoids re-fetching in capture.py
     await bus.emit(Event(ITEM_CREATED, {
         "item_id": item["id"],
         "source_text": source_text,
+        "source_title": resolved_title,
+        "source_url": payload.source_url or None,
         "board_hint": payload.page_hint,
         "workspace_id": None,  # AI decides
         "owner_id": user_id,
@@ -71,25 +69,18 @@ async def capture(payload: CaptureRequest,
 @router.post("/context")
 async def check_context(payload: ContextRequest,
                         user_id: str = Depends(get_optional_user_id)):
-    """
-    Extension checks if the current page has related notes.
-    Returns related items for the badge count + popup display.
-    """
     query = payload.text[:1000] if payload.text else payload.url
     if not query or not query.strip():
         return {"related_notes": []}
 
     try:
         results = await search_svc.semantic_search(
-            query=query,
-            owner_id=user_id,
-            limit=5,
-            threshold=0.55,
+            query=query, owner_id=user_id,
+            limit=5, threshold=0.55,
         )
 
         related = []
         for r in results:
-            # Find which workspace this item is on
             workspaces = await repo.get_workspaces_for_item(r["id"])
             page_name = workspaces[0]["display_name"] if workspaces else "Inbox"
 
@@ -109,7 +100,6 @@ async def check_context(payload: ContextRequest,
 
 @router.get("/pages")
 async def list_pages(user_id: str = Depends(get_optional_user_id)):
-    """Extension popup needs workspace list for the 'Save to' dropdown."""
     workspaces = await repo.list_workspaces(owner_id=user_id)
     pages = []
     for ws in workspaces:
@@ -126,7 +116,6 @@ async def list_pages(user_id: str = Depends(get_optional_user_id)):
 @router.get("/notes")
 async def list_notes(page: int = 1, limit: int = 20,
                      user_id: str = Depends(get_optional_user_id)):
-    """Extension fetches recent notes."""
     result = await repo.list_items(owner_id=user_id, page=page, limit=limit)
     notes = [
         {

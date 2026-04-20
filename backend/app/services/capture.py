@@ -3,9 +3,10 @@
 """
 Item processing pipeline.
 Listens to ITEM_CREATED events.
-Extract → Embed → Route → Place on canvas.
+Extract → Embed → Route → Place as TEXT BLOCK on canvas.
 
-OPTIMIZED: Edge classification deferred, data passed through pipeline.
+Items live in the knowledge layer (search, embeddings, connections).
+Canvas objects live in the presentation layer (what you see).
 """
 
 from __future__ import annotations
@@ -13,10 +14,10 @@ import asyncio
 import logging
 
 from app.db.repo import repo
-from app.services.placement import find_placement
+from app.services.placement import find_placement_for_size
 from app.canvas import canvas_renderer
 from app.llm import router as llm_router
-from app.core.events import bus, Event, ITEM_CREATED, ITEM_READY, ITEM_PLACED
+from app.core.events import bus, Event, ITEM_CREATED
 from app.core.config import settings
 
 logger = logging.getLogger("mnemos.capture")
@@ -24,25 +25,28 @@ logger = logging.getLogger("mnemos.capture")
 
 def register_handlers():
     bus.on(ITEM_CREATED, _on_item_created)
-    bus.on(ITEM_READY, _on_item_ready)
 
 
 async def _on_item_created(event: Event):
     item_id = event.data["item_id"]
     source_text = event.data["source_text"]
+    source_title = event.data.get("source_title")
+    source_url = event.data.get("source_url")
     board_hint = event.data.get("board_hint")
     workspace_id = event.data.get("workspace_id")
     owner_id = event.data.get("owner_id")
 
     try:
-        # Single fetch for source context — reuse throughout pipeline
-        item_row = await repo.get_item(item_id)
-        source_title = item_row.get("source_title") if item_row else None
-        source_url = item_row.get("source_url") if item_row else None
+        # Fetch source context if not in event data
+        if not source_title or not source_url:
+            item_row = await repo.get_item(item_id)
+            if item_row:
+                source_title = source_title or item_row.get("source_title")
+                source_url = source_url or item_row.get("source_url")
 
         await repo.update_item(item_id, status="processing")
 
-        # 1. Extract structured data (with source context for better titles)
+        # 1. Extract structured metadata (1 LLM call)
         processed = await _extract(
             source_text, owner_id,
             source_title=source_title,
@@ -58,29 +62,30 @@ async def _on_item_created(event: Event):
             content_type=processed.content_type,
         )
 
-        # 2. Generate embedding
+        # 2. Generate embedding (1 API call)
         emb = await _embed(source_text)
         if emb:
             await repo.upsert_embedding(item_id, emb)
 
-        # 3. Lightweight connections — similarity score only, NO LLM calls
-        #    Edge classification runs later as background enrichment
-        near_id = None
+        # 3. Lightweight connections — similarity only, no LLM
         if emb:
-            near_id = await _connect_lightweight(item_id, emb)
+            await _connect_lightweight(item_id, emb)
 
-        # 4. Route to workspace (optimized — avoids N+1 queries)
+        # 4. Route to workspace (1 LLM call only if no hint/workspace)
         ws_id = await _route(item_id, source_text, processed,
                              board_hint, workspace_id, owner_id)
 
         await repo.update_item(item_id, status="ready")
 
-        await bus.emit(Event(ITEM_READY, {
-            "item_id": item_id,
-            "workspace_id": ws_id,
-            "owner_id": owner_id,
-            "near_item_id": near_id,  # pass through to avoid re-fetching
-        }))
+        # 5. Place as TEXT BLOCK on canvas (not a card)
+        if ws_id:
+            await _place_as_text_block(
+                item_id=item_id,
+                title=processed.title,
+                source_text=source_text,
+                workspace_id=ws_id,
+                owner_id=owner_id,
+            )
 
     except Exception as e:
         logger.error(f"Processing failed for {item_id}: {e}", exc_info=True)
@@ -90,83 +95,125 @@ async def _on_item_created(event: Event):
             pass
 
 
-async def _on_item_ready(event: Event):
-    item_id = event.data["item_id"]
-    workspace_id = event.data.get("workspace_id")
-    owner_id = event.data.get("owner_id")
-    near_id = event.data.get("near_item_id")
+# ══════════════════════════════════════
+# Canvas placement — TEXT BLOCK, not card
+# ══════════════════════════════════════
 
-    if not workspace_id:
-        logger.warning(f"Item {item_id} ready but no workspace_id — skipping placement")
-        return
+async def _place_as_text_block(
+    item_id: str,
+    title: str,
+    source_text: str,
+    workspace_id: str,
+    owner_id: str,
+):
+    """
+    Create a canvas_object (kind="text") — the same thing
+    compose/write-about produces. NOT a note card.
+    
+    The item stays in the knowledge layer for search.
+    The canvas_object is what the user sees on the board.
+    """
+    from app.canvas.text_measure import measure_text
+    from app.services.sync import handle_structural_rebuild
+    from app.services.broadcaster import broadcaster
 
-    try:
-        # Parallel fetch — all four queries at once
-        item_fut = repo.get_item(item_id)
-        placements_fut = repo.get_placements(workspace_id)
-        objects_fut = repo.get_canvas_objects(workspace_id)
-        stored_fut = repo.get_canvas(workspace_id)
+    # Format the captured text for canvas display
+    formatted = _format_for_canvas(title, source_text)
 
-        item, placements, objects, stored = await asyncio.gather(
-            item_fut, placements_fut, objects_fut, stored_fut,
-        )
+    col_w = settings.sheet_width - settings.sheet_margin * 2
+    m = measure_text(formatted, font_size=16, font_family=1,
+                     max_width=col_w, max_lines=200)
+    actual_h = m["height"] + 20
 
-        if not item:
-            logger.warning(f"Item {item_id} not found for placement")
-            return
+    # Parallel fetch for placement calculation
+    placements, objects, stored = await asyncio.gather(
+        repo.get_placements(workspace_id),
+        repo.get_canvas_objects(workspace_id),
+        repo.get_canvas(workspace_id),
+    )
 
-        all_items = await repo.get_items_for_workspace(workspace_id)
-        managed_ids = canvas_renderer.collect_managed_ids(all_items, objects)
-        user_drawn = canvas_renderer.extract_user_drawn(
-            stored["scene"].get("elements", []), managed_ids,
-        )
+    all_items = await repo.get_items_for_workspace(workspace_id)
+    managed_ids = canvas_renderer.collect_managed_ids(all_items, objects)
+    user_drawn = canvas_renderer.extract_user_drawn(
+        stored["scene"].get("elements", []), managed_ids,
+    )
 
-        # Measure actual card height
-        from app.canvas.text_measure import measure_text
+    placement = find_placement_for_size(
+        placements=placements,
+        objects=objects,
+        user_elements=user_drawn,
+        width=col_w,
+        height=actual_h,
+    )
 
-        col_w = settings.sheet_width - settings.sheet_margin * 2
-        title = item.get("title") or "Untitled"
-        summary = item.get("summary") or item.get("source_text", "")[:500]
-
-        title_m = measure_text(title, 20, 1, col_w, 2)
-        summary_m = measure_text(summary, 14, 1, col_w, 20)
-        actual_h = title_m["height"] + 12 + summary_m["height"] + 30
-
-        # Use near_id from pipeline (avoids extra DB fetch for connections)
-        placement = find_placement(
-            placements=placements,
-            objects=objects,
-            user_elements=user_drawn,
-            item_size=(col_w, actual_h),
-            near_item_id=near_id,
-        )
-
-        await repo.upsert_placement(
-            workspace_id, item_id,
-            placement["x"], placement["y"],
-            col_w, actual_h,
-        )
-
-        from app.services.sync import handle_structural_rebuild
-        result = await handle_structural_rebuild(workspace_id, owner_id)
-
-        await repo.log_op(
-            workspace_id, result["version"], "card_placed",
-            actor="ai", data={"item_id": item_id},
-        )
-
-        from app.services.broadcaster import broadcaster
-        await broadcaster.notify(workspace_id, {
-            "type": "canvas_updated",
-            "version": result["version"],
-            "op": "card_placed",
+    # Create as text block — same as compose does
+    await repo.create_canvas_object(
+        workspace_id=workspace_id,
+        kind="text",
+        origin="ai",
+        x=placement["x"],
+        y=placement["y"],
+        w=col_w,
+        h=actual_h,
+        content=formatted,
+        meta={
+            "topic": title,
             "item_id": item_id,
-        })
+            "source": "capture",
+        },
+    )
 
-        logger.info(f"Item {item_id} placed at ({placement['x']}, {placement['y']}) h={actual_h}")
+    # NO upsert_placement — item has no card, only a text block
 
-    except Exception as e:
-        logger.error(f"Canvas placement failed for {item_id}: {e}", exc_info=True)
+    # Rebuild scene
+    result = await handle_structural_rebuild(workspace_id, owner_id)
+
+    await repo.log_op(
+        workspace_id, result["version"], "text_placed",
+        actor="ai", data={"item_id": item_id, "topic": title},
+    )
+
+    await broadcaster.notify(workspace_id, {
+        "type": "canvas_updated",
+        "version": result["version"],
+        "op": "text_placed",
+        "item_id": item_id,
+    })
+
+    logger.info(
+        f"Item {item_id} placed as text block at "
+        f"({placement['x']}, {placement['y']}) h={actual_h}"
+    )
+
+
+# ══════════════════════════════════════
+# Text formatting for canvas
+# ══════════════════════════════════════
+
+def _format_for_canvas(title: str, source_text: str) -> str:
+    """
+    Format captured text into a clean text block for the canvas.
+    
+    Produces the same style as compose:
+    - UPPERCASE title header
+    - Clean body text, no markdown
+    - Proper paragraph breaks
+    """
+    from app.services.composition import strip_markdown
+
+    clean = strip_markdown(source_text.strip())
+    header = (title or "").strip().upper()
+
+    # Don't duplicate title if text already starts with it
+    if header:
+        first_line = clean.split("\n")[0].strip().upper()
+        if first_line.startswith(header[:20]) or header.startswith(first_line[:20]):
+            return clean
+
+    if header:
+        return f"{header}\n\n{clean}"
+
+    return clean
 
 
 # ══════════════════════════════════════
@@ -175,7 +222,6 @@ async def _on_item_ready(event: Event):
 
 async def _extract(text: str, owner_id: str = None,
                    source_title: str = None, source_url: str = None):
-    """Extract structured data — passes source context for better titles."""
     try:
         return await llm_router.process_capture(
             text, user_id=owner_id,
@@ -193,7 +239,6 @@ async def _extract(text: str, owner_id: str = None,
             tasks: list[str]
             content_type: str
 
-        # Use source_title as fallback instead of raw text slice
         fallback_title = source_title or text[:60]
         return FallbackCapture(
             title=fallback_title, summary=text[:280],
@@ -212,10 +257,8 @@ async def _embed(text: str) -> list[float] | None:
 
 async def _connect_lightweight(item_id: str, emb: list[float]) -> str | None:
     """
-    Create connections using ONLY vector similarity — no LLM calls.
-    Returns the closest related item ID (for near-placement).
-
-    Edge classification is deferred to background enrichment.
+    Connections using vector similarity only — zero LLM calls.
+    Edge classification can run later as background enrichment.
     """
     best_near = None
     try:
@@ -226,7 +269,7 @@ async def _connect_lightweight(item_id: str, emb: list[float]) -> str | None:
             sim = rel.get("similarity", 0.7)
             await repo.create_connection(
                 from_id=item_id, to_id=rel["id"],
-                rel_type="related",          # default — classified later
+                rel_type="related",
                 label=None,
                 score=sim,
                 created_by="system",
@@ -257,7 +300,6 @@ async def _route(item_id: str, text: str, processed,
     except Exception as e:
         logger.warning(f"Routing failed: {e}")
 
-    # Fallback to inbox
     try:
         inbox = await repo.get_workspace_by_slug("inbox", owner_id=owner_id)
         if inbox:

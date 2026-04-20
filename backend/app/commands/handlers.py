@@ -249,8 +249,10 @@ async def _handle_capture(action: str, params: dict,
     await bus.emit(Event(ITEM_CREATED, {
         "item_id": item["id"],
         "source_text": text,
+        "source_title": None,      # chat captures have no page title
+        "source_url": None,
         "board_hint": board_hint,
-        "workspace_id": workspace_id,
+        "workspace_id": workspace_id,  # route to current board
         "owner_id": owner_id,
     }))
 
@@ -259,7 +261,6 @@ async def _handle_capture(action: str, params: dict,
         intent="capture",
         data={"item_id": item["id"], "status": "processing"},
     )
-
 
 # ═══════════════════════════════════════
 # QUERY / SEARCH

@@ -455,9 +455,10 @@ class ElementFactory:
             group_ids=[group_id],
             custom_data={"noteId": note_id, "type": "note-title"},
         )
-        # FIX: Pin width to content_width — prevents Excalidraw
-        # from using our approximate measurement and overflowing
+        # FIX: Pin width and disable autoResize so Excalidraw 
+        # natively wraps the text perfectly at column boundaries
         title_el["width"] = content_width
+        title_el["autoResize"] = False
 
         # Build summary element
         summary_el = self.text(
@@ -469,8 +470,9 @@ class ElementFactory:
             group_ids=[group_id],
             custom_data={"noteId": note_id, "type": "note-summary"},
         )
-        # FIX: Same — pin to full column width for reliable wrapping
+        # FIX: Same — pin to full column width with autoResize off
         summary_el["width"] = content_width
+        summary_el["autoResize"] = False
 
         elements = [title_el, summary_el]
         return elements, group_id

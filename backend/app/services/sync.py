@@ -1,12 +1,13 @@
 # === FILE: backend/app/services/sync.py ===
 
 """
-Bidirectional canvas sync — redesigned.
+Bidirectional canvas sync.
 
-KEY PRINCIPLE: Don't fight the user.
-- Position-only changes → save to DB, return {status: "ok"}, NO scene push
-- Structural changes (add/remove items) → rebuild + push
-- Full reload only when client is way behind
+KEY PRINCIPLES:
+- Position changes → save to DB quietly
+- Deletions → remove from DB so rebuild doesn't resurrect them
+- Structural changes → rebuild + push
+- Full reload when client is way behind
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ async def handle_sync(
     current_placements = await repo.get_placements(workspace_id)
     current_objects = await repo.get_canvas_objects(workspace_id)
 
+    # ── 1. Detect position changes ──
     try:
         item_changes, obj_changes = canvas_renderer.extract_position_changes(
             incoming_elements, current_placements, current_objects,
@@ -50,7 +52,28 @@ async def handle_sync(
         logger.error(f"Position extraction failed: {e}")
         item_changes, obj_changes = [], []
 
+    # ── 2. Detect deletions ──
+    try:
+        deleted_item_ids, deleted_object_ids = canvas_renderer.extract_deletions(
+            incoming_elements, current_placements, current_objects,
+        )
+    except Exception as e:
+        logger.error(f"Deletion detection failed: {e}")
+        deleted_item_ids, deleted_object_ids = set(), set()
+
+    has_deletions = bool(deleted_item_ids) or bool(deleted_object_ids)
+
+    if has_deletions:
+        logger.info(
+            f"Deletions detected — items: {deleted_item_ids}, "
+            f"objects: {deleted_object_ids}"
+        )
+
+    # ── 3. Apply position changes ──
     for ch in item_changes:
+        # Skip items that are being deleted
+        if ch["item_id"] in deleted_item_ids:
+            continue
         try:
             await repo.upsert_placement(
                 workspace_id, ch["item_id"],
@@ -60,13 +83,73 @@ async def handle_sync(
             logger.error(f"Placement update failed: {e}")
 
     for ch in obj_changes:
+        obj_id = ch.get("obj_id", "")
+        if obj_id in deleted_object_ids:
+            continue
         try:
             oid = ch.pop("obj_id")
             await repo.update_canvas_object(oid, **ch)
         except Exception as e:
             logger.error(f"Object update failed: {e}")
 
-    # Use workspace-level item fetch (no owner filter)
+    # ── 4. Apply deletions to DB ──
+    for item_id in deleted_item_ids:
+        try:
+            await repo.delete_placement(workspace_id, item_id)
+            await repo.unlink_item_from_workspace(workspace_id, item_id)
+            logger.info(f"Deleted placement + unlinked item {item_id}")
+        except Exception as e:
+            logger.error(f"Item deletion failed for {item_id}: {e}")
+
+    for obj_id in deleted_object_ids:
+        try:
+            # Check if this text block links to a captured item
+            obj = next(
+                (o for o in current_objects if str(o["id"]) == obj_id),
+                None,
+            )
+            if obj:
+                meta = obj.get("meta") or {}
+                linked_item_id = meta.get("item_id")
+                if linked_item_id and meta.get("source") == "capture":
+                    # Also unlink the captured item from this workspace
+                    await repo.unlink_item_from_workspace(
+                        workspace_id, linked_item_id,
+                    )
+                    logger.info(f"Unlinked captured item {linked_item_id}")
+
+            await repo.delete_canvas_object(obj_id)
+            logger.info(f"Deleted canvas object {obj_id}")
+        except Exception as e:
+            logger.error(f"Object deletion failed for {obj_id}: {e}")
+
+    # ── 5. Decide response ──
+    if has_deletions:
+        # Structural change → full rebuild so scene is clean
+        result = await handle_structural_rebuild(workspace_id, owner_id)
+
+        await repo.log_op(
+            workspace_id, result["version"], "user_delete",
+            actor="user",
+            data={
+                "deleted_items": list(deleted_item_ids),
+                "deleted_objects": list(deleted_object_ids),
+            },
+        )
+
+        await broadcaster.publish(workspace_id, {
+            "type": "canvas_updated",
+            "version": result["version"],
+            "op": "user_delete",
+        })
+
+        return {
+            "status": "rebuilt",
+            "version": result["version"],
+            "scene": result["scene"],
+        }
+
+    # No deletions — just save positions
     items = await repo.get_items_for_workspace(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
     managed_ids = canvas_renderer.collect_managed_ids(items, objects)
@@ -78,7 +161,9 @@ async def handle_sync(
         new_version = server_version + 1
         scene_to_save = {
             "elements": incoming_elements,
-            "appState": incoming_scene.get("appState", stored["scene"].get("appState", {})),
+            "appState": incoming_scene.get(
+                "appState", stored["scene"].get("appState", {}),
+            ),
             "files": incoming_scene.get("files", {}),
         }
         await repo.save_canvas(workspace_id, scene_to_save, new_version)
@@ -87,7 +172,9 @@ async def handle_sync(
     else:
         scene_to_save = {
             "elements": incoming_elements,
-            "appState": incoming_scene.get("appState", stored["scene"].get("appState", {})),
+            "appState": incoming_scene.get(
+                "appState", stored["scene"].get("appState", {}),
+            ),
             "files": incoming_scene.get("files", {}),
         }
         await repo.save_canvas(workspace_id, scene_to_save, server_version)
@@ -98,13 +185,8 @@ async def handle_structural_rebuild(
     workspace_id: str,
     owner_id: str = None,
 ) -> dict:
-    """
-    Called when something structural changes.
-    Uses workspace-level item fetch (no owner filter).
-    """
     stored = await repo.get_canvas(workspace_id)
 
-    # FIX: Don't pass owner_id — get ALL items linked to this workspace
     items = await repo.get_items_for_workspace(workspace_id)
     placements = await repo.get_placements(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
@@ -131,7 +213,6 @@ async def handle_structural_rebuild(
 
 
 async def _full_reload(workspace_id: str, owner_id: str, stored: dict) -> dict:
-    # FIX: Don't filter by owner
     items = await repo.get_items_for_workspace(workspace_id)
     placements = await repo.get_placements(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)

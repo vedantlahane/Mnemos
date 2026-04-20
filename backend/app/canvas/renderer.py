@@ -303,6 +303,69 @@ class SceneBuilder:
         return ids
 
     # ──────────────────────────────────
+    # Deletion detection (Excalidraw → DB)
+    # ──────────────────────────────────
+
+    def extract_deletions(
+        self,
+        incoming_elements: list[dict],
+        current_placements: list[dict],
+        current_objects: list[dict],
+    ) -> tuple[set[str], set[str]]:
+        """
+        Scan incoming elements for soft-deleted managed elements.
+        Returns (deleted_item_ids, deleted_object_ids).
+        
+        When user deletes a note card / text block / sticky / diagram
+        in Excalidraw, we need to remove the corresponding DB record
+        so it doesn't come back on rebuild.
+        """
+        deleted_item_ids: set[str] = set()
+        deleted_object_ids: set[str] = set()
+
+        # What exists in DB right now
+        placed_item_ids = {p["item_id"] for p in (current_placements or [])}
+        object_ids = {str(o["id"]) for o in (current_objects or [])}
+
+        for el in incoming_elements:
+            if not el.get("isDeleted"):
+                continue
+
+            custom = el.get("customData")
+            if not isinstance(custom, dict):
+                continue
+
+            ctype = custom.get("type", "")
+
+            # ── Note cards (items with placements) ──
+            if ctype in ("note-title", "note-summary",
+                         "note-frame", "note-text", "note-body"):
+                note_id = custom.get("noteId")
+                if note_id and note_id in placed_item_ids:
+                    deleted_item_ids.add(note_id)
+
+            # ── Composed text blocks ──
+            elif ctype == "composed-text":
+                obj_id = str(el.get("id", ""))
+                if obj_id and obj_id in object_ids:
+                    deleted_object_ids.add(obj_id)
+
+            # ── Stickies ──
+            elif ctype in ("sticky-bg", "sticky-text"):
+                sticky_id = str(custom.get("stickyId", ""))
+                if sticky_id and sticky_id in object_ids:
+                    deleted_object_ids.add(sticky_id)
+
+            # ── Diagrams (tagged with objId) ──
+            elif ctype in ("diagram-node", "diagram-label",
+                           "diagram-arrow", "diagram-edge-label"):
+                obj_id = str(custom.get("objId", ""))
+                if obj_id and obj_id in object_ids:
+                    deleted_object_ids.add(obj_id)
+
+        return deleted_item_ids, deleted_object_ids
+
+    # ──────────────────────────────────
     # Full scene build (source of truth → Excalidraw)
     # ──────────────────────────────────
 
@@ -345,19 +408,21 @@ class SceneBuilder:
             x = float(obj.get("x") or 0)
             y = float(obj.get("y") or 0)
             w = float(obj.get("w") or 500)
+            obj_id = str(obj.get("id", ""))  # ← track obj_id
 
             if kind == "sticky":
                 self._add_sticky(scene, content, x, y,
                                  bg_color=data.get("color", "#fef08a"),
-                                 sticky_id=str(obj.get("id")))
+                                 sticky_id=obj_id)
             elif kind == "text":
                 self._add_text(scene, content, x, y,
                                max_width=min(w, col_width),
-                               element_id=str(obj.get("id")))
+                               element_id=obj_id)
             elif kind == "diagram":
                 topology = data.get("topology")
                 if topology:
-                    self._add_diagram(scene, topology, x, y, w)
+                    self._add_diagram(scene, topology, x, y, w,
+                                      obj_id=obj_id)  # ← pass obj_id
 
         # 3. Note cards
         place_map = {p["item_id"]: p for p in placements}
@@ -413,7 +478,8 @@ class SceneBuilder:
         elements, _ = f.sticky_note(content, x, y, bg_color=bg_color, id=sticky_id)
         scene["elements"].extend(elements)
 
-    def _add_diagram(self, scene, topology, x, y, w):
+    def _add_diagram(self, scene, topology, x, y, w, obj_id=None):
+        """Build diagram and tag all elements with obj_id for deletion tracking."""
         f = self.factory(scene)
         col_width = settings.sheet_width - settings.sheet_margin * 2
         max_w = min(w, col_width) if w and w > 0 else col_width
@@ -437,17 +503,29 @@ class SceneBuilder:
             el["x"] = el.get("x", 0) + dx
             el["y"] = el.get("y", 0) + dy
 
+            # ── Tag every diagram element with objId for deletion tracking ──
+            if obj_id:
+                cd = el.get("customData") or {}
+                cd["objId"] = obj_id
+                el["customData"] = cd
+
         scene["elements"].extend(elements)
 
     # ── Diagram wrapper for handlers ──
 
-    def add_diagram(self, scene, topology, x, y, max_width=None):
+    def add_diagram(self, scene, topology, x, y, max_width=None, obj_id=None):
         f = self.factory(scene)
         col_width = settings.sheet_width - settings.sheet_margin * 2
         elements, bbox = diagram_layout.layout_diagram(
             topology, x, y, f, max_width=max_width or col_width,
         )
+        if obj_id:
+            for el in elements:
+                cd = el.get("customData") or {}
+                cd["objId"] = obj_id
+                el["customData"] = cd
         scene["elements"].extend(elements)
+        return scene, bbox
         return scene, bbox
 
     def add_sticky(self, scene, content, x, y, bg_color="#fef08a", id=None):
