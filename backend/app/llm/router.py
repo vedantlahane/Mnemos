@@ -80,8 +80,13 @@ async def chat_stream(system: str, messages: list[dict], user_id: str = None):
         except Exception as e2:
             logger.error(f"Both LLMs failed: {e}, {e2}")
             raise
-async def process_capture(raw_text: str, user_id: str = None):
-    """Extract structured data from captured text."""
+async def process_capture(raw_text: str, user_id: str = None,
+                          source_title: str = None, source_url: str = None):
+    """Extract structured data from captured text.
+    
+    Now accepts source_title/source_url so the LLM generates
+    UNIQUE titles per snippet instead of generic page-level titles.
+    """
     from pydantic import BaseModel
 
     class ProcessedCapture(BaseModel):
@@ -92,8 +97,25 @@ async def process_capture(raw_text: str, user_id: str = None):
         entities: list[str]
         content_type: str
 
-    system = """You are a note processor. Return valid JSON:
-{"title":"short title","summary":"2-3 sentences","tags":["tag"],"tasks":["task"],"entities":["entity"],"content_type":"note|code|url|thought|question|snippet"}"""
+    # ── Build context-aware prompt ──
+    source_ctx = ""
+    if source_title:
+        source_ctx += f"\nSource page: {source_title}"
+    if source_url:
+        source_ctx += f"\nSource URL: {source_url}"
+
+    system = f"""You are a note processor. Return valid JSON.
+{source_ctx}
+
+CRITICAL RULES:
+- "title" must describe THIS SPECIFIC snippet, not the whole page.
+- If two snippets come from the same page, they MUST have DIFFERENT titles
+  based on what each snippet actually says.
+- "summary" should capture the key point of THIS snippet in 2-3 sentences.
+- Keep the FULL meaning — do NOT truncate important details.
+
+Return: {{"title":"specific descriptive title","summary":"2-3 sentences about this specific content","tags":["tag"],"tasks":["task"],"entities":["entity"],"content_type":"note|code|url|thought|question|snippet"}}"""
+
     prompt = f"Process this text:\n\n{raw_text[:4000]}"
 
     try:
@@ -103,14 +125,19 @@ async def process_capture(raw_text: str, user_id: str = None):
         try:
             response = await chat(system, [{"role": "user", "content": prompt}], user_id)
         except Exception:
+            fallback_title = source_title or raw_text[:60]
             return ProcessedCapture(
-                title=raw_text[:60], summary=raw_text[:280],
+                title=fallback_title, summary=raw_text[:280],
                 tags=[], tasks=[], entities=[], content_type="note",
             )
 
     data = _extract_json(response) if isinstance(response, str) else (response or {})
+
+    # Use source_title as fallback, not a raw text slice
+    fallback_title = source_title or raw_text[:60]
+
     return ProcessedCapture(
-        title=str(data.get("title", ""))[:100] or raw_text[:60],
+        title=str(data.get("title", ""))[:100] or fallback_title,
         summary=str(data.get("summary", ""))[:500] or raw_text[:280],
         tags=[str(t).lower().strip() for t in data.get("tags", []) if t][:12]
             if isinstance(data.get("tags"), list) else [],

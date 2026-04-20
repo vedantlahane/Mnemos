@@ -425,52 +425,55 @@ class ElementFactory:
         self,
         note: dict,
         x: float, y: float,
-        width: float = 720, height: float = 200,
+        width: float = 720, height: float = 240,
     ) -> tuple[list[dict], str]:
         """
-        Build a note as a clean text block (document-style, no frame).
-        Renders like composed text — title + summary + tags in one flow.
-        Returns (elements, group_id).
+        Build a note card: title + AI summary.
+        
+        FIX: Text elements now use full content_width so Excalidraw
+        wraps at the column boundary instead of our approximate measurement.
         """
         note_id = note["id"]
         group_id = f"note-{note_id[:12]}"
         title = note.get("title") or "Untitled"
-        summary = note.get("summary") or note.get("raw_text", "")[:400]
-        tags = note.get("tags") or []
+        summary = note.get("summary") or note.get("raw_text", "")[:500]
+        content_width = width
 
-        # Build combined text block — same style as composed text
-        parts = [title.upper()]
-        if summary:
-            parts.append("")
-            parts.append(summary)
-        if tags:
-            parts.append("")
-            parts.append("  ".join(f"#{t}" for t in tags))
+        # Measure text for HEIGHT calculation only
+        title_m = measure_text(title, font_size=20, font_family=1,
+                               max_width=content_width, max_lines=2)
+        summary_m = measure_text(summary, font_size=14, font_family=1,
+                                 max_width=content_width, max_lines=20)
 
-        full_text = "\n".join(parts)
-
-        # Thin divider above (subtle visual separator between notes)
-        divider = self.line(
-            [[x, y - 16], [x + min(width * 0.25, 160), y - 16]],
-            id=f"note-divider-{note_id}",
-            stroke_color=self._colors["divider"],
-            stroke_width=1,
+        # Build title element
+        title_el = self.text(
+            title, x, y,
+            id=f"note-title-{note_id}",
+            font_size=20, font_family=1,
+            max_width=content_width, max_lines=2,
+            color=self._colors["title_color"],
             group_ids=[group_id],
-            custom_data={"noteId": note_id, "type": "note-divider"},
+            custom_data={"noteId": note_id, "type": "note-title"},
         )
+        # FIX: Pin width to content_width — prevents Excalidraw
+        # from using our approximate measurement and overflowing
+        title_el["width"] = content_width
 
-        # Single text element with everything
-        text_el = self.text(
-            full_text, x, y,
-            id=f"note-body-{note_id}",
-            font_size=16, font_family=1,
-            max_width=width, max_lines=30,
+        # Build summary element
+        summary_el = self.text(
+            summary, x, y + title_m["height"] + 12,
+            id=f"note-summary-{note_id}",
+            font_size=14, font_family=1,
+            max_width=content_width, max_lines=20,
             color=self._colors["body_color"],
             group_ids=[group_id],
-            custom_data={"noteId": note_id, "type": "note-body"},
+            custom_data={"noteId": note_id, "type": "note-summary"},
         )
+        # FIX: Same — pin to full column width for reliable wrapping
+        summary_el["width"] = content_width
 
-        return [divider, text_el], group_id
+        elements = [title_el, summary_el]
+        return elements, group_id
 
     def diagram_node(
         self,

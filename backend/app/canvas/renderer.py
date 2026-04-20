@@ -160,7 +160,10 @@ def extract_palette(scene: dict) -> list[str]:
 # ══════════════════════════════════════
 
 MANAGED_TYPES = frozenset({
-    "note-frame", "note-accent", "note-title", "note-summary", "note-tags",
+    "note-title", "note-summary",
+    # Legacy (old scenes still have these)
+    "note-frame", "note-accent", "note-tags",
+    "note-text", "note-body", "note-divider",
     "sticky-bg", "sticky-text",
     "composed-text",
     "diagram-node", "diagram-label", "diagram-arrow", "diagram-edge-label",
@@ -195,10 +198,6 @@ class SceneBuilder:
         current_placements: list[dict],
         current_objects: list[dict] = None,
     ) -> tuple[list[dict], list[dict]]:
-        """
-        Extract POSITION-only changes from user drags.
-        NEVER reads text content from Excalidraw (avoids double-wrapping).
-        """
         item_changes = []
         obj_changes = []
         place_map = {p["item_id"]: p for p in current_placements}
@@ -217,8 +216,7 @@ class SceneBuilder:
             new_w = el.get("width", 0)
             new_h = el.get("height", 0)
 
-            # Track note position by the body text element
-            if ctype in ("note-body", "note-frame"):
+            if ctype in ("note-text", "note-body", "note-frame"):
                 item_id = custom.get("noteId")
                 if not item_id:
                     continue
@@ -289,10 +287,10 @@ class SceneBuilder:
         for item in items:
             nid = item["id"]
             ids.update({
-                f"note-body-{nid}", f"note-divider-{nid}",
-                # Legacy (still need to clean up old scenes)
-                f"note-frame-{nid}", f"note-accent-{nid}",
-                f"note-title-{nid}", f"note-summary-{nid}", f"note-tags-{nid}",
+                f"note-title-{nid}", f"note-summary-{nid}",
+                # Legacy
+                f"note-frame-{nid}", f"note-accent-{nid}", f"note-tags-{nid}",
+                f"note-text-{nid}", f"note-body-{nid}", f"note-divider-{nid}",
             })
         for obj in objects:
             oid = str(obj.get("id", ""))
@@ -388,12 +386,12 @@ class SceneBuilder:
     # ── Internal builders ──
 
     def _upsert_note_card(self, scene, note, x, y, width=None, height=None):
-        """Always render at column start, full column width."""
         col_width = settings.sheet_width - settings.sheet_margin * 2
-        actual_x = float(settings.sheet_margin)
+        w = min(width or col_width, col_width)
+        h = height or settings.card_h
         f = self.factory(scene)
         remove_elements_by_custom(scene, "noteId", note["id"])
-        elements, _ = f.note_card(note, actual_x, y, col_width)
+        elements, _ = f.note_card(note, float(settings.sheet_margin), y, w, h)
         scene["elements"].extend(elements)
 
     def _add_text(self, scene, text, x, y, *, max_width=500, element_id=None):

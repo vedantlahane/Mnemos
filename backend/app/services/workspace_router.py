@@ -1,6 +1,10 @@
 # === FILE: backend/app/services/workspace_router.py ===
 
-"""Route items to workspaces using LLM."""
+"""Route items to workspaces using LLM.
+
+OPTIMIZED: Removed N+1 per-workspace item fetch.
+Uses workspace names + descriptions only for routing.
+"""
 
 from app.db.repo import repo
 from app.llm import router as llm_router
@@ -20,14 +24,13 @@ async def route_item(
 ) -> str | None:
     """Returns workspace_id to place the item in."""
 
-    # Explicit hint wins
+    # Explicit hint wins — no LLM needed
     if board_hint:
         ws = await repo.get_workspace_by_slug(
             board_hint.lower().replace(" ", "-"), owner_id=owner_id,
         )
         if ws:
             return ws["id"]
-        # Create new workspace
         ws = await repo.create_workspace(
             slug=board_hint.lower().replace(" ", "-"),
             display_name=board_hint,
@@ -35,11 +38,11 @@ async def route_item(
         )
         return ws["id"]
 
-    # If user is viewing a workspace, default there
+    # If user is viewing a workspace, default there — no LLM needed
     if current_workspace_id:
         return current_workspace_id
 
-    # LLM routing
+    # LLM routing — only when we genuinely don't know where to put it
     workspaces = await repo.list_workspaces(owner_id=owner_id)
     non_inbox = [w for w in workspaces if w["slug"] != "inbox"]
 
@@ -47,24 +50,21 @@ async def route_item(
         inbox = await _ensure_inbox(owner_id)
         return inbox["id"]
 
-    # Build context for LLM
+    # ── FIX: Build context from workspace metadata ONLY ──
+    # Old code fetched items for EVERY workspace (N+1 queries).
+    # Workspace name + description is enough for routing.
     ws_info_parts = []
     for w in workspaces:
-        items = await repo.get_items_for_workspace(w["id"], owner_id)
-        sample_titles = [i.get("title", "Untitled") for i in items[:5]]
-        sample_tags: set[str] = set()
-        for i in items[:10]:
-            sample_tags.update(i.get("tags") or [])
+        desc = w.get("description", "") or ""
         ws_info_parts.append(
-            f"- {w['display_name']}: {w.get('description', '')} | "
-            f"Items: {', '.join(sample_titles)} | Tags: {', '.join(list(sample_tags)[:10])}"
+            f"- {w['display_name']}: {desc}"
         )
 
     try:
         result = await llm_router.route_to_page(
             title=title or "Untitled",
             tags=tags or [],
-            content=text,
+            content=text[:500],  # Cap content sent to LLM
             source_url="",
             pages_info="\n".join(ws_info_parts),
             user_id=owner_id,
