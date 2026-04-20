@@ -72,6 +72,12 @@ def strip_markdown(text: str) -> str:
 async def compose_content(topic: str, workspace_id: str = None,
                           owner_id: str = None) -> str:
     context = await _gather_context(topic, workspace_id, owner_id)
+    board_context = await _get_board_context(workspace_id, owner_id)
+
+    system = COMPOSE_SYSTEM
+    if board_context:
+        system += f"\n\nIMPORTANT CONTEXT: The user is working on a board about: {board_context}\nInterpret the topic in that context. For example, 'architecture' on a Kubernetes board means K8s architecture, not building architecture."
+
     prompt = f"Topic: {topic}\n\n"
     if context:
         prompt += f"Relevant notes:\n{context}\n\nWrite using these as primary source."
@@ -79,7 +85,7 @@ async def compose_content(topic: str, workspace_id: str = None,
         prompt += "No existing notes found. Write using general knowledge."
 
     raw = await llm_router.chat(
-        COMPOSE_SYSTEM,
+        system,
         [{"role": "user", "content": prompt}],
         user_id=owner_id,
     )
@@ -92,6 +98,12 @@ async def compose_stream_chunks(topic: str, workspace_id: str = None,
     from app.llm.router import chat_stream
 
     context = await _gather_context(topic, workspace_id, owner_id)
+    board_context = await _get_board_context(workspace_id, owner_id)
+
+    system = COMPOSE_SYSTEM
+    if board_context:
+        system += f"\n\nIMPORTANT CONTEXT: The user is working on a board about: {board_context}\nInterpret the topic in that context. For example, 'architecture' on a Kubernetes board means K8s architecture, not building architecture."
+
     prompt = f"Topic: {topic}\n\n"
     if context:
         prompt += f"Relevant notes:\n{context}\n\nWrite using these as primary source."
@@ -99,7 +111,7 @@ async def compose_stream_chunks(topic: str, workspace_id: str = None,
         prompt += "No existing notes found. Write using general knowledge."
 
     async for chunk in chat_stream(
-        COMPOSE_SYSTEM,
+        system,
         [{"role": "user", "content": prompt}],
         user_id=owner_id,
     ):
@@ -124,4 +136,36 @@ async def _gather_context(topic: str, workspace_id: str = None,
         )
     except Exception as e:
         logger.warning(f"Context gather failed: {e}")
+        return ""
+
+
+async def _get_board_context(workspace_id: str = None, owner_id: str = None) -> str:
+    """Get the board name and existing content topics to establish context."""
+    if not workspace_id:
+        return ""
+    try:
+        ws = await repo.get_workspace(workspace_id, owner_id=owner_id)
+        if not ws:
+            return ""
+
+        board_name = ws.get("display_name", "")
+
+        # Also check existing objects for topic hints
+        objects = await repo.get_canvas_objects(workspace_id)
+        topics = []
+        for obj in objects:
+            meta = obj.get("meta") or {}
+            topic = meta.get("topic", "")
+            content = obj.get("content", "")[:100]
+            if topic:
+                topics.append(topic)
+            elif content:
+                topics.append(content)
+
+        parts = [board_name]
+        if topics:
+            parts.append(f"Existing content: {', '.join(topics[:5])}")
+
+        return ". ".join(parts)
+    except Exception:
         return ""

@@ -4,7 +4,7 @@ import { useMemo, useEffect, useCallback, useRef } from "react"
 import { api } from "@/api/client"
 import { debounce } from "@/lib/utils"
 import { SYNC_DEBOUNCE_MS, SSE_RECONNECT_MS } from "@/lib/constants"
-import { useAppStore, useCanvasStore } from "@/store"
+import { useAppStore, useCanvasStore, useChatStore } from "@/store"
 import { lockCanvas, isCanvasLocked } from "@/lib/canvasLock"
 import { sanitizeScene } from "@/lib/sanitizeScene"
 import type { ExcalidrawScene, SSEEvent } from "@/api/types"
@@ -184,7 +184,7 @@ export function useCanvas() {
     [setDirty, debouncedSync],
   )
 
-  // ── SSE — only reload on structural changes from OTHER clients ──
+  // ── SSE — stream chunks into chat, reload on structural changes ──
   useEffect(() => {
     if (!workspace) return
 
@@ -194,11 +194,44 @@ export function useCanvas() {
     let reconnectTimer: ReturnType<typeof setTimeout>
     let attempts = 0
 
+    // Track active streams
+    const activeStreams = new Map<string, string>() // obj_id → msg_id
+
     const connect = () => {
       unsub = api.canvas.subscribe(
         wsId,
         (event: SSEEvent) => {
           attempts = 0
+
+          // ── Live streaming text into chat ──
+          if (event.type === "stream_chunk" && event.obj_id) {
+            let msgId = activeStreams.get(event.obj_id)
+            const chatStore = useChatStore.getState()
+
+            if (!msgId) {
+              // Start a new stream message
+              msgId = `stream-${event.obj_id}`
+              activeStreams.set(event.obj_id, msgId)
+              chatStore.startStream(msgId, event.text ?? event.chunk ?? "")
+            } else {
+              chatStore.updateStream(msgId, event.text ?? "")
+            }
+            return
+          }
+
+          if (event.type === "stream_end" && event.obj_id) {
+            const msgId = activeStreams.get(event.obj_id)
+            if (msgId) {
+              const chatStore = useChatStore.getState()
+              chatStore.endStream(msgId, "✓ Written to canvas")
+              activeStreams.delete(event.obj_id)
+            }
+
+            if (event.version && event.version > versionRef.current) {
+              loadScene(true)
+            }
+            return
+          }
 
           if (event.type === "canvas_updated" && event.version) {
             // Skip if WE caused this (our sync just completed)
@@ -208,12 +241,6 @@ export function useCanvas() {
             if (event.op === "user_move" || event.op === "user_sync") return
 
             // Structural change (card_placed, diagram_added, theme_changed, etc.)
-            if (event.version > versionRef.current) {
-              loadScene(true)
-            }
-          }
-
-          if (event.type === "stream_end" && event.version) {
             if (event.version > versionRef.current) {
               loadScene(true)
             }
@@ -233,6 +260,7 @@ export function useCanvas() {
       wsIdRef.current = null
       unsub?.()
       clearTimeout(reconnectTimer)
+      activeStreams.clear()
     }
   }, [workspace?.id, loadScene])
 

@@ -10,6 +10,7 @@ export interface RichMessage extends ChatMessage {
   ui_action?: UIAction
   data?: unknown
   error?: string | null
+  isStreaming?: boolean
 }
 
 interface ChatStore {
@@ -23,6 +24,11 @@ interface ChatStore {
   setLastResponse: (r: ChatResponse | null) => void
   clearHistory: () => void
   getContext: () => ChatMessage[]
+
+  // Streaming
+  startStream: (id: string, initialText: string) => void
+  updateStream: (id: string, text: string) => void
+  endStream: (id: string, finalText?: string) => void
 }
 
 let _msgId = 0
@@ -63,5 +69,37 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   getContext: () =>
     get()
       .messages.slice(-MAX_CONTEXT)
+      .filter((m) => !m.isStreaming)
       .map(({ role, content }) => ({ role, content })),
+
+  // ── Streaming ──
+  startStream: (id, initialText) =>
+    set((s) => ({
+      messages: [
+        ...s.messages,
+        {
+          id,
+          role: "assistant" as const,
+          content: initialText,
+          timestamp: Date.now(),
+          isStreaming: true,
+        },
+      ],
+    })),
+
+  updateStream: (id, text) =>
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === id ? { ...m, content: text } : m,
+      ),
+    })),
+
+  endStream: (id, finalText?) =>
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === id
+          ? { ...m, content: finalText ?? m.content, isStreaming: false }
+          : m,
+      ),
+    })),
 }))

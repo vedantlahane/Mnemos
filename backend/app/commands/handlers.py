@@ -371,6 +371,16 @@ async def _canvas_compose_and_diagram(params: dict, workspace_id: str,
     """Handle compound: write about topic AND create diagram."""
     topic = params.get("topic", "untitled")
 
+    # Get board context for better topic understanding
+    ws = await repo.get_workspace(workspace_id, owner_id=owner_id)
+    board_name = ws.get("display_name", "") if ws else ""
+
+    # If the topic is vague and board has a clear name, enrich it
+    enriched_topic = topic
+    if board_name and topic.lower() != board_name.lower():
+        # e.g. topic="architecture", board="k8s" → "k8s architecture"
+        enriched_topic = f"{board_name} {topic}"
+
     # 1. Start the compose (text) as a background task
     from app.services.composition import compose_stream_chunks, strip_markdown
     from app.services.broadcaster import broadcaster
@@ -421,14 +431,14 @@ async def _canvas_compose_and_diagram(params: dict, workspace_id: str,
         actual_h = m["height"] + 20
         await repo.update_canvas_object(obj_id, content=content, h=actual_h)
 
-        # After text is done, create the diagram
-        await _create_diagram_for_topic(topic, workspace_id, owner_id)
+        # After text is done, create the diagram with enriched topic
+        await _create_diagram_for_topic(enriched_topic, workspace_id, owner_id)
 
         # Final rebuild
         result = await handle_structural_rebuild(workspace_id, owner_id)
 
         await repo.log_op(workspace_id, result["version"], "compound_compose_diagram",
-                          actor="ai", data={"topic": topic})
+                          actor="ai", data={"topic": enriched_topic})
 
         await broadcaster.publish(workspace_id, {
             "type": "stream_end",
@@ -656,7 +666,6 @@ async def _canvas_rebuild(workspace_id: str, owner_id: str) -> CommandResponse:
     """Full page reorganization — cleans up all overlaps."""
     from app.services.placement import organize_page
 
-    items = await repo.get_items_for_workspace(workspace_id, owner_id)
     objects = await repo.get_canvas_objects(workspace_id)
     current_placements = await repo.get_placements(workspace_id)
 
@@ -688,8 +697,39 @@ async def _canvas_rebuild(workspace_id: str, owner_id: str) -> CommandResponse:
         "op": "full_rebuild",
     })
 
+    # Count what's actually on the board
+    total_elements = len(new_placements) + len(new_obj_positions)
+
+    # Build a descriptive summary
+    kind_counts: dict[str, int] = {}
+    for obj in objects:
+        kind = obj.get("kind", "unknown")
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+
+    parts = []
+    if kind_counts.get("text"):
+        n = kind_counts["text"]
+        parts.append(f"{n} text block{'s' if n != 1 else ''}")
+    if kind_counts.get("diagram"):
+        n = kind_counts["diagram"]
+        parts.append(f"{n} diagram{'s' if n != 1 else ''}")
+    if kind_counts.get("sticky"):
+        n = kind_counts["sticky"]
+        parts.append(f"{n} sticky note{'s' if n != 1 else ''}")
+    if len(new_placements) > 0:
+        n = len(new_placements)
+        parts.append(f"{n} card{'s' if n != 1 else ''}")
+
+    if parts:
+        summary = ", ".join(parts)
+        text = f"Canvas reorganized — {summary} arranged."
+    elif total_elements == 0:
+        text = "Canvas is empty — nothing to organize."
+    else:
+        text = f"Canvas reorganized — {total_elements} element{'s' if total_elements != 1 else ''} arranged."
+
     return CommandResponse(
-        text=f"Canvas reorganized: {len(items)} items + {len(objects)} objects.",
+        text=text,
         intent="canvas",
         canvas_update={"version": result["version"], "action": "reload"},
     )

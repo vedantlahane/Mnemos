@@ -62,6 +62,15 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, Props>(
       if (trimmed.startsWith("/") && !trimmed.includes(" ")) {
         const mapped = COMMAND_TO_MESSAGE[trimmed]
         if (mapped) {
+          // Special: __HOME__ navigates home without API call
+          if (mapped === "__HOME__") {
+            import("@/store").then(({ useAppStore, useChatStore }) => {
+              useAppStore.getState().setActiveWorkspace(null)
+              useChatStore.getState().clearHistory()
+            })
+            setValue("")
+            return
+          }
           // If the mapped message ends with a space, it needs more input — put it in the input
           if (mapped.endsWith(" ")) {
             setValue(mapped)
@@ -99,6 +108,16 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, Props>(
       (command: Command) => {
         const mapped = COMMAND_TO_MESSAGE[command.slash]
         if (!mapped) return
+
+        // Special: __HOME__ navigates home without API call
+        if (mapped === "__HOME__") {
+          import("@/store").then(({ useAppStore, useChatStore }) => {
+            useAppStore.getState().setActiveWorkspace(null)
+            useChatStore.getState().clearHistory()
+          })
+          setValue("")
+          return
+        }
 
         // Commands that need more input (end with space)
         if (mapped.endsWith(" ")) {

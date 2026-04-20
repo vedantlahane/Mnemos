@@ -20,6 +20,7 @@ export interface Command {
 
 export const COMMANDS: Command[] = [
   // Navigate
+  { id: "home",      slash: "/home",      label: "Home",           description: "Go back to home screen",       icon: "brain",    category: "navigate" },
   { id: "boards",    slash: "/boards",    label: "Boards",         description: "List all boards",              icon: "boards",   category: "navigate" },
   // Canvas
   { id: "diagram",   slash: "/diagram",   label: "Diagram",        description: "Draw a diagram on canvas",     icon: "graph",    category: "canvas" },
@@ -33,7 +34,8 @@ export const COMMANDS: Command[] = [
   { id: "settings",  slash: "/settings",  label: "Settings",       description: "Models & preferences",         icon: "settings", category: "system" },
 ]
 
-export const COMMAND_TO_MESSAGE: Record<string, string> = {
+expohome":      "__HOME__",
+  "/rt const COMMAND_TO_MESSAGE: Record<string, string> = {
   "/boards":    "show boards",
   "/diagram":   "draw diagram ",
   "/compose":   "write about ",

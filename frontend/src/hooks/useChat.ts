@@ -1,5 +1,3 @@
-// === FILE: frontend/src/hooks/useChat.ts ===
-
 import { useCallback } from "react"
 import { api } from "@/api/client"
 import { useAppStore, useChatStore, useCanvasStore } from "@/store"
@@ -20,7 +18,6 @@ export function useChat() {
   const setLastResponse = useChatStore((s) => s.setLastResponse)
   const getContext = useChatStore((s) => s.getContext)
 
-  const scene = useCanvasStore((s) => s.scene)
   const setVersion = useCanvasStore((s) => s.setVersion)
   const requestReload = useCanvasStore((s) => s.requestReload)
 
@@ -39,8 +36,16 @@ export function useChat() {
           getContext(),
         )
 
-        addAssistantMessage(response.text, response)
         setLastResponse(response)
+
+        // Always add assistant message to chat
+        addAssistantMessage(response.text, response)
+
+        // Update preferences if settings response
+        if (response.ui_action === "open_settings" || response.intent === "settings") {
+          const prefs = asPreferences(response.data)
+          if (prefs) setPreferences(prefs)
+        }
 
         // Workspace navigation
         const targetWs = extractNavigation(response)
@@ -48,21 +53,14 @@ export function useChat() {
           setActiveWorkspace(targetWs)
         }
 
-        // Settings — update preferences for any settings response
-        if (response.ui_action === "open_settings" || response.intent === "settings") {
-          const prefs = asPreferences(response.data)
-          if (prefs) setPreferences(prefs)
-        }
-
-        // Canvas reload — set version AND trigger reload
+        // Canvas reload
         if (shouldReloadCanvas(response)) {
           const v = response.canvas_update?.version
           if (v != null) setVersion(v)
           requestReload()
         }
       } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Something went wrong"
+        const msg = err instanceof Error ? err.message : "Something went wrong"
         addAssistantMessage(`⚠️ ${msg}`)
       } finally {
         setLoading(false)
@@ -70,7 +68,6 @@ export function useChat() {
     },
     [
       activeWorkspace,
-      scene,
       addUserMessage,
       addAssistantMessage,
       setLoading,
