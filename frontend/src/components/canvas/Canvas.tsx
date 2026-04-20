@@ -29,10 +29,12 @@ export function Canvas() {
   // Track desired scrollY so we can allow vertical scroll
   const scrollYRef = useRef(0)
 
-  const theme = useMemo(
-    () => (scene?.appState?.theme === "light" ? "light" : "dark"),
-    [scene?.appState?.theme],
-  )
+  const themeRef = useRef<"dark" | "light">("dark")
+  const theme = useMemo(() => {
+    const detected = scene?.appState?.theme === "light" ? "light" : "dark"
+    themeRef.current = detected
+    return detected
+  }, [scene?.appState?.theme])
 
   const setApi = useCallback((api: any) => {
     if (apiRef.current !== api) {
@@ -270,17 +272,17 @@ export function Canvas() {
         zoom: { value: FIXED_ZOOM as any },
         scrollX: computeLockedScrollX(),
         scrollY: 0,
-        theme: theme as any,
+        theme: themeRef.current as any,
         viewBackgroundColor: scene.appState?.viewBackgroundColor ?? "#0e0e1a",
       },
     }
-  }, [scene, theme])
+  }, [scene])
 
   const menu = useMemo(
     () => (
       <MainMenu>
         <MainMenu.DefaultItems.SaveAsImage />
-        <MainMenu.DefaultItems.ClearCanvas />
+        {/* ClearCanvas REMOVED — it breaks managed element sync */}
       </MainMenu>
     ),
     [],
@@ -320,7 +322,7 @@ export function Canvas() {
       />
 
       <Excalidraw
-        key={`${workspace.id}-${theme}`}
+        key={workspace.id}
         initialData={initialData ?? undefined}
         excalidrawAPI={setApi}
         onChange={handleChange}

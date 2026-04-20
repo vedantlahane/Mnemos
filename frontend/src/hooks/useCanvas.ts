@@ -109,6 +109,16 @@ export function useCanvas() {
         if (isCanvasLocked()) return
         if (Date.now() < pausedUntil.current) return
 
+        // Don't sync if all elements were deleted (Clear Canvas protection)
+        const liveElements = toSync.elements?.filter(
+          (el) => !el.isDeleted
+        ) ?? []
+        if (liveElements.length === 0 && versionRef.current > 0) {
+          // User cleared everything — reload from server instead of syncing empty
+          loadScene(true)
+          return
+        }
+
         setSyncing(true)
         lastSyncTs.current = Date.now()
 
@@ -146,8 +156,16 @@ export function useCanvas() {
           }
         }
       }, SYNC_DEBOUNCE_MS),
-    [workspace?.id, setSyncing, markSynced, pushToExcalidraw], // eslint-disable-line
+    [workspace?.id, setSyncing, markSynced, pushToExcalidraw, loadScene], // eslint-disable-line
   )
+
+  // ── Cleanup on workspace change — cancel pending syncs ──
+  useEffect(() => {
+    return () => {
+      debouncedSync.cancel?.()
+      pendingRef.current = null
+    }
+  }, [workspace?.id, debouncedSync]) // eslint-disable-line
 
   // ── onChange — lightweight, just queues for sync ──
   const onSceneChange = useCallback(

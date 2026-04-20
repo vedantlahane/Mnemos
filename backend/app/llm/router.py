@@ -169,9 +169,23 @@ async def route_to_page(title: str, tags: list[str], content: str,
 
 
 async def generate_diagram(topic: str, user_id: str = None) -> dict:
-    system = """Generate a diagram. Return JSON:
-{"layout_type":"flow|mindmap|list|comparison|timeline","elements":[{"id":"id","label":"text","type":"box","style":"default|accent|muted|warning|success","width":200,"height":60}],"connections":[{"from":"id1","to":"id2","label":"optional","style":"solid|dashed|dotted"}]}
-Create 4-8 elements. Keep labels concise."""
+    system = """Generate a diagram topology as JSON. Return ONLY valid JSON:
+{"layout_type":"tree|flow|mindmap|list|comparison|timeline",
+ "elements":[{"id":"unique_id","label":"Short Label","type":"box","style":"default|accent|muted|warning|success","width":240,"height":64}],
+ "connections":[{"from":"id1","to":"id2","label":"optional","style":"solid|dashed|dotted"}]}
+
+RULES:
+- Create 5-10 elements with CONCISE labels (1-3 words max, e.g. "API Server" not "Kubernetes API Server Component")
+- Use layout_type "tree" for architectures, hierarchies, org charts
+- Use layout_type "mindmap" for concept maps with a central topic
+- Use layout_type "flow" only for strictly sequential processes
+- For tree layouts: ONE root node, branch into 2-4 children, then sub-children
+- Set width: 240 for normal labels, 280 for longer labels (3+ words)
+- Set height: 64 always
+- Use "accent" style for the root/main node, "default" for most nodes, "success"/"warning" for special nodes
+- Connections should form a TREE (one parent per child), not a linear chain
+- Do NOT create linear chains for architecture diagrams — spread into branches"""
+
     prompt = f"Create a diagram about: {topic}"
 
     try:
@@ -181,22 +195,31 @@ Create 4-8 elements. Keep labels concise."""
         if not topology.get("elements"):
             topology["elements"] = [
                 {"id": "node1", "label": topic, "type": "box",
-                 "style": "accent", "width": 200, "height": 60},
+                 "style": "accent", "width": 240, "height": 64},
             ]
         if not topology.get("layout_type"):
-            topology["layout_type"] = "flow"
+            topology["layout_type"] = "tree"
+        # Enforce minimum node widths
+        for el in topology.get("elements", []):
+            el["width"] = max(int(el.get("width", 240)), 200)
+            el["height"] = max(int(el.get("height", 64)), 56)
         return topology
     except Exception as e:
         logger.error(f"Diagram generation failed: {e}")
         return {
-            "layout_type": "flow",
+            "layout_type": "tree",
             "elements": [
                 {"id": "node1", "label": topic, "type": "box",
-                 "style": "accent", "width": 200, "height": 60},
-                {"id": "node2", "label": "Details", "type": "box",
-                 "style": "default", "width": 200, "height": 60},
+                 "style": "accent", "width": 260, "height": 64},
+                {"id": "node2", "label": "Component A", "type": "box",
+                 "style": "default", "width": 240, "height": 64},
+                {"id": "node3", "label": "Component B", "type": "box",
+                 "style": "default", "width": 240, "height": 64},
             ],
-            "connections": [{"from": "node1", "to": "node2", "style": "solid"}],
+            "connections": [
+                {"from": "node1", "to": "node2", "style": "solid"},
+                {"from": "node1", "to": "node3", "style": "solid"},
+            ],
         }
 
 

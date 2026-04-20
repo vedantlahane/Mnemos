@@ -83,15 +83,22 @@ export function truncate(text: string | null | undefined, max = 100): string {
 // MISC
 // ══════════════════════════════════════════
 
+export interface DebouncedFn<T extends (...args: never[]) => unknown> {
+  (...args: Parameters<T>): void
+  cancel: () => void
+}
+
 export function debounce<T extends (...args: never[]) => unknown>(
   fn: T,
   ms: number,
-): (...args: Parameters<T>) => void {
+): DebouncedFn<T> {
   let timer: ReturnType<typeof setTimeout>
-  return (...args) => {
+  const debounced = (...args: Parameters<T>) => {
     clearTimeout(timer)
     timer = setTimeout(() => fn(...args), ms)
   }
+  debounced.cancel = () => clearTimeout(timer)
+  return debounced as DebouncedFn<T>
 }
 
 export function cn(...classes: (string | false | null | undefined)[]): string {

@@ -26,9 +26,6 @@ _RULES: list[tuple[list[str], str, str]] = [
      "navigate", "open_settings"),
     (["show boards", "list boards", "my boards", "all boards", "/boards"],
      "navigate", "list_boards"),
-    (["show cards", "list cards", "my cards", "all items", "show items",
-      "show notes", "list notes", "/items", "/notes"],
-     "navigate", "list_items"),
 
     # ── Board awareness (before generic capture) ──
     (["summarize this page", "summarize page", "summarize board",
@@ -45,21 +42,11 @@ _RULES: list[tuple[list[str], str, str]] = [
       "what's on my board", "what's on my page"],
      "chat", "summarize_board"),
 
-    # ── Capture ──
-    (["remember ", "save this", "capture ", "note this", "jot down ",
-      "save note ", "add note "],
-     "capture", "capture_text"),
-
     # ── Canvas: diagrams ──
     (["draw diagram ", "create diagram ", "diagram about ", "make diagram ",
       "draw a diagram ", "create a diagram ", "make a diagram ",
       "diagram of ", "diagram for "],
      "canvas", "add_diagram"),
-
-    # ── Canvas: stickies ──
-    (["add sticky ", "sticky note ", "post-it ", "new sticky ",
-      "add a sticky ", "create sticky "],
-     "canvas", "add_sticky"),
 
     # ── Canvas: compose ──
     (["write about ", "compose ", "write on canvas ",
@@ -75,7 +62,7 @@ _RULES: list[tuple[list[str], str, str]] = [
       "reorganize", "reorganize page", "reorganise", "reorganise page"],
      "canvas", "rebuild"),
 
-    # ── Theme (both settings and canvas) ──
+    # ── Theme ──
     (["dark mode", "dark theme", "set theme dark", "switch to dark", "go dark"],
      "settings", "set_dark"),
     (["light mode", "light theme", "set theme light", "switch to light", "go light"],
@@ -103,8 +90,57 @@ _RULES: list[tuple[list[str], str, str]] = [
 ]
 
 
+def _detect_compound(lower: str, original: str) -> dict | None:
+    """Detect compound commands like 'write about X and create diagram about Y'"""
+    import re
+    
+    # Patterns: "write about X and draw/create diagram"
+    # or "create diagram and write about X"
+    compound_patterns = [
+        (r"(?:write|compose)\s+(?:about\s+)?(.+?)\s+(?:and|&|,)\s+(?:draw|create|make)\s+(?:a\s+)?diagram",
+         "compose_and_diagram"),
+        (r"(?:draw|create|make)\s+(?:a\s+)?diagram\s+(?:about\s+)?(.+?)\s+(?:and|&|,)\s+(?:write|compose)\s+(?:about\s+)?(.+)",
+         "diagram_and_compose"),
+        (r"(?:write|compose)\s+(?:about\s+)?(.+?)\s+(?:and|&|,)\s+(?:draw|create|make)\s+(?:a\s+)?(?:architecture\s+)?diagram",
+         "compose_and_diagram"),
+    ]
+
+    for pattern, cmd_type in compound_patterns:
+        m = re.search(pattern, lower)
+        if m:
+            topic = m.group(1).strip()
+            return {
+                "intent": "canvas",
+                "action": "compose_and_diagram",
+                "params": {"topic": topic},
+                "confidence": 0.95,
+            }
+
+    # Also catch: "write about X and create architecture diagram"
+    if ("diagram" in lower and
+        any(w in lower for w in ("write about", "compose about", "write on")) and
+        any(w in lower for w in ("and", "&", ","))):
+        # Extract the topic — everything between "about" and "and"
+        m = re.search(r"(?:write|compose)\s+(?:about\s+)(.+?)(?:\s+and|\s*&|\s*,)", lower)
+        if m:
+            topic = m.group(1).strip()
+            return {
+                "intent": "canvas",
+                "action": "compose_and_diagram",
+                "params": {"topic": topic},
+                "confidence": 0.90,
+            }
+
+    return None
+
+
 async def classify(message: str, context: dict = None) -> dict:
     lower = message.lower().strip()
+
+    # ── 0. Compound command detection ──
+    compound = _detect_compound(lower, message)
+    if compound:
+        return compound
 
     # ── 1. Pattern match ──
     for triggers, intent, action in _RULES:
@@ -152,10 +188,9 @@ def _params(remainder: str, action: str) -> dict:
     if not remainder:
         return {}
     mapping = {
-        "capture_text": "text",
         "add_diagram": "topic",
         "compose": "topic",
-        "add_sticky": "content",
+        "compose_and_diagram": "topic",
         "search": "query",
         "create_board": "name",
         "delete_board": "board_ref",
@@ -176,20 +211,20 @@ async def _llm_classify(message: str, context: dict = None) -> dict:
 
     system = f"""Classify this message for a knowledge workspace app.
 Return ONLY valid JSON:
-{{"intent":"navigate|capture|query|canvas|manage|settings|chat",
+{{"intent":"navigate|query|canvas|manage|settings|chat",
   "action":"action_name",
   "params":{{}},
   "confidence":0.0-1.0}}
 
 Actions:
-- navigate: open_settings, list_boards, list_items, open_board(board_ref)
-- capture: capture_text(text)
+- navigate: open_settings, list_boards, open_board(board_ref)
 - query: search(query)
-- canvas: add_diagram(topic), add_sticky(content,color), compose(topic), rebuild
+- canvas: add_diagram(topic), compose(topic), compose_and_diagram(topic), rebuild
 - manage: create_board(name), delete_board(board_ref), rename_board(board_ref,new_name)
 - settings: set_dark, set_light, set_primary_model(text), set_secondary_model(text)
 - chat: answer, summarize_board
 
+If user asks to write AND create diagram about same topic → canvas/compose_and_diagram
 If user asks about "this page/board/what's here" → chat/summarize_board
 {ctx_str}"""
 

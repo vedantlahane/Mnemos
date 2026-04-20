@@ -14,9 +14,20 @@ interface Props {
 export function Overlay({ inputRef }: Props) {
   const activeWorkspace = useAppStore((s) => s.activeWorkspace)
   const messageCount = useChatStore((s) => s.messages.length)
+  const clearHistory = useChatStore((s) => s.clearHistory)
   const [chatOpen, setChatOpen] = useState(true)
   const dragHandleRef = useRef<HTMLDivElement>(null)
   const [hasDragged, setHasDragged] = useState(false)
+  const prevWorkspaceRef = useRef<string | null>(null)
+
+  // Clear chat when workspace changes (prevents stale messages breaking layout)
+  useEffect(() => {
+    const currentId = activeWorkspace?.id ?? null
+    if (prevWorkspaceRef.current !== null && prevWorkspaceRef.current !== currentId) {
+      clearHistory()
+    }
+    prevWorkspaceRef.current = currentId
+  }, [activeWorkspace?.id, clearHistory])
 
   const initialPosition = useRef({
     x: window.innerWidth - 420,

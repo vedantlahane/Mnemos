@@ -334,6 +334,118 @@ def _rebuild_scene(ctx: dict, theme: str = None, background: str = None) -> tupl
 
 
 # ═══════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════
+
+async def _create_diagram_for_topic(topic: str, workspace_id: str, owner_id: str):
+    """Helper to create a diagram — used by both standalone and compound commands."""
+    topology = await llm_router.generate_diagram(topic, user_id=owner_id)
+
+    canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
+    col = get_column_bounds()
+    f = canvas_renderer.factory(canvas_ctx["stored"].get("theme", "dark"))
+    _, bbox = layout_diagram(topology, 0, 0, f, max_width=col["width"])
+
+    from app.services.placement import find_diagram_placement
+    placement = find_diagram_placement(
+        placements=canvas_ctx["placements"],
+        objects=canvas_ctx["objects"],
+        user_elements=canvas_ctx["user_drawn"],
+        diagram_width=bbox["width"],
+        diagram_height=bbox["height"],
+    )
+
+    await repo.create_canvas_object(
+        workspace_id=workspace_id,
+        kind="diagram", origin="ai",
+        excalidraw_ids=[],
+        x=placement["x"], y=placement["y"],
+        w=bbox["width"], h=bbox["height"],
+        content=topic,
+        meta={"topology": topology},
+    )
+
+
+async def _canvas_compose_and_diagram(params: dict, workspace_id: str,
+                                      owner_id: str) -> CommandResponse:
+    """Handle compound: write about topic AND create diagram."""
+    topic = params.get("topic", "untitled")
+
+    # 1. Start the compose (text) as a background task
+    from app.services.composition import compose_stream_chunks, strip_markdown
+    from app.services.broadcaster import broadcaster
+    from app.canvas.text_measure import measure_text
+    import asyncio
+
+    col = get_column_bounds()
+
+    async def _run_compose():
+        canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
+
+        placement = find_placement_for_size(
+            placements=canvas_ctx["placements"],
+            objects=canvas_ctx["objects"],
+            user_elements=canvas_ctx["user_drawn"],
+            width=col["width"],
+            height=300,
+        )
+
+        obj = await repo.create_canvas_object(
+            workspace_id=workspace_id,
+            kind="text", origin="ai",
+            x=placement["x"], y=placement["y"],
+            w=col["width"], h=300,
+            content="",
+            meta={"topic": topic},
+        )
+        obj_id = obj["id"]
+
+        content = ""
+        try:
+            async for chunk in compose_stream_chunks(topic, workspace_id, owner_id):
+                content += chunk
+                await broadcaster.publish(workspace_id, {
+                    "type": "stream_chunk",
+                    "obj_id": obj_id,
+                    "chunk": chunk,
+                    "text": content,
+                    "x": placement["x"],
+                    "y": placement["y"],
+                })
+        except Exception as e:
+            logger.error(f"Compose stream failed: {e}")
+
+        content = strip_markdown(content)
+        m = measure_text(content, font_size=16, font_family=1,
+                         max_width=col["width"], max_lines=200)
+        actual_h = m["height"] + 20
+        await repo.update_canvas_object(obj_id, content=content, h=actual_h)
+
+        # After text is done, create the diagram
+        await _create_diagram_for_topic(topic, workspace_id, owner_id)
+
+        # Final rebuild
+        result = await handle_structural_rebuild(workspace_id, owner_id)
+
+        await repo.log_op(workspace_id, result["version"], "compound_compose_diagram",
+                          actor="ai", data={"topic": topic})
+
+        await broadcaster.publish(workspace_id, {
+            "type": "stream_end",
+            "obj_id": obj_id,
+            "version": result["version"],
+        })
+
+    asyncio.create_task(_run_compose())
+
+    return CommandResponse(
+        text=f"Writing about '{topic}' and creating an architecture diagram.",
+        intent="canvas",
+        canvas_update=None,
+    )
+
+
+# ═══════════════════════════════════════
 # CANVAS
 # ═══════════════════════════════════════
 
@@ -357,8 +469,8 @@ async def _handle_canvas(action: str, params: dict,
     if action == "add_diagram":
         return await _canvas_add_diagram(params, workspace_id, owner_id)
 
-    if action == "add_sticky":
-        return await _canvas_add_sticky(params, workspace_id, owner_id)
+    if action == "compose_and_diagram":
+        return await _canvas_compose_and_diagram(params, workspace_id, owner_id)
 
     if action == "compose":
         return await _canvas_compose(params, workspace_id, owner_id)
@@ -398,42 +510,11 @@ async def _canvas_add_diagram(params: dict, workspace_id: str,
                               owner_id: str) -> CommandResponse:
     topic = params.get("topic", "untitled diagram")
 
-    topology = await llm_router.generate_diagram(topic, user_id=owner_id)
-
-    # Get ALL existing content to find correct placement
-    canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
-
-    # Layout diagram to get its actual size
-    col = get_column_bounds()
-    f = canvas_renderer.factory(canvas_ctx["stored"].get("theme", "dark"))
-    _, bbox = layout_diagram(topology, 0, 0, f, max_width=col["width"])
-
-    # Find position BELOW all existing content
-    from app.services.placement import find_diagram_placement
-    placement = find_diagram_placement(
-        placements=canvas_ctx["placements"],
-        objects=canvas_ctx["objects"],
-        user_elements=canvas_ctx["user_drawn"],
-        diagram_width=bbox["width"],
-        diagram_height=bbox["height"],
-    )
-
-    # Store the diagram object
-    obj = await repo.create_canvas_object(
-        workspace_id=workspace_id,
-        kind="diagram", origin="ai",
-        excalidraw_ids=[],
-        x=placement["x"], y=placement["y"],
-        w=bbox["width"], h=bbox["height"],
-        content=topic,
-        meta={"topology": topology},
-    )
-
-    # Structural rebuild — this is a new object
+    await _create_diagram_for_topic(topic, workspace_id, owner_id)
     result = await handle_structural_rebuild(workspace_id, owner_id)
 
     await repo.log_op(workspace_id, result["version"], "diagram_added",
-                      actor="ai", data={"topic": topic, "bbox": bbox})
+                      actor="ai", data={"topic": topic})
 
     from app.services.broadcaster import broadcaster
     await broadcaster.publish(workspace_id, {
@@ -446,7 +527,6 @@ async def _canvas_add_diagram(params: dict, workspace_id: str,
         text=f"Created a diagram about **{topic}**.",
         intent="canvas",
         canvas_update={"version": result["version"], "action": "reload"},
-        data={"bbox": bbox, "object_id": obj.get("id")},
     )
 
 

@@ -21,13 +21,8 @@ export interface Command {
 export const COMMANDS: Command[] = [
   // Navigate
   { id: "boards",    slash: "/boards",    label: "Boards",         description: "List all boards",              icon: "boards",   category: "navigate" },
-  { id: "items",     slash: "/items",     label: "Items",          description: "List all items",               icon: "note",     category: "navigate" },
-  // Capture
-  { id: "remember",  slash: "/remember",  label: "Remember",       description: "Save a note or thought",       icon: "note",     category: "capture" },
-  { id: "board",     slash: "/board",     label: "New Board",      description: "Create a new board",           icon: "boards",   category: "capture" },
   // Canvas
   { id: "diagram",   slash: "/diagram",   label: "Diagram",        description: "Draw a diagram on canvas",     icon: "graph",    category: "canvas" },
-  { id: "sticky",    slash: "/sticky",    label: "Sticky Note",    description: "Add a sticky note",            icon: "note",     category: "canvas" },
   { id: "compose",   slash: "/compose",   label: "Compose",        description: "Write text on canvas",         icon: "sparkles", category: "canvas" },
   { id: "organize",  slash: "/organize",  label: "Organize",       description: "Clean up & reorganize canvas", icon: "boards",   category: "canvas" },
   { id: "dark",      slash: "/dark",      label: "Dark Mode",      description: "Switch to dark theme",         icon: "moon",     category: "canvas" },
@@ -40,11 +35,7 @@ export const COMMANDS: Command[] = [
 
 export const COMMAND_TO_MESSAGE: Record<string, string> = {
   "/boards":    "show boards",
-  "/items":     "show cards",
-  "/remember":  "remember ",        // trailing space = needs input
-  "/board":     "create board ",
   "/diagram":   "draw diagram ",
-  "/sticky":    "add sticky ",
   "/compose":   "write about ",
   "/organize":  "organize page",
   "/dark":      "dark mode",
@@ -55,7 +46,6 @@ export const COMMAND_TO_MESSAGE: Record<string, string> = {
 
 export const CATEGORY_LABELS: Record<string, string> = {
   navigate: "Navigate",
-  capture: "Capture",
   canvas: "Canvas",
   search: "Search",
   system: "System",

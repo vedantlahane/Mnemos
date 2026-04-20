@@ -514,7 +514,8 @@ class ElementFactory:
         node_colors = self._colors.get("node", {}).get(style, self._colors["node"]["default"])
         gids = [group_id] if group_id else []
 
-        label_m = measure_text(label, font_size=14, font_family=1, max_width=width - 20, max_lines=3)
+        # Use more of the node width for text (was width - 20)
+        label_m = measure_text(label, font_size=14, font_family=1, max_width=width - 28, max_lines=3)
 
         return [
             self.rectangle(
@@ -533,7 +534,7 @@ class ElementFactory:
                 y + (height - label_m["height"]) / 2,
                 id=f"{node_id}-text",
                 font_size=14, font_family=1,
-                max_width=width - 20, max_lines=3,
+                max_width=width - 28, max_lines=3,
                 color=node_colors["text"],
                 text_align="center",
                 vertical_align="middle",

@@ -16,9 +16,10 @@ from app.canvas.factory import ElementFactory
 from app.core.config import settings
 
 ARROW_GAP = 10
-H_GAP = 60        # horizontal between siblings
-V_GAP = 80        # vertical between tree levels
-FLOW_GAP = 60     # vertical in flow layout
+H_GAP = 80        # horizontal between siblings (was 60)
+V_GAP = 90        # vertical between tree levels (was 80)
+FLOW_GAP = 70     # vertical in flow layout (was 60)
+MIN_NODE_W = 180   # minimum node width
 
 
 def layout_diagram(
@@ -122,14 +123,18 @@ def layout_diagram(
 # ── Node measurement ──
 
 def _measure_nodes(nodes: list[dict], max_w: float) -> list[dict]:
-    cap = max_w * 0.4
+    # Cap each node at 45% of canvas width (was 40%)
+    cap = max_w * 0.45
     out = []
     for n in nodes:
         label = n.get("label", "")
-        req = min(float(n.get("width", 180)), cap)
+        requested = max(float(n.get("width", 240)), MIN_NODE_W)
+        req = min(requested, cap)
         m = measure_text(label, 14, 1, req - 24, 3)
-        w = min(max(req, m["width"] + 32), cap)
-        h = max(float(n.get("height", 56)), m["height"] + 24)
+        # Ensure node is wide enough for the text + padding
+        w = min(max(req, m["width"] + 40), cap)
+        w = max(w, MIN_NODE_W)  # enforce minimum
+        h = max(float(n.get("height", 64)), m["height"] + 24, 56)
         out.append({"id": n["id"], "label": label,
                      "style": n.get("style", "default"),
                      "width": w, "height": h})
@@ -167,12 +172,25 @@ def _is_tree(nodes, connections, root):
             continue
         visited.add(n)
         q.extend(children[n])
-    return len(visited) >= len(nodes) * 0.7
+    # More lenient: 50% reachability counts as tree (was 70%)
+    return len(visited) >= len(nodes) * 0.5
 
 
 # ── Dispatch ──
 
 def _dispatch(lt, nodes, conns, max_w):
+    # If connections exist and form a tree, force tree layout
+    if lt in ("flow", "tree") and conns and len(nodes) > 2:
+        root = _find_root(nodes, conns)
+        if root:
+            children = defaultdict(list)
+            for c in conns:
+                children[c["from"]].append(c["to"])
+            # Check if any node has multiple children (branching)
+            has_branching = any(len(ch) > 1 for ch in children.values())
+            if has_branching:
+                lt = "tree"
+
     fn = {"tree": _tree, "flow": _flow, "mindmap": _mindmap,
           "list": _list, "comparison": _comparison,
           "timeline": _timeline}.get(lt, _flow)
@@ -195,18 +213,21 @@ def _tree(nodes, connections, max_w):
     stw: dict[str, float] = {}
     _subtree_w(root, children, node_map, stw)
 
-    # Position top-down
+    # Position top-down, centered at max_w/2
     out: dict[str, dict] = {}
-    _place(root, 0, 0, children, node_map, stw, out)
+    _place(root, max_w / 2, 0, children, node_map, stw, out)
 
     # Handle orphans
     placed = set(out.keys())
     bottom = max((p["y"] + p["height"] for p in out.values()), default=0)
+    ox = 0.0
     for n in nodes:
         if n["id"] not in placed:
-            out[n["id"]] = {**n, "x": (max_w - n["width"]) / 2,
-                            "y": bottom + V_GAP}
-            bottom += n["height"] + FLOW_GAP
+            out[n["id"]] = {**n, "x": ox, "y": bottom + V_GAP}
+            ox += n["width"] + H_GAP
+            if ox > max_w:
+                ox = 0.0
+                bottom += n["height"] + V_GAP
 
     return list(out.values())
 
