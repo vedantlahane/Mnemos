@@ -13,17 +13,65 @@ Tables: users, items, item_embeddings, item_connections,
 from __future__ import annotations
 import asyncio
 import json
+import math
+import sys
+import logging
 from datetime import datetime, timezone
 from supabase import create_client
 from app.core.config import settings
+
+logger = logging.getLogger("mnemos.repo")
 
 _key = settings.supabase_service_role_key or settings.supabase_key
 _client = create_client(settings.supabase_url, _key)
 
 
-def _run(fn):
-    return asyncio.to_thread(fn)
+# ── Windows socket retry wrapper ──
+# WinError 10035 = WSAEWOULDBLOCK — transient non-blocking socket error.
+# Happens when asyncio.to_thread() runs sync httpx on Windows.
+# Safe to retry immediately.
 
+_IS_WINDOWS = sys.platform == "win32"
+_MAX_RETRIES = 3
+_RETRY_DELAY = 0.1  # seconds
+
+
+async def _run(fn):
+    """Run a synchronous Supabase call in a thread with retry on Windows socket errors."""
+    last_err = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return await asyncio.to_thread(fn)
+        except OSError as e:
+            # WinError 10035 (WSAEWOULDBLOCK) — retry
+            if _IS_WINDOWS and getattr(e, "winerror", None) == 10035:
+                last_err = e
+                logger.debug(f"WinError 10035 on attempt {attempt + 1}, retrying...")
+                await asyncio.sleep(_RETRY_DELAY * (attempt + 1))
+                continue
+            raise
+        except Exception as e:
+            # Catch broader connection errors that wrap the socket error
+            err_str = str(e)
+            if _IS_WINDOWS and "10035" in err_str:
+                last_err = e
+                logger.debug(f"Socket 10035 in wrapper on attempt {attempt + 1}, retrying...")
+                await asyncio.sleep(_RETRY_DELAY * (attempt + 1))
+                continue
+            raise
+    # All retries exhausted
+    raise last_err  # type: ignore
+
+def _clean_json(obj):
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return obj
+    if isinstance(obj, dict):
+        return {k: _clean_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_clean_json(v) for v in obj]
+    return obj
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
@@ -124,7 +172,6 @@ class Repo:
 
     async def get_items_for_workspace(self, workspace_id: str,
                                       owner_id: str = None) -> list:
-        """Get all items linked to a workspace via junction table."""
         def _q():
             q = _client.table("workspace_items") \
                 .select("item_id, items(*)") \
@@ -216,7 +263,7 @@ class Repo:
             )
             return r.data[0] if r.data else None
         except Exception:
-            return None  # unique constraint = already exists
+            return None
 
     async def delete_connection(self, conn_id: str):
         await _run(
@@ -277,7 +324,6 @@ class Repo:
     async def create_workspace(self, **kw) -> dict:
         r = await _run(lambda: _client.table("workspaces").insert(kw).execute())
         ws = r.data[0]
-        # Auto-create canvas state
         await _run(
             lambda: _client.table("canvas_state")
             .insert({"workspace_id": ws["id"]}).execute()
@@ -342,7 +388,7 @@ class Repo:
                 }).execute()
             )
         except Exception:
-            pass  # already linked
+            pass
 
     async def unlink_item_from_workspace(self, workspace_id: str, item_id: str):
         await _run(
@@ -384,7 +430,7 @@ class Repo:
                           version: int, theme: str = None,
                           background: str = None):
         updates = {
-            "scene": scene, "version": version,
+            "scene": _clean_json(scene), "version": version,
             "updated_at": _now(),
         }
         if theme: updates["theme"] = theme
@@ -449,6 +495,16 @@ class Repo:
             .eq("workspace_id", workspace_id).execute()
         )
         return r.data or []
+
+    async def update_canvas_object(self, obj_id: str, **kw) -> dict:
+        updates = {k: v for k, v in kw.items() if v is not None}
+        if not updates:
+            return {}
+        r = await _run(
+            lambda: _client.table("canvas_objects").update(updates)
+            .eq("id", obj_id).execute()
+        )
+        return r.data[0] if r.data else {}
 
     async def delete_canvas_object(self, obj_id: str):
         await _run(

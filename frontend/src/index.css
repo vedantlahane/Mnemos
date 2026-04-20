@@ -253,4 +253,41 @@
     padding: 4px 10px !important;
     backdrop-filter: blur(20px) !important;
   }
+
+  /* ─── Canvas lock: vertical-only notebook ─── */
+  .canvas-lock .excalidraw {
+    touch-action: pan-y !important;
+  }
+
+  /* Kill ALL zoom UI */
+  .canvas-lock .excalidraw .zoom-actions,
+  .canvas-lock .excalidraw .zoom-actions-wrapper,
+  .canvas-lock .excalidraw .layer-ui__wrapper__footer-left,
+  .canvas-lock .excalidraw [class*="zoom"],
+  .canvas-lock .excalidraw button[title="Zoom in"],
+  .canvas-lock .excalidraw button[title="Zoom out"],
+  .canvas-lock .excalidraw button[title="Reset zoom"],
+  .canvas-lock .excalidraw [class*="Zoom"],
+  .canvas-lock .excalidraw .footer-center {
+    display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Hide the scroll-back-to-content button (we control scroll) */
+  .canvas-lock .excalidraw .scroll-back-to-content {
+    display: none !important;
+  }
+
+  /* Prevent cursor change to grab/pan outside content area */
+  .canvas-lock .excalidraw canvas {
+    cursor: default !important;
+  }
+  .canvas-lock .excalidraw .selected canvas,
+  .canvas-lock .excalidraw canvas:active {
+    cursor: auto !important;
+  }
 }

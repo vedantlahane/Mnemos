@@ -92,12 +92,32 @@ async def _on_item_ready(event: Event):
         if not item:
             return
 
-        stored = await repo.get_canvas(workspace_id)
-        items = await repo.get_items_for_workspace(workspace_id, owner_id)
         placements = await repo.get_placements(workspace_id)
+        objects = await repo.get_canvas_objects(workspace_id)
+        stored = await repo.get_canvas(workspace_id)
+        user_drawn = canvas_renderer.extract_user_drawn(
+            stored["scene"].get("elements", []),
+        )
 
-        # Find position
-        placement = find_placement(placements)
+        # Find best related item for near-placement
+        near_id = None
+        connections = await repo.get_connections_for_item(item_id)
+        if connections:
+            placed_ids = {p["item_id"] for p in placements}
+            for conn in connections:
+                other = conn["to_id"] if conn["from_id"] == item_id else conn["from_id"]
+                if other in placed_ids:
+                    near_id = other
+                    break
+
+        # Smart placement — column-aware, gap-detecting
+        placement = find_placement(
+            placements=placements,
+            objects=objects,
+            user_elements=user_drawn,
+            item_size=(settings.card_w, settings.card_h),
+            near_item_id=near_id,
+        )
 
         # Save placement (source of truth for position)
         await repo.upsert_placement(
@@ -106,12 +126,10 @@ async def _on_item_ready(event: Event):
             settings.card_w, settings.card_h,
         )
 
-        # Rebuild scene
-        placements = await repo.get_placements(workspace_id)  # re-fetch with new
+        # Rebuild scene from source of truth
+        items = await repo.get_items_for_workspace(workspace_id, owner_id)
+        placements = await repo.get_placements(workspace_id)
         objects = await repo.get_canvas_objects(workspace_id)
-        user_drawn = canvas_renderer.extract_user_drawn(
-            stored["scene"].get("elements", []),
-        )
 
         scene = canvas_renderer.build_scene(
             items, placements, objects, user_drawn,
@@ -144,7 +162,6 @@ async def _extract(text: str, owner_id: str = None):
     try:
         return await llm_router.process_capture(text, user_id=owner_id)
     except Exception:
-        from app.commands.responses import CommandResponse
         from pydantic import BaseModel
 
         class FallbackCapture(BaseModel):

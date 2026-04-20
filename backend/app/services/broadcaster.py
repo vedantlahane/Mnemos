@@ -1,7 +1,5 @@
 # === FILE: backend/app/services/broadcaster.py ===
 
-"""SSE broadcaster for real-time canvas updates."""
-
 from __future__ import annotations
 import asyncio
 import logging
@@ -31,6 +29,10 @@ class Broadcaster:
                 q.put_nowait(event)
             except asyncio.QueueFull:
                 logger.warning(f"SSE queue full for {workspace_id[:8]}")
+
+    # Alias used by handlers.py
+    async def publish(self, workspace_id: str, event: dict):
+        await self.notify(workspace_id, event)
 
     def listener_count(self, workspace_id: str) -> int:
         return len(self._listeners.get(workspace_id, []))

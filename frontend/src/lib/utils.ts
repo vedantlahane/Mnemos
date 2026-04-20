@@ -1,13 +1,12 @@
+// === FILE: frontend/src/lib/utils.ts ===
+
 import type {
   ChatResponse,
   Workspace,
   BoardListData,
   ItemListData,
   OpenBoardData,
-  GraphData,
   SearchData,
-  TagListData,
-  StatsData,
   Preferences,
 } from "@/api/types"
 
@@ -50,20 +49,8 @@ export function asOpenBoard(data: unknown): OpenBoardData | null {
   return hasKey(data, "board") ? (data as unknown as OpenBoardData) : null
 }
 
-export function asGraph(data: unknown): GraphData | null {
-  return hasKey(data, "nodes") ? (data as unknown as GraphData) : null
-}
-
 export function asSearch(data: unknown): SearchData | null {
   return hasKey(data, "results") ? (data as unknown as SearchData) : null
-}
-
-export function asTags(data: unknown): TagListData | null {
-  return hasKey(data, "tags") ? (data as unknown as TagListData) : null
-}
-
-export function asStats(data: unknown): StatsData | null {
-  return hasKey(data, "total_items") ? (data as unknown as StatsData) : null
 }
 
 export function asPreferences(data: unknown): Preferences | null {
@@ -85,11 +72,6 @@ export function formatTime(iso: string | null | undefined): string {
   if (hr < 24) return `${hr}h ago`
   if (day < 7) return `${day}d ago`
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-}
-
-export function formatSimilarity(score: number | undefined): string {
-  if (score === undefined) return ""
-  return `${Math.round(score * 100)}%`
 }
 
 export function truncate(text: string | null | undefined, max = 100): string {

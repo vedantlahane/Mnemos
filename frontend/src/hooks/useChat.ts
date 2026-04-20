@@ -1,21 +1,14 @@
+// === FILE: frontend/src/hooks/useChat.ts ===
+
 import { useCallback } from "react"
 import { api } from "@/api/client"
 import { useAppStore, useChatStore, useCanvasStore } from "@/store"
 import {
   extractNavigation,
   shouldReloadCanvas,
-  getCanvasVersion,
   asPreferences,
 } from "@/lib/utils"
 
-/**
- * THE core hook.
- * Sends a message to POST /api/chat, then routes the response:
- *   1. Show response.text + inline card data in chat
- *   2. Handle open_board → set workspace
- *   3. Handle canvas_update → trigger reload
- *   4. Handle settings → store preferences
- */
 export function useChat() {
   const activeWorkspace = useAppStore((s) => s.activeWorkspace)
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace)
@@ -27,7 +20,9 @@ export function useChat() {
   const setLastResponse = useChatStore((s) => s.setLastResponse)
   const getContext = useChatStore((s) => s.getContext)
 
+  const scene = useCanvasStore((s) => s.scene)
   const setVersion = useCanvasStore((s) => s.setVersion)
+  const requestReload = useCanvasStore((s) => s.requestReload)
 
   const send = useCallback(
     async (message: string) => {
@@ -44,38 +39,47 @@ export function useChat() {
           getContext(),
         )
 
-        // 1. Show text + card data inline in chat
         addAssistantMessage(response.text, response)
         setLastResponse(response)
 
-        // 2. Workspace navigation
+        // Workspace navigation
         const targetWs = extractNavigation(response)
         if (targetWs) {
           setActiveWorkspace(targetWs)
         }
 
-        // 3. Settings
-        if (response.ui_action === "open_settings") {
+        // Settings — update preferences for any settings response
+        if (response.ui_action === "open_settings" || response.intent === "settings") {
           const prefs = asPreferences(response.data)
           if (prefs) setPreferences(prefs)
         }
 
-        // 4. Canvas reload
+        // Canvas reload — set version AND trigger reload
         if (shouldReloadCanvas(response)) {
-          const v = getCanvasVersion(response)
-          if (v !== null) setVersion(v)
+          const v = response.canvas_update?.version
+          if (v != null) setVersion(v)
+          requestReload()
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "Something went wrong"
+        const msg =
+          err instanceof Error ? err.message : "Something went wrong"
         addAssistantMessage(`⚠️ ${msg}`)
       } finally {
         setLoading(false)
       }
     },
     [
-      activeWorkspace, addUserMessage, addAssistantMessage,
-      setLoading, setLastResponse, getContext,
-      setActiveWorkspace, setPreferences, setVersion,
+      activeWorkspace,
+      scene,
+      addUserMessage,
+      addAssistantMessage,
+      setLoading,
+      setLastResponse,
+      getContext,
+      setActiveWorkspace,
+      setPreferences,
+      setVersion,
+      requestReload,
     ],
   )
 

@@ -119,6 +119,7 @@ ROUNDNESS_ADAPTIVE = {"type": 3}
 ROUNDNESS_NONE = None
 
 # ── Theme color palettes ──
+# Replace the THEME_COLORS dict in constants.py:
 
 THEME_COLORS = {
     "dark": {
@@ -126,7 +127,7 @@ THEME_COLORS = {
         "card_bg": "#1e1e2e",
         "card_border": "#374151",
         "title_color": "#f3f4f6",
-        "body_color": "#9ca3af",
+        "body_color": "#d1d5db",
         "accent": "#818cf8",
         "muted": "#6b7280",
         "divider": "#374151",
@@ -141,21 +142,21 @@ THEME_COLORS = {
     },
     "light": {
         "background": "#ffffff",
-        "card_bg": "#ffffff",
-        "card_border": "#e5e7eb",
+        "card_bg": "#f9fafb",
+        "card_border": "#d1d5db",
         "title_color": "#111827",
-        "body_color": "#6b7280",
-        "accent": "#6366f1",
-        "muted": "#9ca3af",
-        "divider": "#e5e7eb",
+        "body_color": "#374151",
+        "accent": "#4f46e5",
+        "muted": "#6b7280",
+        "divider": "#d1d5db",
         "node": {
-            "default":  {"bg": "#ffffff", "border": "#e5e7eb", "text": "#1f2937"},
-            "accent":   {"bg": "#eef2ff", "border": "#6366f1", "text": "#312e81"},
-            "muted":    {"bg": "#f9fafb", "border": "#d1d5db", "text": "#6b7280"},
+            "default":  {"bg": "#f9fafb", "border": "#d1d5db", "text": "#1f2937"},
+            "accent":   {"bg": "#e0e7ff", "border": "#4f46e5", "text": "#312e81"},
+            "muted":    {"bg": "#f3f4f6", "border": "#9ca3af", "text": "#4b5563"},
             "warning":  {"bg": "#fff7ed", "border": "#ea580c", "text": "#7c2d12"},
             "success":  {"bg": "#f0fdf4", "border": "#16a34a", "text": "#14532d"},
         },
-        "arrow": "#9ca3af",
+        "arrow": "#6b7280",
     },
 }
 

@@ -54,8 +54,32 @@ async def chat(system: str, messages: list[dict],
         except Exception as e2:
             logger.error(f"Both LLMs failed: {e}, {e2}")
             raise
-
-
+async def chat_stream(system: str, messages: list[dict], user_id: str = None):
+    primary, secondary = await _runtime_models(user_id)
+    try:
+        if _is_groq_model(primary) and settings.groq_api_key:
+            # We don't have groq_chat_stream yet, fallback to google or fake stream
+            from app.llm.groq_provider import groq_chat_call
+            res = await groq_chat_call(system, messages, model=primary)
+            yield res
+        else:
+            from app.llm.google_provider import google_chat_stream
+            async for chunk in google_chat_stream(system, messages, model=primary):
+                yield chunk
+    except Exception as e:
+        logger.warning(f"Primary LLM ({primary}) failed: {e}")
+        try:
+            if _is_groq_model(secondary) and settings.groq_api_key:
+                from app.llm.groq_provider import groq_chat_call
+                res = await groq_chat_call(system, messages, model=secondary)
+                yield res
+            else:
+                from app.llm.google_provider import google_chat_stream
+                async for chunk in google_chat_stream(system, messages, model=secondary):
+                    yield chunk
+        except Exception as e2:
+            logger.error(f"Both LLMs failed: {e}, {e2}")
+            raise
 async def process_capture(raw_text: str, user_id: str = None):
     """Extract structured data from captured text."""
     from pydantic import BaseModel

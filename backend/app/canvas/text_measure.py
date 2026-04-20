@@ -1,3 +1,5 @@
+# === FILE: backend/app/canvas/text_measure.py ===
+
 """
 Server-side text measurement for Excalidraw.
 Approximates Excalidraw's text rendering with character-width tables.
@@ -8,15 +10,17 @@ import math
 import re
 
 # ── Character width tables at fontSize=16 ──
+# UPDATED: Measured against actual Excalidraw rendering.
+# Previous values were ~30% too small, causing text overflow.
 
 _BASE_WIDTHS = {
-    1: 8.4,   # Virgil
-    2: 7.8,   # Helvetica
-    3: 9.6,   # Cascadia (mono)
-    4: 8.0,   # Excalifont
-    5: 7.6,   # Nunito
-    6: 8.8,   # Lilita One
-    7: 8.2,   # Comic Shanns
+    1: 10.8,   # Virgil (handwritten) — was 8.4, way too small
+    2: 9.8,    # Helvetica — was 7.8
+    3: 9.6,    # Cascadia (mono) — monospace is predictable, OK
+    4: 10.2,   # Excalifont — was 8.0
+    5: 9.6,    # Nunito — was 7.6
+    6: 10.4,   # Lilita One — was 8.8
+    7: 10.0,   # Comic Shanns — was 8.2
 }
 
 _NARROW = set("iljtfr!|[](){}.,:;'\"1")
@@ -25,15 +29,15 @@ _WIDE = set("mwMWOQGD@#%&")
 
 def _char_width(ch: str, base: float) -> float:
     if ch in _NARROW:
-        return base * 0.55
+        return base * 0.5
     if ch in _WIDE:
-        return base * 1.35
+        return base * 1.4
     if ch == " ":
-        return base * 0.45
+        return base * 0.4
     if ch == "\t":
         return base * 1.8
     if ch.isupper():
-        return base * 1.1
+        return base * 1.15
     return base
 
 
@@ -59,8 +63,11 @@ def measure_text(
         return {"wrapped_text": "", "width": 20, "height": lh + 4, "line_count": 1}
 
     scale = font_size / 16.0
-    base = _BASE_WIDTHS.get(font_family, 8.0) * scale
+    base = _BASE_WIDTHS.get(font_family, 10.0) * scale
     line_height = font_size * 1.25
+
+    # Safety margin — Excalidraw's actual rendering can be slightly wider
+    effective_max_width = max_width * 0.92
 
     paragraphs = text.split("\n")
     all_lines: list[str] = []
@@ -78,10 +85,32 @@ def measure_text(
 
         for word in words:
             word_w = _line_width(word, base)
+
+            # If a single word exceeds max width, force-break it
+            if word_w > effective_max_width and not current_line:
+                # Break the word into chunks
+                chunk = ""
+                chunk_w = 0.0
+                for ch in word:
+                    cw = _char_width(ch, base)
+                    if chunk_w + cw > effective_max_width and chunk:
+                        all_lines.append(chunk)
+                        if len(all_lines) >= max_lines:
+                            break
+                        chunk = ch
+                        chunk_w = cw
+                    else:
+                        chunk += ch
+                        chunk_w += cw
+                if chunk and len(all_lines) < max_lines:
+                    current_line = chunk
+                    current_w = chunk_w
+                continue
+
             sep = " " if current_line else ""
             sep_w = _line_width(sep, base)
 
-            if current_w + sep_w + word_w <= max_width or not current_line:
+            if current_w + sep_w + word_w <= effective_max_width or not current_line:
                 current_line += sep + word
                 current_w += sep_w + word_w
             else:
@@ -107,7 +136,7 @@ def measure_text(
 
     return {
         "wrapped_text": wrapped,
-        "width": max(actual_w, 20),
+        "width": min(max(actual_w, 20), max_width),  # clamp to max_width
         "height": max(actual_h, line_height + 4),
         "line_count": len(all_lines),
     }

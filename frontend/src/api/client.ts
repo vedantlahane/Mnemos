@@ -1,3 +1,5 @@
+// === FILE: frontend/src/api/client.ts ===
+
 import type {
   AuthState,
   AuthTokens,
@@ -42,17 +44,22 @@ function clearTokens() {
 // ══════════════════════════════════════════
 
 export class ApiError extends Error {
-  status: number;
-  detail: string;
+  status: number
+  detail: string
 
-  constructor(
-    status: number,
-    detail: string,
-  ) {
+  constructor(status: number, detail: string) {
     super(detail)
     this.name = "ApiError"
-    this.status = status;
-    this.detail = detail;
+    this.status = status
+    this.detail = detail
+  }
+}
+
+/** Network-level error (server down, CORS, timeout) */
+export class NetworkError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "NetworkError"
   }
 }
 
@@ -60,21 +67,35 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken()
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(init.headers as Record<string, string> ??  {}),
+    ...((init.headers as Record<string, string>) ?? {}),
   }
 
   if (token) {
     headers["Authorization"] = `Bearer ${token}`
   }
 
-  let res = await fetch(`${API}${path}`, { ...init, headers })
+  let res: Response
+  try {
+    res = await fetch(`${API}${path}`, { ...init, headers })
+  } catch (e) {
+    // Network error — server down, CORS block, DNS failure, etc.
+    throw new NetworkError(
+      e instanceof Error ? e.message : "Network request failed",
+    )
+  }
 
   // Auto-refresh on 401
   if (res.status === 401) {
     const refreshed = await tryRefresh()
     if (refreshed) {
       headers["Authorization"] = `Bearer ${getToken()}`
-      res = await fetch(`${API}${path}`, { ...init, headers })
+      try {
+        res = await fetch(`${API}${path}`, { ...init, headers })
+      } catch (e) {
+        throw new NetworkError(
+          e instanceof Error ? e.message : "Network request failed after refresh",
+        )
+      }
     } else {
       clearTokens()
       throw new ApiError(401, "Session expired")
@@ -82,7 +103,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
+    const body = await res
+      .json()
+      .catch(() => ({ detail: `HTTP ${res.status}` }))
     throw new ApiError(res.status, body.detail ?? `HTTP ${res.status}`)
   }
 
@@ -129,7 +152,9 @@ export const api = {
       return data
     },
 
-    refresh: async (refreshToken: string): Promise<{ access_token: string }> => {
+    refresh: async (
+      refreshToken: string,
+    ): Promise<{ access_token: string }> => {
       const data = await request<{ access_token: string }>("/auth/refresh", {
         method: "POST",
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -174,10 +199,15 @@ export const api = {
     ): Promise<SyncResponse> =>
       request<SyncResponse>(`/workspaces/${workspaceId}/sync`, {
         method: "POST",
-        body: JSON.stringify({ base_version: baseVersion, scene: scene ?? null }),
+        body: JSON.stringify({
+          base_version: baseVersion,
+          scene: scene ?? null,
+        }),
       }),
 
-    getVersion: (workspaceId: string): Promise<{ version: number; workspace_id: string }> =>
+    getVersion: (
+      workspaceId: string,
+    ): Promise<{ version: number; workspace_id: string }> =>
       request(`/workspaces/${workspaceId}/version`),
 
     subscribe: (
@@ -186,7 +216,10 @@ export const api = {
       onError?: () => void,
     ): (() => void) => {
       const token = getToken()
-      const url = new URL(`${API}/workspaces/${workspaceId}/events`, window.location.origin)
+      const url = new URL(
+        `${API}/workspaces/${workspaceId}/events`,
+        window.location.origin,
+      )
       if (token && token !== "auth-disabled") {
         url.searchParams.set("token", token)
       }
@@ -213,8 +246,12 @@ export const api = {
   // ── Health ──
   health: {
     check: async (): Promise<{ status: string; version: string }> => {
-      const res = await fetch(`${BASE}/health`)
-      return res.json()
+      try {
+        const res = await fetch(`${BASE}/health`)
+        return res.json()
+      } catch {
+        return { status: "unreachable", version: "unknown" }
+      }
     },
   },
 } as const

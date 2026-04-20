@@ -159,6 +159,8 @@ async def sse_events(workspace_id: str):
                     yield f": keepalive\n\n"
         except asyncio.CancelledError:
             pass
+        except OSError:
+            pass
         finally:
             broadcaster.unsubscribe(workspace_id, queue)
 

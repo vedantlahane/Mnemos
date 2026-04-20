@@ -1,3 +1,5 @@
+// === FILE: frontend/src/api/types.ts ===
+
 // ══════════════════════════════════════════
 // KNOWLEDGE LAYER
 // ══════════════════════════════════════════
@@ -47,11 +49,6 @@ export interface ItemConnection {
 export type RelationType =
   | "related" | "depends_on" | "extends"
   | "contradicts" | "summarizes" | "example_of"
-
-export interface TagCount {
-  name: string
-  count: number
-}
 
 // ══════════════════════════════════════════
 // PRESENTATION LAYER
@@ -118,7 +115,7 @@ export interface Preferences {
 }
 
 // ══════════════════════════════════════════
-// CHAT — THE unified interface
+// CHAT
 // ══════════════════════════════════════════
 
 export interface ChatRequest {
@@ -147,7 +144,7 @@ export type Intent =
 
 export type UIAction =
   | "open_settings" | "list_boards" | "list_items" | "open_board"
-  | "open_graph" | "list_tags" | "show_stats" | "show_search"
+  | "show_search"
   | null
 
 export interface CanvasUpdate {
@@ -161,27 +158,6 @@ export interface BoardListData { boards: Workspace[] }
 export interface ItemListData  { items: Item[]; total: number }
 export interface OpenBoardData { board: Workspace }
 export interface SearchData    { query: string; results: ItemSummary[] }
-export interface TagListData   { tags: TagCount[] }
-
-export interface GraphNode {
-  id: string
-  title: string
-  tags: string[]
-  content_type: ContentType
-}
-
-export interface GraphEdge {
-  id: string
-  source: string
-  target: string
-  type: RelationType
-  label: string | null
-  weight: number
-}
-
-export interface GraphData  { nodes: GraphNode[]; edges: GraphEdge[] }
-export interface StatsData  { total_items: number; total_workspaces: number; total_tags: number; statuses: Record<string, number> }
-export interface CaptureData { item_id: string; status: string }
 
 // ══════════════════════════════════════════
 // CANVAS SYNC
@@ -209,11 +185,16 @@ export interface SceneResponse {
 // ══════════════════════════════════════════
 
 export interface SSEEvent {
-  type: "connected" | "canvas_updated"
+  type: "connected" | "canvas_updated" | "stream_chunk" | "stream_end"
   workspace_id?: string
   version?: number
   op?: string
   item_id?: string
+  obj_id?: string
+  chunk?: string
+  text?: string
+  x?: number
+  y?: number
 }
 
 // ══════════════════════════════════════════
@@ -231,11 +212,3 @@ export interface AuthTokens {
   refresh_token: string
   user: User
 }
-
-// ══════════════════════════════════════════
-// UI STATE (frontend-only)
-// ══════════════════════════════════════════
-
-export type ActivePanel =
-  | "none" | "settings" | "boards" | "items"
-  | "graph" | "tags" | "stats" | "search"

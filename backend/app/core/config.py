@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     similarity_threshold: float = 0.65
     embedding_dim: int = 768
 
-    # Canvas layout
+    # Canvas column model — matches frontend CANVAS_CONTENT_WIDTH
+    sheet_width: int = 800
+    sheet_margin: int = 40
     card_w: int = 360
     card_h: int = 240
     card_gap: int = 60

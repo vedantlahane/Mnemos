@@ -259,7 +259,8 @@ class ElementFactory:
             "arrow",
             id=id or _id(),
             x=start_x, y=start_y,
-            width=abs(dx), height=abs(dy),
+            width=max(abs(dx), 1),
+            height=max(abs(dy), 1),
             points=points or [[0, 0], [dx, dy]],
             strokeColor=stroke_color or self._colors["arrow"],
             strokeWidth=stroke_width,
@@ -492,9 +493,10 @@ class ElementFactory:
         width: float = 180, height: float = 160,
         bg_color: str = "#fef08a",
         text_color: str = "#78350f",
+        id: str = None,
     ) -> tuple[list[dict], str]:
         """Build a sticky note."""
-        sticky_id = f"sticky-{_id()[:8]}"
+        sticky_id = id or f"sticky-{_id()[:8]}"
         group_id = f"sticky-{sticky_id}"
 
         elements = [
@@ -593,6 +595,8 @@ class ElementFactory:
 
 
 def _luminance(hex_color: str) -> float:
+    if not hex_color:
+        return 0.1
     h = hex_color.lstrip("#")
     if len(h) < 6:
         h = "".join(c * 2 for c in h[:3])
