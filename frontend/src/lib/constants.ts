@@ -34,8 +34,8 @@ export const COMMANDS: Command[] = [
   { id: "settings",  slash: "/settings",  label: "Settings",       description: "Models & preferences",         icon: "settings", category: "system" },
 ]
 
-expohome":      "__HOME__",
-  "/rt const COMMAND_TO_MESSAGE: Record<string, string> = {
+export const COMMAND_TO_MESSAGE: Record<string, string> = {
+  "/home":      "__HOME__",
   "/boards":    "show boards",
   "/diagram":   "draw diagram ",
   "/compose":   "write about ",
