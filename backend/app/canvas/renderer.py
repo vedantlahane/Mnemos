@@ -326,26 +326,75 @@ class SceneManager:
 
         return item_changes, obj_changes
 
-    def extract_user_drawn(self, elements: list[dict]) -> list[dict]:
-        """Extract elements drawn by user (not managed by system via build_scene)."""
+    def extract_user_drawn(self, elements: list[dict], managed_ids: set[str] = None) -> list[dict]:
+        """
+        Extract elements drawn by user (not managed by system via build_scene).
+        
+        Two-layer filter:
+        1. Filter by customData.type (semantic)
+        2. Filter by element ID if we know the managed IDs (exact match)
+        """
         kept = []
         managed_types = {
             "note-frame", "note-accent", "note-title", "note-summary", "note-tags",
             "sticky-bg", "sticky-text",
             "composed-text",
-            # Diagram types are also managed now to prevent duplication
             "diagram-node", "diagram-label", "diagram-arrow", "diagram-edge-label",
         }
+        skip_ids = managed_ids or set()
+
         for el in elements:
             if el.get("isDeleted"):
                 continue
+
+            el_id = el.get("id", "")
+
+            # Skip by known managed ID
+            if el_id and el_id in skip_ids:
+                continue
+
+            # Skip by customData type
             custom = el.get("customData")
             if isinstance(custom, dict):
                 t = custom.get("type")
                 if t in managed_types:
                     continue
+
             kept.append(el)
         return kept
+
+    def _collect_managed_ids(self, items: list[dict], objects: list[dict]) -> set[str]:
+        """
+        Compute ALL element IDs that build_scene will generate.
+        Used to definitively filter them from user_drawn.
+        """
+        ids = set()
+
+        for item in items:
+            note_id = item["id"]
+            ids.update({
+                f"note-frame-{note_id}",
+                f"note-accent-{note_id}",
+                f"note-title-{note_id}",
+                f"note-summary-{note_id}",
+                f"note-tags-{note_id}",
+            })
+
+        for obj in objects:
+            obj_id = str(obj.get("id", ""))
+            kind = obj.get("kind")
+
+            if kind == "text":
+                ids.add(obj_id)  # composed text uses obj UUID as element ID
+
+            elif kind == "sticky":
+                ids.add(f"{obj_id}-bg")
+                ids.add(f"{obj_id}-text")
+
+            # Diagram element IDs are generated dynamically by layout_diagram,
+            # so we can't precompute them. They're caught by customData filter.
+
+        return ids
 
     def build_scene(
         self,
@@ -358,13 +407,38 @@ class SceneManager:
     ) -> dict:
         """
         Get the full rendered scene for a workspace.
-        This REBUILDS from source-of-truth tables every time.
+        REBUILDS from source-of-truth tables every time.
+        Deduplicates by element ID — managed elements always win.
         """
         scene = normalize_scene(None)
         scene = self.set_theme(scene, theme)
         scene = self.set_background(scene, background)
 
-        scene["elements"].extend(user_drawn)
+        # ── Compute managed IDs to definitively filter user_drawn ──
+        managed_ids = self._collect_managed_ids(items, objects)
+
+        # ── Filter user_drawn against managed IDs ──
+        clean_user_drawn = []
+        for el in user_drawn:
+            el_id = el.get("id", "")
+            if el_id in managed_ids:
+                continue  # this element will be recreated by build_scene
+            # Also check customData type as a backup
+            custom = el.get("customData")
+            if isinstance(custom, dict):
+                ctype = custom.get("type", "")
+                if ctype in {
+                    "note-frame", "note-accent", "note-title",
+                    "note-summary", "note-tags",
+                    "sticky-bg", "sticky-text",
+                    "composed-text",
+                    "diagram-node", "diagram-label",
+                    "diagram-arrow", "diagram-edge-label",
+                }:
+                    continue
+            clean_user_drawn.append(el)
+
+        scene["elements"].extend(clean_user_drawn)
 
         # ── Render canvas objects (text, stickies, diagrams) ──
         for obj in objects:
@@ -402,6 +476,22 @@ class SceneManager:
             if not p:
                 continue
             self.upsert_note_card(scene, item, p["x"], p["y"], p.get("w"), p.get("h"))
+
+        # ── FINAL SAFETY: deduplicate by element ID ──
+        # If somehow the same ID appears twice, the LAST one wins
+        # (managed elements are added after user_drawn, so they win)
+        seen_ids = {}
+        deduped = []
+        for el in scene["elements"]:
+            el_id = el.get("id")
+            if el_id:
+                if el_id in seen_ids:
+                    # Replace the earlier element
+                    deduped[seen_ids[el_id]] = None  # mark for removal
+                seen_ids[el_id] = len(deduped)
+            deduped.append(el)
+
+        scene["elements"] = [el for el in deduped if el is not None]
 
         return scene
 

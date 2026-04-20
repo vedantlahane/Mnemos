@@ -137,6 +137,24 @@ export function useCanvas() {
                 elements: JSON.parse(JSON.stringify(safeElements)),
               })
             }
+          } else if (result.status === "ok" && result.scene) {
+            // ── NEW: Apply corrected scene from sync ──
+            // Backend rebuilt the scene to deduplicate managed elements,
+            // so we should apply it to prevent stale state (e.g., duplicated text)
+            setScene(result.scene)
+            const apiObj = (window as any).excalidrawAPI
+            if (apiObj && result.scene.elements) {
+              const safeElements = result.scene.elements.filter(
+                (el: any) =>
+                  el.x !== null &&
+                  el.x !== undefined &&
+                  el.y !== null &&
+                  el.y !== undefined,
+              )
+              apiObj.updateScene({
+                elements: JSON.parse(JSON.stringify(safeElements)),
+              })
+            }
           }
 
           markSynced(result.version)
