@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     # Canvas column model — matches frontend CANVAS_CONTENT_WIDTH
     sheet_width: int = 800
     sheet_margin: int = 40
-    card_w: int = 360
-    card_h: int = 240
+    card_w: int = 720      # ← was 360, now matches column width (800 - 40*2)
+    card_h: int = 200      # ← was 240, default (overridden dynamically)
     card_gap: int = 60
 
     # Confidence thresholds

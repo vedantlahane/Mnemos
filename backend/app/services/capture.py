@@ -21,13 +21,11 @@ logger = logging.getLogger("mnemos.capture")
 
 
 def register_handlers():
-    """Called at startup to wire event handlers."""
     bus.on(ITEM_CREATED, _on_item_created)
     bus.on(ITEM_READY, _on_item_ready)
 
 
 async def _on_item_created(event: Event):
-    """Full processing pipeline triggered by capture."""
     item_id = event.data["item_id"]
     source_text = event.data["source_text"]
     board_hint = event.data.get("board_hint")
@@ -71,7 +69,7 @@ async def _on_item_created(event: Event):
         }))
 
     except Exception as e:
-        logger.error(f"Processing failed for {item_id}: {e}")
+        logger.error(f"Processing failed for {item_id}: {e}", exc_info=True)
         try:
             await repo.update_item(item_id, status="error")
         except Exception:
@@ -79,29 +77,47 @@ async def _on_item_created(event: Event):
 
 
 async def _on_item_ready(event: Event):
-    """Place item on canvas after processing is done."""
     item_id = event.data["item_id"]
     workspace_id = event.data.get("workspace_id")
     owner_id = event.data.get("owner_id")
 
     if not workspace_id:
+        logger.warning(f"Item {item_id} ready but no workspace_id — skipping placement")
         return
 
     try:
         item = await repo.get_item(item_id)
         if not item:
+            logger.warning(f"Item {item_id} not found for placement")
             return
 
         placements = await repo.get_placements(workspace_id)
         objects = await repo.get_canvas_objects(workspace_id)
         stored = await repo.get_canvas(workspace_id)
-        managed_ids = canvas_renderer.collect_managed_ids(
-            await repo.get_items_for_workspace(workspace_id, owner_id),
-            objects,
-        )
+
+        all_items = await repo.get_items_for_workspace(workspace_id)
+        managed_ids = canvas_renderer.collect_managed_ids(all_items, objects)
         user_drawn = canvas_renderer.extract_user_drawn(
             stored["scene"].get("elements", []), managed_ids,
         )
+
+        # ── Measure actual text height for this note ──
+        from app.canvas.text_measure import measure_text
+
+        col_w = settings.sheet_width - settings.sheet_margin * 2
+        title = (item.get("title") or "Untitled").upper()
+        summary = item.get("summary") or item.get("source_text", "")[:400]
+        tags = item.get("tags") or []
+
+        parts = [title, ""]
+        if summary:
+            parts.append(summary)
+        if tags:
+            parts.extend(["", "  ".join(f"#{t}" for t in tags)])
+
+        full_text = "\n".join(parts)
+        m = measure_text(full_text, 16, 1, col_w, 30)
+        actual_h = m["height"] + 30  # padding + divider space
 
         # Find best related item for near-placement
         near_id = None
@@ -118,17 +134,16 @@ async def _on_item_ready(event: Event):
             placements=placements,
             objects=objects,
             user_elements=user_drawn,
-            item_size=(settings.card_w, settings.card_h),
+            item_size=(col_w, actual_h),
             near_item_id=near_id,
         )
 
         await repo.upsert_placement(
             workspace_id, item_id,
             placement["x"], placement["y"],
-            settings.card_w, settings.card_h,
+            col_w, actual_h,
         )
 
-        # Use structural rebuild
         from app.services.sync import handle_structural_rebuild
         result = await handle_structural_rebuild(workspace_id, owner_id)
 
@@ -145,8 +160,10 @@ async def _on_item_ready(event: Event):
             "item_id": item_id,
         })
 
+        logger.info(f"Item {item_id} placed on workspace {workspace_id} at ({placement['x']}, {placement['y']}) h={actual_h}")
+
     except Exception as e:
-        logger.error(f"Canvas placement failed for {item_id}: {e}")
+        logger.error(f"Canvas placement failed for {item_id}: {e}", exc_info=True)
 
 
 async def _extract(text: str, owner_id: str = None):
@@ -204,7 +221,6 @@ async def _connect(item_id: str, emb: list[float], text: str,
 async def _route(item_id: str, text: str, processed,
                  board_hint: str, workspace_id: str,
                  owner_id: str) -> str | None:
-    """Route item to a workspace and link it."""
     try:
         from app.services.workspace_router import route_item
         ws_id = await route_item(

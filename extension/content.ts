@@ -30,10 +30,7 @@ function showToast(message: string, isError = false) {
   `
 
   document.body.appendChild(toast)
-
-  requestAnimationFrame(() => {
-    toast.style.opacity = "1"
-  })
+  requestAnimationFrame(() => { toast.style.opacity = "1" })
 
   setTimeout(() => {
     toast.style.opacity = "0"
@@ -41,7 +38,7 @@ function showToast(message: string, isError = false) {
   }, 3000)
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
+chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "GET_SELECTION") {
     const selectedText = window.getSelection()?.toString().trim()
 
@@ -56,7 +53,7 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
         payload: {
           text: selectedText,
           source_url: window.location.href,
-          page_title: document.title,
+          source_title: document.title,
           capture_type: "highlight"
         }
       },
@@ -71,24 +68,18 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
   }
 
   if (message.type === "CAPTURE_RESULT") {
-    if (message.success) {
-      showToast("✓ Saved to Mnemos!")
-    } else {
-      showToast("✗ Failed to save. Is backend running?", true)
-    }
+    showToast(message.success ? "✓ Saved to Mnemos!" : "✗ Failed to save.", !message.success)
   }
 })
 
 function runContextCheck() {
   setTimeout(() => {
     const pageText = document.body?.innerText?.slice(0, 1000) || ""
-    const url = window.location.href
-
     if (pageText.length < 200) return
 
     chrome.runtime.sendMessage({
       type: "CHECK_CONTEXT",
-      payload: { url, text: pageText }
+      payload: { url: window.location.href, text: pageText }
     })
   }, 2000)
 }

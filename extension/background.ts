@@ -1,11 +1,14 @@
 // background.ts — Service Worker
-// Handles: context menu, keyboard commands, API calls, per-URL cooldown
+
+declare const process: {
+  env: Record<string, string | undefined>
+}
 
 const BACKEND_URL = process.env.PLASMO_PUBLIC_BACKEND_URL || "http://localhost:8000"
 
-// Track context check cooldowns (URL → timestamp)
 const contextCooldowns = new Map<string, number>()
-const COOLDOWN_MS = 5 * 60 * 1000 // 5 minutes
+const COOLDOWN_MS = 5 * 60 * 1000
+const relatedNotesCache = new Map<string, any[]>()
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -13,7 +16,6 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "Save to Mnemos",
     contexts: ["selection"]
   })
-  console.log("Mnemos: Context menu registered")
 })
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
@@ -21,7 +23,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const result = await captureNote({
       text: info.selectionText,
       source_url: tab?.url || "",
-      page_title: tab?.title || "",
+      source_title: tab?.title || "",
       capture_type: "highlight"
     })
 
@@ -39,7 +41,6 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command === "save-selection") {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     if (!tab?.id) return
-
     chrome.tabs.sendMessage(tab.id, { type: "GET_SELECTION" })
   }
 })
@@ -55,15 +56,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
-  if (message.type === "GET_RECENT_NOTES") {
-    getRecentNotes().then(sendResponse)
+  if (message.type === "GET_PAGES") {
+    getPages().then(sendResponse)
     return true
   }
 
   if (message.type === "GET_RELATED_FOR_POPUP") {
     if (sender.tab?.url) {
-      const cached = relatedNotesCache.get(sender.tab.url)
-      sendResponse({ related: cached || [] })
+      sendResponse({ related: relatedNotesCache.get(sender.tab.url) || [] })
     } else {
       sendResponse({ related: [] })
     }
@@ -74,8 +74,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 interface CapturePayload {
   text: string
   source_url: string
-  page_title: string
+  source_title: string
   capture_type: string
+  page_hint?: string
 }
 
 interface CaptureResult {
@@ -92,9 +93,7 @@ async function captureNote(payload: CapturePayload): Promise<CaptureResult> {
       body: JSON.stringify(payload)
     })
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
     const data = await response.json()
     return { success: true, noteId: data.note_id }
@@ -103,8 +102,6 @@ async function captureNote(payload: CapturePayload): Promise<CaptureResult> {
     return { success: false, error: String(error) }
   }
 }
-
-const relatedNotesCache = new Map<string, any[]>()
 
 async function checkContext(
   payload: { url: string; text: string },
@@ -126,7 +123,6 @@ async function checkContext(
 
     const data = await response.json()
     contextCooldowns.set(payload.url, Date.now())
-
     relatedNotesCache.set(payload.url, data.related_notes || [])
 
     const count = data.related_notes?.length || 0
@@ -146,15 +142,14 @@ async function checkContext(
   }
 }
 
-async function getRecentNotes() {
+async function getPages() {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/notes?page=1&limit=5`)
+    const response = await fetch(`${BACKEND_URL}/api/pages`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const data = await response.json()
-    return { notes: data.notes }
+    return await response.json()
   } catch (error) {
-    console.error("Mnemos fetch recent failed:", error)
-    return { notes: [], error: String(error) }
+    console.error("Mnemos fetch pages failed:", error)
+    return { pages: [], error: String(error) }
   }
 }
 

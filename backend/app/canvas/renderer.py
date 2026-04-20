@@ -217,7 +217,8 @@ class SceneBuilder:
             new_w = el.get("width", 0)
             new_h = el.get("height", 0)
 
-            if ctype == "note-frame":
+            # Track note position by the body text element
+            if ctype in ("note-body", "note-frame"):
                 item_id = custom.get("noteId")
                 if not item_id:
                     continue
@@ -288,6 +289,8 @@ class SceneBuilder:
         for item in items:
             nid = item["id"]
             ids.update({
+                f"note-body-{nid}", f"note-divider-{nid}",
+                # Legacy (still need to clean up old scenes)
                 f"note-frame-{nid}", f"note-accent-{nid}",
                 f"note-title-{nid}", f"note-summary-{nid}", f"note-tags-{nid}",
             })
@@ -385,11 +388,12 @@ class SceneBuilder:
     # ── Internal builders ──
 
     def _upsert_note_card(self, scene, note, x, y, width=None, height=None):
-        w = width or settings.card_w
-        h = height or settings.card_h
+        """Always render at column start, full column width."""
+        col_width = settings.sheet_width - settings.sheet_margin * 2
+        actual_x = float(settings.sheet_margin)
         f = self.factory(scene)
         remove_elements_by_custom(scene, "noteId", note["id"])
-        elements, _ = f.note_card(note, x, y, w, h)
+        elements, _ = f.note_card(note, actual_x, y, col_width)
         scene["elements"].extend(elements)
 
     def _add_text(self, scene, text, x, y, *, max_width=500, element_id=None):

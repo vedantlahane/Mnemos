@@ -26,24 +26,17 @@ _key = settings.supabase_service_role_key or settings.supabase_key
 _client = create_client(settings.supabase_url, _key)
 
 
-# ── Windows socket retry wrapper ──
-# WinError 10035 = WSAEWOULDBLOCK — transient non-blocking socket error.
-# Happens when asyncio.to_thread() runs sync httpx on Windows.
-# Safe to retry immediately.
-
 _IS_WINDOWS = sys.platform == "win32"
 _MAX_RETRIES = 3
-_RETRY_DELAY = 0.1  # seconds
+_RETRY_DELAY = 0.1
 
 
 async def _run(fn):
-    """Run a synchronous Supabase call in a thread with retry on Windows socket errors."""
     last_err = None
     for attempt in range(_MAX_RETRIES):
         try:
             return await asyncio.to_thread(fn)
         except OSError as e:
-            # WinError 10035 (WSAEWOULDBLOCK) — retry
             if _IS_WINDOWS and getattr(e, "winerror", None) == 10035:
                 last_err = e
                 logger.debug(f"WinError 10035 on attempt {attempt + 1}, retrying...")
@@ -51,7 +44,6 @@ async def _run(fn):
                 continue
             raise
         except Exception as e:
-            # Catch broader connection errors that wrap the socket error
             err_str = str(e)
             if _IS_WINDOWS and "10035" in err_str:
                 last_err = e
@@ -59,8 +51,8 @@ async def _run(fn):
                 await asyncio.sleep(_RETRY_DELAY * (attempt + 1))
                 continue
             raise
-    # All retries exhausted
-    raise last_err  # type: ignore
+    raise last_err
+
 
 def _clean_json(obj):
     if isinstance(obj, float):
@@ -73,6 +65,7 @@ def _clean_json(obj):
         return [_clean_json(v) for v in obj]
     return obj
 
+
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -84,7 +77,6 @@ def _parse_embedding(raw) -> list[float] | None:
 
 
 class Repo:
-    """Every DB call in the app goes through here."""
 
     # ═══════════════════════════════════════
     # USERS
@@ -125,7 +117,7 @@ class Repo:
             return None
 
     # ═══════════════════════════════════════
-    # ITEMS (knowledge units)
+    # ITEMS
     # ═══════════════════════════════════════
 
     async def create_item(self, **kw) -> dict:
@@ -172,6 +164,12 @@ class Repo:
 
     async def get_items_for_workspace(self, workspace_id: str,
                                       owner_id: str = None) -> list:
+        """
+        Get all items linked to a workspace.
+        FIX: If an item is linked to a workspace, it's visible to anyone
+        who can access that workspace — regardless of item owner_id.
+        This fixes extension captures (owner_id=None) not appearing.
+        """
         def _q():
             q = _client.table("workspace_items") \
                 .select("item_id, items(*)") \
@@ -182,10 +180,22 @@ class Repo:
         for row in (r.data or []):
             item_data = row.get("items")
             if item_data:
-                if owner_id and item_data.get("owner_id") != owner_id:
-                    continue
+                # NO owner filter here — workspace membership = visibility
                 items.append(item_data)
         return items
+
+    async def claim_orphan_items(self, workspace_id: str, owner_id: str):
+        """Assign owner to items in this workspace that have no owner."""
+        if not owner_id:
+            return
+        try:
+            items = await self.get_items_for_workspace(workspace_id)
+            for item in items:
+                if not item.get("owner_id"):
+                    await self.update_item(item["id"], owner_id=None,
+                                           **{"owner_id": owner_id})
+        except Exception as e:
+            logger.warning(f"Claim orphans failed: {e}")
 
     async def get_all_tags(self, owner_id: str = None) -> list[dict]:
         def _q():
@@ -251,7 +261,7 @@ class Repo:
         return r.data or []
 
     # ═══════════════════════════════════════
-    # ITEM CONNECTIONS (knowledge graph edges)
+    # ITEM CONNECTIONS
     # ═══════════════════════════════════════
 
     async def create_connection(self, from_id: str, to_id: str,
@@ -375,8 +385,6 @@ class Repo:
         if owner_id: q = q.eq("owner_id", owner_id)
         await _run(lambda: q.execute())
 
-    # ── Workspace ↔ Item (M:N) ──
-
     async def link_item_to_workspace(self, workspace_id: str, item_id: str,
                                      added_by: str = "system"):
         try:
@@ -440,8 +448,6 @@ class Repo:
             .eq("workspace_id", workspace_id).execute()
         )
 
-    # ── Canvas placements (item positions — source of truth) ──
-
     async def upsert_placement(self, workspace_id: str, item_id: str,
                                x: float, y: float, w: float = 360,
                                h: float = 240,
@@ -481,8 +487,6 @@ class Repo:
             .eq("item_id", item_id).execute()
         )
 
-    # ── Canvas objects (non-item elements) ──
-
     async def create_canvas_object(self, **kw) -> dict:
         r = await _run(
             lambda: _client.table("canvas_objects").insert(kw).execute()
@@ -513,7 +517,7 @@ class Repo:
         )
 
     # ═══════════════════════════════════════
-    # BOARD OPS (sync changelog)
+    # BOARD OPS
     # ═══════════════════════════════════════
 
     async def log_op(self, workspace_id: str, version: int, op: str,

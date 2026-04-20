@@ -32,21 +32,9 @@ class SyncPayload(BaseModel):
     scene: Optional[dict] = None
 
 
-# ═══════════════════════════════════════
-# THE chat endpoint — one input, everything happens
-# ═══════════════════════════════════════
-
 @router.post("/chat")
 async def chat(payload: ChatMessage,
                user_id: str = Depends(get_optional_user_id)):
-    """
-    Single chat endpoint. User types anything:
-    - "show boards" → returns board list + ui_action
-    - "remember Docker is great" → captures item
-    - "draw diagram about ML" → creates diagram on canvas
-    - "what is Docker?" → answers from knowledge base
-    """
-    # Build context for classifier
     context = {"owner_id": user_id}
     if payload.workspace_id:
         ws = await repo.get_workspace(payload.workspace_id, owner_id=user_id)
@@ -54,10 +42,8 @@ async def chat(payload: ChatMessage,
             context["workspace_id"] = ws["id"]
             context["workspace_name"] = ws["display_name"]
 
-    # Classify intent
     classified = await cmd_router.classify(payload.message, context)
 
-    # Handle it
     result = await handle(
         intent=classified["intent"],
         action=classified["action"],
@@ -77,15 +63,10 @@ async def chat(payload: ChatMessage,
     }
 
 
-# ═══════════════════════════════════════
-# Canvas sync — Excalidraw ↔ backend
-# ═══════════════════════════════════════
-
 @router.get("/workspaces/{workspace_id}/sync")
 async def sync_get(workspace_id: str,
                    base_version: int = 0,
                    user_id: str = Depends(get_optional_user_id)):
-    """GET sync — check version only (no scene sync)."""
     ws = await repo.get_workspace(workspace_id, owner_id=user_id)
     if not ws:
         raise HTTPException(404, "Workspace not found")
@@ -118,10 +99,6 @@ async def sync(workspace_id: str, payload: SyncPayload,
 @router.get("/workspaces/{workspace_id}/scene")
 async def get_scene(workspace_id: str,
                     user_id: str = Depends(get_optional_user_id)):
-    """
-    Get the full rendered scene for a workspace.
-    This REBUILDS from source-of-truth tables every time.
-    """
     from app.canvas import canvas_renderer
 
     ws = await repo.get_workspace(workspace_id, owner_id=user_id)
@@ -129,7 +106,9 @@ async def get_scene(workspace_id: str,
         raise HTTPException(404, "Workspace not found")
 
     stored = await repo.get_canvas(workspace_id)
-    items = await repo.get_items_for_workspace(workspace_id, user_id)
+
+    # FIX: Don't filter items by owner — workspace membership = visibility
+    items = await repo.get_items_for_workspace(workspace_id)
     placements = await repo.get_placements(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
     managed_ids = canvas_renderer.collect_managed_ids(items, objects)
@@ -156,13 +135,8 @@ async def get_version(workspace_id: str):
     return {"version": stored["version"], "workspace_id": workspace_id}
 
 
-# ═══════════════════════════════════════
-# SSE — real-time canvas updates
-# ═══════════════════════════════════════
-
 @router.get("/workspaces/{workspace_id}/events")
 async def sse_events(workspace_id: str):
-    """Server-Sent Events for real-time canvas updates."""
     queue = broadcaster.subscribe(workspace_id)
 
     async def stream():

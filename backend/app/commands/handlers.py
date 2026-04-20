@@ -595,63 +595,78 @@ async def _canvas_compose(params: dict, workspace_id: str,
     col = get_column_bounds()
 
     async def _run_compose():
-        canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
-
-        placement = find_placement_for_size(
-            placements=canvas_ctx["placements"],
-            objects=canvas_ctx["objects"],
-            user_elements=canvas_ctx["user_drawn"],
-            width=col["width"],
-            height=300,
-        )
-
-        obj = await repo.create_canvas_object(
-            workspace_id=workspace_id,
-            kind="text", origin="ai",
-            x=placement["x"], y=placement["y"],
-            w=col["width"], h=300,
-            content="",
-            meta={"topic": topic},
-        )
-        obj_id = obj["id"]
-
-        content = ""
         try:
-            async for chunk in compose_stream_chunks(topic, workspace_id, owner_id):
-                content += chunk
-                await broadcaster.publish(workspace_id, {
-                    "type": "stream_chunk",
-                    "obj_id": obj_id,
-                    "chunk": chunk,
-                    "text": content,
-                    "x": placement["x"],
-                    "y": placement["y"],
-                })
+            logger.info(f"[COMPOSE] Starting compose for topic='{topic}', ws={workspace_id}")
+            canvas_ctx = await _get_canvas_context(workspace_id, owner_id)
+            logger.info(f"[COMPOSE] Got canvas context, placements={len(canvas_ctx['placements'])}")
+
+            placement = find_placement_for_size(
+                placements=canvas_ctx["placements"],
+                objects=canvas_ctx["objects"],
+                user_elements=canvas_ctx["user_drawn"],
+                width=col["width"],
+                height=300,
+            )
+            logger.info(f"[COMPOSE] Found placement at ({placement['x']}, {placement['y']})")
+
+            obj = await repo.create_canvas_object(
+                workspace_id=workspace_id,
+                kind="text", origin="ai",
+                x=placement["x"], y=placement["y"],
+                w=col["width"], h=300,
+                content="",
+                meta={"topic": topic},
+            )
+            obj_id = obj["id"]
+            logger.info(f"[COMPOSE] Created canvas object {obj_id}")
+
+            content = ""
+            chunk_count = 0
+            try:
+                async for chunk in compose_stream_chunks(topic, workspace_id, owner_id):
+                    chunk_count += 1
+                    content += chunk
+                    await broadcaster.publish(workspace_id, {
+                        "type": "stream_chunk",
+                        "obj_id": obj_id,
+                        "chunk": chunk,
+                        "text": content,
+                        "x": placement["x"],
+                        "y": placement["y"],
+                    })
+                logger.info(f"[COMPOSE] Streamed {chunk_count} chunks, total length={len(content)}")
+            except Exception as e:
+                logger.error(f"[COMPOSE] Stream failed: {e}", exc_info=True)
+
+            # Clean markdown
+            content = strip_markdown(content)
+            logger.info(f"[COMPOSE] After markdown strip: {len(content)} chars")
+
+            # Measure actual height
+            m = measure_text(content, font_size=16, font_family=1,
+                             max_width=col["width"], max_lines=200)
+            actual_h = m["height"] + 20
+            logger.info(f"[COMPOSE] Measured height: {actual_h}")
+
+            # Update object with final content and real dimensions
+            await repo.update_canvas_object(obj_id, content=content, h=actual_h)
+            logger.info(f"[COMPOSE] Updated canvas object with final content")
+
+            # Structural rebuild
+            result = await handle_structural_rebuild(workspace_id, owner_id)
+            logger.info(f"[COMPOSE] Rebuilt scene, version={result['version']}")
+
+            await repo.log_op(workspace_id, result["version"], "element_added",
+                              actor="ai", data={"type": "composed_text", "topic": topic})
+
+            await broadcaster.publish(workspace_id, {
+                "type": "stream_end",
+                "obj_id": obj_id,
+                "version": result["version"],
+            })
+            logger.info(f"[COMPOSE] Compose completed successfully")
         except Exception as e:
-            logger.error(f"Compose stream failed: {e}")
-
-        # Clean markdown
-        content = strip_markdown(content)
-
-        # Measure actual height
-        m = measure_text(content, font_size=16, font_family=1,
-                         max_width=col["width"], max_lines=200)
-        actual_h = m["height"] + 20
-
-        # Update object with final content and real dimensions
-        await repo.update_canvas_object(obj_id, content=content, h=actual_h)
-
-        # Structural rebuild
-        result = await handle_structural_rebuild(workspace_id, owner_id)
-
-        await repo.log_op(workspace_id, result["version"], "element_added",
-                          actor="ai", data={"type": "composed_text", "topic": topic})
-
-        await broadcaster.publish(workspace_id, {
-            "type": "stream_end",
-            "obj_id": obj_id,
-            "version": result["version"],
-        })
+            logger.error(f"[COMPOSE] Fatal error in _run_compose: {e}", exc_info=True)
 
     asyncio.create_task(_run_compose())
 

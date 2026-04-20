@@ -1,3 +1,5 @@
+// === FILE: frontend/src/components/cards/SettingsCard.tsx ===
+
 import { Icon } from "@/components/shared/Icon"
 import type { Preferences } from "@/api/types"
 import { PRIMARY_MODELS, SECONDARY_MODELS } from "@/lib/constants"
@@ -17,7 +19,7 @@ export function SettingsCard({ data, send }: Props) {
           {(["dark", "light"] as const).map((t) => (
             <button
               key={t}
-              onClick={() => send(`set theme ${t}`)}
+              onClick={() => send(t === "dark" ? "dark mode" : "light mode")}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] transition-all cursor-pointer",
                 data.theme === t
@@ -36,26 +38,29 @@ export function SettingsCard({ data, send }: Props) {
       <Row>
         <RowLabel>Primary Model</RowLabel>
         <div className="space-y-0.5">
-          {PRIMARY_MODELS.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => send(`set primary model ${m.name}`)}
-              className={cn(
-                "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] transition-all cursor-pointer",
-                data.primary_model === m.id
-                  ? "bg-[var(--accent-subtle)] text-[var(--accent-light)] border border-[var(--accent)]/15"
-                  : "text-white/35 hover:bg-white/[0.03] hover:text-white/55",
-              )}
-            >
-              <div className="flex items-center gap-2">
-                {data.primary_model === m.id && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shadow-[0_0_6px_var(--accent-glow)]" />
+          {PRIMARY_MODELS.map((m) => {
+            const isActive = data.primary_model === m.id || data.primary_model === m.name
+            return (
+              <button
+                key={m.id}
+                onClick={() => send(`set primary model ${m.id}`)}
+                className={cn(
+                  "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] transition-all cursor-pointer",
+                  isActive
+                    ? "bg-[var(--accent-subtle)] text-[var(--accent-light)] border border-[var(--accent)]/15"
+                    : "text-white/35 hover:bg-white/[0.03] hover:text-white/55",
                 )}
-                <span>{m.name}</span>
-              </div>
-              <span className="text-[10px] text-white/15">{m.tier}</span>
-            </button>
-          ))}
+              >
+                <div className="flex items-center gap-2">
+                  {isActive && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shadow-[0_0_6px_var(--accent-glow)]" />
+                  )}
+                  <span>{m.name}</span>
+                </div>
+                <span className="text-[10px] text-white/15">{m.tier}</span>
+              </button>
+            )
+          })}
         </div>
       </Row>
 
@@ -63,26 +68,29 @@ export function SettingsCard({ data, send }: Props) {
       <Row>
         <RowLabel>Secondary Model</RowLabel>
         <div className="space-y-0.5">
-          {SECONDARY_MODELS.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => send(`set secondary model ${m.name}`)}
-              className={cn(
-                "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] transition-all cursor-pointer",
-                data.secondary_model === m.id
-                  ? "bg-[var(--accent-subtle)] text-[var(--accent-light)] border border-[var(--accent)]/15"
-                  : "text-white/35 hover:bg-white/[0.03] hover:text-white/55",
-              )}
-            >
-              <div className="flex items-center gap-2">
-                {data.secondary_model === m.id && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shadow-[0_0_6px_var(--accent-glow)]" />
+          {SECONDARY_MODELS.map((m) => {
+            const isActive = data.secondary_model === m.id || data.secondary_model === m.name
+            return (
+              <button
+                key={m.id}
+                onClick={() => send(`set secondary model ${m.id}`)}
+                className={cn(
+                  "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[12px] transition-all cursor-pointer",
+                  isActive
+                    ? "bg-[var(--accent-subtle)] text-[var(--accent-light)] border border-[var(--accent)]/15"
+                    : "text-white/35 hover:bg-white/[0.03] hover:text-white/55",
                 )}
-                <span>{m.name}</span>
-              </div>
-              <span className="text-[10px] text-white/15">{m.tier}</span>
-            </button>
-          ))}
+              >
+                <div className="flex items-center gap-2">
+                  {isActive && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shadow-[0_0_6px_var(--accent-glow)]" />
+                  )}
+                  <span>{m.name}</span>
+                </div>
+                <span className="text-[10px] text-white/15">{m.tier}</span>
+              </button>
+            )
+          })}
         </div>
       </Row>
 

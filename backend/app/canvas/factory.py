@@ -425,79 +425,52 @@ class ElementFactory:
         self,
         note: dict,
         x: float, y: float,
-        width: float = 360, height: float = 240,
+        width: float = 720, height: float = 200,
     ) -> tuple[list[dict], str]:
         """
-        Build a complete note card (frame + title + summary + accent + tags).
+        Build a note as a clean text block (document-style, no frame).
+        Renders like composed text — title + summary + tags in one flow.
         Returns (elements, group_id).
         """
         note_id = note["id"]
         group_id = f"note-{note_id[:12]}"
         title = note.get("title") or "Untitled"
-        summary = note.get("summary") or note.get("raw_text", "")
+        summary = note.get("summary") or note.get("raw_text", "")[:400]
         tags = note.get("tags") or []
-        content_width = width - 24  # 12px padding each side
 
-        # Measure text blocks
-        title_m = measure_text(title, font_size=18, font_family=1, max_width=content_width, max_lines=2)
-        summary_m = measure_text(summary, font_size=13, font_family=1, max_width=content_width, max_lines=6)
-        tag_text = "  ".join(f"#{t}" for t in tags)
-
-        elements = [
-            # Card background
-            self.rectangle(
-                x - 12, y - 12, width, height,
-                id=f"note-frame-{note_id}",
-                bg_color=self._colors["card_bg"],
-                stroke_color=self._colors["card_border"],
-                stroke_width=1,
-                corner_radius=10,
-                group_ids=[group_id],
-                custom_data={"noteId": note_id, "type": "note-frame"},
-            ),
-            # Accent bar
-            self.line(
-                [[x - 12, y - 12], [x - 12, y - 12 + height]],
-                id=f"note-accent-{note_id}",
-                stroke_color=self._colors["accent"],
-                stroke_width=3,
-                group_ids=[group_id],
-                custom_data={"noteId": note_id, "type": "note-accent"},
-            ),
-            # Title
-            self.text(
-                title, x, y,
-                id=f"note-title-{note_id}",
-                font_size=18, font_family=1,
-                max_width=content_width, max_lines=2,
-                color=self._colors["title_color"],
-                group_ids=[group_id],
-                custom_data={"noteId": note_id, "type": "note-title"},
-            ),
-            # Summary
-            self.text(
-                summary, x, y + title_m["height"] + 8,
-                id=f"note-summary-{note_id}",
-                font_size=13, font_family=1,
-                max_width=content_width, max_lines=6,
-                color=self._colors["body_color"],
-                group_ids=[group_id],
-                custom_data={"noteId": note_id, "type": "note-summary"},
-            ),
-        ]
-
+        # Build combined text block — same style as composed text
+        parts = [title.upper()]
+        if summary:
+            parts.append("")
+            parts.append(summary)
         if tags:
-            elements.append(self.text(
-                tag_text, x, y + height - 48,
-                id=f"note-tags-{note_id}",
-                font_size=11, font_family=3,
-                max_width=content_width, max_lines=1,
-                color=self._colors["accent"],
-                group_ids=[group_id],
-                custom_data={"noteId": note_id, "type": "note-tags"},
-            ))
+            parts.append("")
+            parts.append("  ".join(f"#{t}" for t in tags))
 
-        return elements, group_id
+        full_text = "\n".join(parts)
+
+        # Thin divider above (subtle visual separator between notes)
+        divider = self.line(
+            [[x, y - 16], [x + min(width * 0.25, 160), y - 16]],
+            id=f"note-divider-{note_id}",
+            stroke_color=self._colors["divider"],
+            stroke_width=1,
+            group_ids=[group_id],
+            custom_data={"noteId": note_id, "type": "note-divider"},
+        )
+
+        # Single text element with everything
+        text_el = self.text(
+            full_text, x, y,
+            id=f"note-body-{note_id}",
+            font_size=16, font_family=1,
+            max_width=width, max_lines=30,
+            color=self._colors["body_color"],
+            group_ids=[group_id],
+            custom_data={"noteId": note_id, "type": "note-body"},
+        )
+
+        return [divider, text_el], group_id
 
     def diagram_node(
         self,

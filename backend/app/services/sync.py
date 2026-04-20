@@ -29,11 +29,9 @@ async def handle_sync(
     stored = await repo.get_canvas(workspace_id)
     server_version = stored["version"]
 
-    # ── Client too far behind → full reload ──
     if server_version - base_version > settings.max_version_gap:
         return await _full_reload(workspace_id, owner_id, stored)
 
-    # ── No incoming scene → just confirm version ──
     if not incoming_scene:
         return {"status": "ok", "version": server_version}
 
@@ -41,7 +39,6 @@ async def handle_sync(
     if not incoming_elements:
         return {"status": "ok", "version": server_version}
 
-    # ── Extract what the user changed ──
     current_placements = await repo.get_placements(workspace_id)
     current_objects = await repo.get_canvas_objects(workspace_id)
 
@@ -53,7 +50,6 @@ async def handle_sync(
         logger.error(f"Position extraction failed: {e}")
         item_changes, obj_changes = [], []
 
-    # ── Save position changes to DB ──
     for ch in item_changes:
         try:
             await repo.upsert_placement(
@@ -70,60 +66,32 @@ async def handle_sync(
         except Exception as e:
             logger.error(f"Object update failed: {e}")
 
-    # ── Save user-drawn elements into the scene blob ──
-    items = await repo.get_items_for_workspace(workspace_id, owner_id)
+    # Use workspace-level item fetch (no owner filter)
+    items = await repo.get_items_for_workspace(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
     managed_ids = canvas_renderer.collect_managed_ids(items, objects)
     user_drawn = canvas_renderer.extract_user_drawn(incoming_elements, managed_ids)
 
-    # ── CRITICAL DECISION: rebuild or just save? ──
-    #
-    # If the user only moved things around, DON'T rebuild.
-    # Just persist their positions and the user-drawn elements.
-    # Only rebuild when we detect structural changes.
-
     has_position_changes = bool(item_changes) or bool(obj_changes)
 
     if has_position_changes:
-        # Save the incoming scene AS-IS (with user's positions)
-        # plus update user_drawn in stored scene
         new_version = server_version + 1
-
-        # Merge: keep the incoming elements but update the stored scene's
-        # metadata (version, user_drawn tracking)
         scene_to_save = {
             "elements": incoming_elements,
             "appState": incoming_scene.get("appState", stored["scene"].get("appState", {})),
             "files": incoming_scene.get("files", {}),
         }
-
         await repo.save_canvas(workspace_id, scene_to_save, new_version)
         await repo.log_op(workspace_id, new_version, "user_move", actor="user")
-
-        # DON'T send scene back — user already has the right state
-        return {
-            "status": "ok",
-            "version": new_version,
-            # NO "scene" key — this tells the frontend "you're good, keep what you have"
-        }
+        return {"status": "ok", "version": new_version}
     else:
-        # No position changes — just save user-drawn elements
-        # Build a minimal update: store user_drawn into the scene blob
-        # without changing anything the user sees
-
-        # Persist user_drawn into stored scene
         scene_to_save = {
             "elements": incoming_elements,
             "appState": incoming_scene.get("appState", stored["scene"].get("appState", {})),
             "files": incoming_scene.get("files", {}),
         }
         await repo.save_canvas(workspace_id, scene_to_save, server_version)
-
-        return {
-            "status": "ok",
-            "version": server_version,
-            # NO scene — frontend keeps its state
-        }
+        return {"status": "ok", "version": server_version}
 
 
 async def handle_structural_rebuild(
@@ -131,15 +99,16 @@ async def handle_structural_rebuild(
     owner_id: str = None,
 ) -> dict:
     """
-    Called when something structural changes (item added, diagram created, theme change).
-    This DOES rebuild and return the full scene.
+    Called when something structural changes.
+    Uses workspace-level item fetch (no owner filter).
     """
     stored = await repo.get_canvas(workspace_id)
-    items = await repo.get_items_for_workspace(workspace_id, owner_id)
+
+    # FIX: Don't pass owner_id — get ALL items linked to this workspace
+    items = await repo.get_items_for_workspace(workspace_id)
     placements = await repo.get_placements(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
 
-    # Get user-drawn from the stored scene
     managed_ids = canvas_renderer.collect_managed_ids(items, objects)
     user_drawn = canvas_renderer.extract_user_drawn(
         stored["scene"].get("elements", []), managed_ids,
@@ -162,7 +131,8 @@ async def handle_structural_rebuild(
 
 
 async def _full_reload(workspace_id: str, owner_id: str, stored: dict) -> dict:
-    items = await repo.get_items_for_workspace(workspace_id, owner_id)
+    # FIX: Don't filter by owner
+    items = await repo.get_items_for_workspace(workspace_id)
     placements = await repo.get_placements(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
     scene = canvas_renderer.build_scene(
