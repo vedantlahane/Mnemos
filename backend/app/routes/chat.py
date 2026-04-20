@@ -81,13 +81,29 @@ async def chat(payload: ChatMessage,
 # Canvas sync — Excalidraw ↔ backend
 # ═══════════════════════════════════════
 
+@router.get("/workspaces/{workspace_id}/sync")
+async def sync_get(workspace_id: str,
+                   base_version: int = 0,
+                   user_id: str = Depends(get_optional_user_id)):
+    """GET sync — check version only (no scene sync)."""
+    ws = await repo.get_workspace(workspace_id, owner_id=user_id)
+    if not ws:
+        raise HTTPException(404, "Workspace not found")
+
+    result = await handle_sync(
+        workspace_id=workspace_id,
+        base_version=base_version,
+        incoming_scene=None,
+        owner_id=user_id,
+    )
+    return result
+
+
 @router.post("/workspaces/{workspace_id}/sync")
 async def sync(workspace_id: str, payload: SyncPayload,
                user_id: str = Depends(get_optional_user_id)):
     ws = await repo.get_workspace(workspace_id, owner_id=user_id)
     if not ws:
-        # === FILE: backend/app/routes/chat.py (continued) ===
-
         raise HTTPException(404, "Workspace not found")
 
     result = await handle_sync(
@@ -116,8 +132,9 @@ async def get_scene(workspace_id: str,
     items = await repo.get_items_for_workspace(workspace_id, user_id)
     placements = await repo.get_placements(workspace_id)
     objects = await repo.get_canvas_objects(workspace_id)
+    managed_ids = canvas_renderer.collect_managed_ids(items, objects)
     user_drawn = canvas_renderer.extract_user_drawn(
-        stored["scene"].get("elements", []),
+        stored["scene"].get("elements", []), managed_ids,
     )
 
     scene = canvas_renderer.build_scene(
