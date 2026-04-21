@@ -1,0 +1,52 @@
+# === FILE: k8s/ingress.yaml ===
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mnemos-ingress
+  namespace: mnemos
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    # SSE support for canvas streaming
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # CORS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ec2-65-1-109-185.ap-south-1.compute.amazonaws.com
+      secretName: mnemos-tls
+  rules:
+    - host: mec2-65-1-109-185.ap-south-1.compute.amazonaws.com
+      http:
+        paths:
+          # API routes → backend
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: mnemos-backend
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: mnemos-backend
+                port:
+                  number: 8000
+          # Everything else → frontend
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mnemos-frontend
+                port:
+                  number: 80

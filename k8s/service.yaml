@@ -8,11 +8,10 @@ metadata:
   labels:
     app: mnemos-backend
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: mnemos-backend
   ports:
     - port: 8000
       targetPort: 8000
-      nodePort: 30080
       protocol: TCP
