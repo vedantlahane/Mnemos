@@ -1,16 +1,30 @@
 # === FILE: k8s/cluster-issuer.yaml ===
 
+# Kubernetes API version for cert-manager ClusterIssuer resource
 apiVersion: cert-manager.io/v1
+# Resource type: ClusterIssuer (cluster-wide SSL certificate issuer)
 kind: ClusterIssuer
+# Metadata for the ClusterIssuer resource
 metadata:
+  # Name of this issuer, referenced by Ingress resources
   name: letsencrypt-prod
+# Configuration for the ClusterIssuer
 spec:
+  # ACME (Automatic Certificate Management Environment) protocol settings
   acme:
+    # LetsEncrypt production API endpoint for obtaining real SSL certificates
     server: https://acme-v02.api.letsencrypt.org/directory
+    # Email address used for ACME account and renewal notifications
     email: vedantanillahane@gmail.com
+    # Reference to secret storing the private key for ACME account
     privateKeySecretRef:
+      # Name of the Kubernetes Secret that will store the private key
       name: letsencrypt-prod-key
+    # Methods for validating domain ownership (ACME challenges)
     solvers:
+      # HTTP-01 challenge solver (creates temporary HTTP endpoint)
       - http01:
+          # Configure HTTP-01 solver with ingress controller
           ingress:
+            # Use NGINX ingress controller class for validation
             class: nginx

@@ -1,42 +1,80 @@
 # === FILE: k8s/redis.yaml ===
 # Simple single-pod Redis for caching (no persistence needed)
 
+# Kubernetes API version for Deployment resource
 apiVersion: apps/v1
+# Resource type: Deployment (manages Redis pod replicas)
 kind: Deployment
+# Metadata for the Deployment
 metadata:
+  # Name of the Redis deployment
   name: mnemos-redis
+  # Kubernetes namespace where Redis runs
   namespace: mnemos
+# Deployment specification
 spec:
+  # Number of Redis pod replicas (1 for single instance)
   replicas: 1
+  # Label selector to identify Redis pods
   selector:
+    # Select pods with matching labels
     matchLabels:
+      # Select pods labeled as mnemos-redis
       app: mnemos-redis
+  # Pod template specification
   template:
+    # Metadata for Redis pods
     metadata:
+      # Labels to assign to each Redis pod
       labels:
+        # Identify pods as mnemos-redis (matches selector)
         app: mnemos-redis
+    # Pod specification
     spec:
+      # List of containers to run in each pod
       containers:
+        # Container definition
         - name: redis
+          # Redis Docker image (Alpine Linux for minimal size)
           image: redis:7-alpine
+          # Network ports exposed by the container
           ports:
+            # Redis listens on port 6379
             - containerPort: 6379
+          # Resource requests and limits
           resources:
+            # Minimum resources guaranteed
             requests:
+              # Minimum CPU cores
               cpu: 50m
+              # Minimum memory allocation
               memory: 64Mi
+            # Maximum resources allowed
             limits:
+              # Maximum CPU cores allowed
               cpu: 200m
+              # Maximum memory allowed
               memory: 128Mi
 ---
+# Kubernetes API version for Service resource
 apiVersion: v1
+# Resource type: Service (network abstraction for pods)
 kind: Service
+# Metadata for the Service
 metadata:
+  # Name of the Redis service (used for DNS discovery)
   name: mnemos-redis
+  # Kubernetes namespace where this service exists
   namespace: mnemos
+# Service specification
 spec:
+  # Label selector to identify Redis pods to route traffic to
   selector:
+    # Select pods labeled as mnemos-redis
     app: mnemos-redis
+  # Network ports exposed by the service
   ports:
+    # Port configuration
     - port: 6379
+      # Port on Redis pod to forward traffic to
       targetPort: 6379

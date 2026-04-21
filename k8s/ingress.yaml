@@ -1,52 +1,94 @@
 # === FILE: k8s/ingress.yaml ===
 
+# Kubernetes API version for Ingress resource
 apiVersion: networking.k8s.io/v1
+# Resource type: Ingress (external HTTP/HTTPS access to services)
 kind: Ingress
+# Metadata for the Ingress
 metadata:
+  # Name of the Ingress resource
   name: mnemos-ingress
+  # Kubernetes namespace where this Ingress exists
   namespace: mnemos
+  # Additional metadata to configure ingress behavior
   annotations:
+    # Reference to ClusterIssuer for automatic SSL certificate generation
     cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Maximum allowed request body size (prevents payload rejection)
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # Timeout for reading response from backend service (seconds)
     nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    # Timeout for sending request to backend service (seconds)
     nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
-    # SSE support for canvas streaming
+    # Disable buffering for Server-Sent Events (real-time canvas streaming)
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
-    # CORS
+    # Enable Cross-Origin Resource Sharing for browser requests
     nginx.ingress.kubernetes.io/enable-cors: "true"
+    # Allow requests from any origin domain
     nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    # HTTP methods allowed from other origins
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    # HTTP headers allowed in cross-origin requests
     nginx.ingress.kubernetes.io/cors-allow-headers: "Authorization, Content-Type"
+# Ingress specification
 spec:
+  # Ingress controller class to use (NGINX in this case)
   ingressClassName: nginx
+  # TLS/SSL configuration for HTTPS
   tls:
+    # TLS certificate configuration
     - hosts:
+        # Domain name(s) this certificate applies to
         - ec2-65-1-109-185.ap-south-1.compute.amazonaws.com
+      # Name of Secret storing the TLS certificate and key
       secretName: mnemos-tls
+  # HTTP routing rules
   rules:
+    # Rule for specific host
     - host: mec2-65-1-109-185.ap-south-1.compute.amazonaws.com
+      # HTTP paths for this host
       http:
+        # List of path-based routes
         paths:
-          # API routes → backend
+          # Route all /api/* requests to backend service
           - path: /api
+            # Match paths starting with /api (prefix matching)
             pathType: Prefix
+            # Backend service to forward requests to
             backend:
+              # Target Kubernetes service
               service:
+                # Name of the service
                 name: mnemos-backend
+                # Port the service listens on
                 port:
+                  # Port number
                   number: 8000
+          # Route /health requests to backend service for monitoring
           - path: /health
+            # Match exactly /health (no prefix matching)
             pathType: Exact
+            # Backend service to forward requests to
             backend:
+              # Target Kubernetes service
               service:
+                # Name of the service
                 name: mnemos-backend
+                # Port the service listens on
                 port:
+                  # Port number
                   number: 8000
-          # Everything else → frontend
+          # Route all remaining requests to frontend service
           - path: /
+            # Match all paths starting with / (everything else)
             pathType: Prefix
+            # Backend service to forward requests to
             backend:
+              # Target Kubernetes service
               service:
+                # Name of the frontend service
                 name: mnemos-frontend
+                # Port the frontend listens on
                 port:
+                  # Port number
                   number: 80

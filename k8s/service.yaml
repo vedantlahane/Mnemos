@@ -1,17 +1,33 @@
 # === FILE: k8s/service.yaml ===
 
+# Kubernetes API version for Service resource
 apiVersion: v1
+# Resource type: Service (network abstraction for backend pods)
 kind: Service
+# Metadata for the Service
 metadata:
+  # Name of the backend service (used for DNS discovery within cluster)
   name: mnemos-backend
+  # Kubernetes namespace where this Service exists
   namespace: mnemos
+  # Labels for organizing and identifying this service
   labels:
+    # Label identifying this as the backend application
     app: mnemos-backend
+# Service specification
 spec:
+  # Service type: ClusterIP = internal only (accessible within cluster)
   type: ClusterIP
+  # Label selector to identify backend pods to route traffic to
   selector:
+    # Route traffic to pods labeled as mnemos-backend
     app: mnemos-backend
+  # Network port(s) exposed by the service
   ports:
+    # Port configuration
     - port: 8000
+      # Port number exposed on service (used by clients to connect)
       targetPort: 8000
+      # Port number on backend pod to forward traffic to
       protocol: TCP
+      # Network protocol used (TCP for HTTP)

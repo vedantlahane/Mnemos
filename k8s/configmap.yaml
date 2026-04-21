@@ -1,26 +1,50 @@
 # === FILE: k8s/configmap.yaml ===
 
+# Kubernetes API version for ConfigMap resource
 apiVersion: v1
+# Resource type: ConfigMap (non-sensitive configuration data)
 kind: ConfigMap
+# Metadata for the ConfigMap
 metadata:
+  # Name of this ConfigMap
   name: mnemos-config
+  # Kubernetes namespace where this ConfigMap exists
   namespace: mnemos
+# Configuration data (key-value pairs) to be injected into containers
 data:
+  # Boolean flag to enable/disable authentication
   AUTH_ENABLED: "false"
+  # Port number the backend service listens on
   BACKEND_PORT: "8000"
+  # JWT token expiration time in hours
   JWT_EXPIRY_HOURS: "72"
+  # Redis cache connection URL (service discovery via DNS)
   REDIS_URL: "redis://mnemos-redis:6379"
+  # CORS allowed origins (wildcard allows all origins)
   CORS_ORIGINS: '["*"]'
+  # Google Gemini LLM model identifier
   GEMINI_MODEL: "gemini-2.5-flash"
+  # Groq LLM model identifier
   GROQ_MODEL: "llama-3.3-70b-versatile"
+  # Dimension size for vector embeddings
   EMBEDDING_DIM: "768"
+  # Minimum cosine similarity threshold for matching embeddings
   SIMILARITY_THRESHOLD: "0.65"
+  # Confidence threshold for routing decisions
   ROUTE_CONFIDENCE: "0.75"
+  # Canvas sheet width in pixels
   SHEET_WIDTH: "800"
+  # Canvas sheet margin in pixels
   SHEET_MARGIN: "40"
+  # Canvas card width in pixels
   CARD_W: "720"
+  # Canvas card height in pixels
   CARD_H: "200"
+  # Gap between cards in pixels
   CARD_GAP: "60"
+  # Maximum operation history gap to maintain
   MAX_VERSION_GAP: "50"
+  # Number of operations to retain in history
   OPS_RETENTION: "200"
+  # Delay between stream events in seconds
   STREAM_DELAY: "0.02"

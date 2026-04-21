@@ -1,6 +1,10 @@
 # === FILE: k8s/namespace.yaml ===
 
+# Kubernetes API version for Namespace resource
 apiVersion: v1
+# Resource type: Namespace (logical cluster isolation)
 kind: Namespace
+# Metadata for the Namespace
 metadata:
+  # Name of this namespace where all mnemos resources will be deployed
   name: mnemos

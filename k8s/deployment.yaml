@@ -1,55 +1,104 @@
 # === FILE: k8s/deployment.yaml ===
 
+# Kubernetes API version for Deployment resource
 apiVersion: apps/v1
+# Resource type: Deployment (manages replica sets and rolling updates)
 kind: Deployment
+# Metadata for the Deployment
 metadata:
+  # Name of the deployment
   name: mnemos-backend
+  # Kubernetes namespace where this deployment runs
   namespace: mnemos
+  # Labels for organizing and identifying this deployment
   labels:
+    # Label used to identify backend application pods
     app: mnemos-backend
+# Deployment specification
 spec:
+  # Number of pod replicas to run
   replicas: 2
+  # Label selector to identify pods managed by this deployment
   selector:
+    # Select pods with matching labels
     matchLabels:
+      # Must match pods with app=mnemos-backend label
       app: mnemos-backend
+  # Pod update strategy configuration
   strategy:
+    # Use rolling updates (gradually replace old pods with new ones)
     type: RollingUpdate
+    # Rolling update parameters
     rollingUpdate:
+      # Maximum number of pods that can be unavailable during update
       maxUnavailable: 0
+      # Maximum number of extra pods that can be created during update
       maxSurge: 1
+  # Pod template specification
   template:
+    # Metadata for pods created from this template
     metadata:
+      # Labels to assign to each pod
       labels:
+        # Identify pods as mnemos-backend (matches selector)
         app: mnemos-backend
+    # Pod specification
     spec:
+      # List of containers to run in each pod
       containers:
+        # Container definition
         - name: backend
+          # Docker image to run (replace YOUR_DOCKERHUB_USERNAME with actual username)
           image: YOUR_DOCKERHUB_USERNAME/mnemos-backend:latest
+          # Network ports exposed by the container
           ports:
+            # Container listens on port 8000
             - containerPort: 8000
+          # Environment variables loaded from external sources
           envFrom:
-            # Secrets first (API keys, DB creds)
+            # Load sensitive values from the mnemos-secrets Secret
             - secretRef:
+                # Secret name containing API keys and credentials
                 name: mnemos-secrets
-            # Config second (non-sensitive settings)
+            # Load non-sensitive configuration from ConfigMap
             - configMapRef:
+                # ConfigMap name containing application settings
                 name: mnemos-config
+          # Resource requests and limits for this container
           resources:
+            # Minimum resources guaranteed to be available
             requests:
+              # Minimum CPU cores (1000m = 1 core)
               cpu: 100m
+              # Minimum memory allocation
               memory: 256Mi
+            # Maximum resources the container can use
             limits:
+              # Maximum CPU cores allowed
               cpu: 500m
+              # Maximum memory allowed
               memory: 512Mi
+          # Probe to check if container is ready to receive traffic
           readinessProbe:
+            # Check readiness by making HTTP GET request
             httpGet:
+              # Health check endpoint path
               path: /health
+              # Port to send request to
               port: 8000
+            # Wait before starting readiness checks (seconds)
             initialDelaySeconds: 10
+            # Frequency of readiness checks (seconds)
             periodSeconds: 10
+          # Probe to check if container is alive and healthy
           livenessProbe:
+            # Check liveness by making HTTP GET request
             httpGet:
+              # Health check endpoint path
               path: /health
+              # Port to send request to
               port: 8000
+            # Wait before starting liveness checks (seconds)
             initialDelaySeconds: 15
+            # Frequency of liveness checks (seconds)
             periodSeconds: 20
