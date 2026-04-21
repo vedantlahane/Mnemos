@@ -27,3 +27,14 @@ frontend_split/
 backend_split/
 frontend_all_content.txt
 backend_all_content.txt
+
+# k8s & Secrets
+secret.yaml
+*.secret.yaml
+secrets/
+.secrets/
+
+# === Add to .gitignore ===
+k8s/secret.yaml
+.env
+*.pem

@@ -28,13 +28,12 @@ spec:
           ports:
             - containerPort: 8000
           envFrom:
+            # Secrets first (API keys, DB creds)
             - secretRef:
                 name: mnemos-secrets
-          env:
-            - name: AUTH_ENABLED
-              value: "false"
-            - name: CORS_ORIGINS
-              value: '["*"]'
+            # Config second (non-sensitive settings)
+            - configMapRef:
+                name: mnemos-config
           resources:
             requests:
               cpu: 100m
@@ -54,5 +53,3 @@ spec:
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20
-      # Schedule on worker node
-      tolerations: []
