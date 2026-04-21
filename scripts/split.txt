@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# ═══════════════════════════════════════════════════════
+# COLLECT & SPLIT BACKEND CONTENT
+# ═══════════════════════════════════════════════════════
+
+echo "=== COLLECTING BACKEND CONTENT ==="
+outputFile="backend_all_content.txt"
+backendPath="backend"
+
+# Clear the file if it exists
+rm -f "$outputFile"
+
+count=0
+find "$backendPath" -type f \( -name "*.py" -o -name "*.txt" -o -name "*.json" -o -name "*.yml" -o -name "*.yaml" -o -name "*.md" -o -name "*.sql" \) \
+  ! -path "*/__pycache__/*" \
+  ! -path "*/.venv/*" \
+  ! -path "*/venv/*" \
+  ! -path "*/node_modules/*" \
+  ! -path "*/dist/*" \
+  ! -path "*/build/*" \
+  ! -path "*/app-old/*" \
+  ! -name "*.pyc" \
+  ! -name "*.pyo" \
+  ! -name ".env" \
+  ! -name "README*" \
+  ! -name "migrations.sql" | while read file; do
+  count=$((count + 1))
+  echo "=== FILE: $file ===" >> "$outputFile"
+  echo "" >> "$outputFile"
+  cat "$file" >> "$outputFile" 2>/dev/null || echo "[Error reading file]" >> "$outputFile"
+  echo "" >> "$outputFile"
+  echo "" >> "$outputFile"
+done
+
+echo "Done! Added backend files to $outputFile"
+
+# ═══════════════════════════════════════════════════════
+# COLLECT FRONTEND CONTENT
+# ═══════════════════════════════════════════════════════
+
+echo "=== COLLECTING FRONTEND CONTENT ==="
+outputFile="frontend_all_content.txt"
+frontendPath="frontend"
+
+rm -f "$outputFile"
+
+find "$frontendPath" -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.css" -o -name "*.json" -o -name "*.md" -o -name "*.txt" \) \
+  ! -path "*/node_modules/*" \
+  ! -path "*/dist/*" \
+  ! -path "*/build/*" \
+  ! -path "*/.next/*" \
+  ! -path "*/coverage/*" \
+  ! -path "*/.git/*" \
+  ! -name ".env" \
+  ! -name "package-lock.json" \
+  ! -name "pnpm-lock.yaml" | while read file; do
+  echo "=== FILE: $file ===" >> "$outputFile"
+  echo "" >> "$outputFile"
+  cat "$file" >> "$outputFile" 2>/dev/null || echo "[Error reading file]" >> "$outputFile"
+  echo "" >> "$outputFile"
+  echo "" >> "$outputFile"
+done
+
+echo "Done! Added frontend files to $outputFile"
+
+# ═══════════════════════════════════════════════════════
+# SPLIT BACKEND CONTENT
+# ═══════════════════════════════════════════════════════
+
+echo ""
+echo "=== SPLITTING BACKEND CONTENT ===" 
+inputFile="backend_all_content.txt"
+outputDir="backend_split"
+linesPerFile=1700
+
+mkdir -p "$outputDir"
+
+if [ -f "$inputFile" ]; then
+  totalLines=$(wc -l < "$inputFile")
+  fileNumber=1
+  startLine=1
+
+  while [ $startLine -le $totalLines ]; do
+    endLine=$((startLine + linesPerFile - 1))
+    [ $endLine -gt $totalLines ] && endLine=$totalLines
+    
+    sed -n "${startLine},${endLine}p" "$inputFile" > "$outputDir/part_$fileNumber.txt"
+    
+    actualLines=$((endLine - startLine + 1))
+    echo "  Created part_$fileNumber.txt ($actualLines lines)"
+    
+    startLine=$((endLine + 1))
+    fileNumber=$((fileNumber + 1))
+  done
+  
+  echo "Done! Split backend_all_content.txt into $((fileNumber - 1)) files"
+fi
+
+# ═══════════════════════════════════════════════════════
+# SPLIT FRONTEND CONTENT
+# ═══════════════════════════════════════════════════════
+
+echo ""
+echo "=== SPLITTING FRONTEND CONTENT ===" 
+inputFile="frontend_all_content.txt"
+outputDir="frontend_split"
+linesPerFile=1700
+
+mkdir -p "$outputDir"
+
+if [ -f "$inputFile" ]; then
+  totalLines=$(wc -l < "$inputFile")
+  fileNumber=1
+  startLine=1
+
+  while [ $startLine -le $totalLines ]; do
+    endLine=$((startLine + linesPerFile - 1))
+    [ $endLine -gt $totalLines ] && endLine=$totalLines
+    
+    sed -n "${startLine},${endLine}p" "$inputFile" > "$outputDir/part_$fileNumber.txt"
+    
+    actualLines=$((endLine - startLine + 1))
+    echo "  Created part_$fileNumber.txt ($actualLines lines)"
+    
+    startLine=$((endLine + 1))
+    fileNumber=$((fileNumber + 1))
+  done
+  
+  echo "Done! Split frontend_all_content.txt into $((fileNumber - 1)) files"
+fi
