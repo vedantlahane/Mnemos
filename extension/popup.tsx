@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react"
 
 const BACKEND_URL =
-  (globalThis as any).process?.env?.PLASMO_PUBLIC_BACKEND_URL || "http://localhost:8000"
-const FRONTEND_URL = "http://localhost:5173"
+  (globalThis as any).process?.env?.PLASMO_PUBLIC_BACKEND_URL || "https://mnem0s.vercel.app"
+const FRONTEND_URL = (globalThis as any).process?.env?.PLASMO_PUBLIC_FRONTEND_URL || "https://mnem0s.vercel.app"
 
 interface Note {
   id: string

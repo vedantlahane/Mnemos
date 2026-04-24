@@ -109,6 +109,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(res.status, body.detail ?? `HTTP ${res.status}`)
   }
 
+  // Validate content type before parsing JSON
+  const contentType = res.headers.get("content-type")
+  if (!contentType?.includes("application/json")) {
+    throw new ApiError(
+      res.status,
+      `Expected JSON response but got ${contentType || "unknown content-type"}. Backend may be unreachable or misconfigured.`
+    )
+  }
+
   return res.json()
 }
 

@@ -4,7 +4,7 @@ declare const process: {
   env: Record<string, string | undefined>
 }
 
-const BACKEND_URL = process.env.PLASMO_PUBLIC_BACKEND_URL || "http://localhost:8000"
+const BACKEND_URL = process.env.PLASMO_PUBLIC_BACKEND_URL || "https://mnem0s.vercel.app"
 
 const contextCooldowns = new Map<string, number>()
 const COOLDOWN_MS = 5 * 60 * 1000
@@ -95,6 +95,11 @@ async function captureNote(payload: CapturePayload): Promise<CaptureResult> {
 
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
+    const contentType = response.headers.get("content-type")
+    if (!contentType?.includes("application/json")) {
+      throw new Error(`Expected JSON response, got ${contentType || "no content-type"}`)
+    }
+
     const data = await response.json()
     return { success: true, noteId: data.note_id }
   } catch (error) {
@@ -121,6 +126,11 @@ async function checkContext(
 
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
+    const contentType = response.headers.get("content-type")
+    if (!contentType?.includes("application/json")) {
+      throw new Error(`Expected JSON response, got ${contentType || "no content-type"}`)
+    }
+
     const data = await response.json()
     contextCooldowns.set(payload.url, Date.now())
     relatedNotesCache.set(payload.url, data.related_notes || [])
@@ -146,6 +156,11 @@ async function getPages() {
   try {
     const response = await fetch(`${BACKEND_URL}/api/pages`)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    
+    const contentType = response.headers.get("content-type")
+    if (!contentType?.includes("application/json")) {
+      throw new Error(`Expected JSON response, got ${contentType || "no content-type"}`)
+    }
     return await response.json()
   } catch (error) {
     console.error("Mnemos fetch pages failed:", error)
